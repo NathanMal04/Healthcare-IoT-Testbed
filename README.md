@@ -66,6 +66,7 @@ This project uses **VS Code Dev Containers** to standardize tooling across the t
 3. Reopen the project in the provided container
     - Open the Command Pallette (`Ctrl+Shift+P`)
     - Select **`Dev Containers: Reopen in Container`**
-4. Verify AWS access:
-   ```bash
-   aws sts get-caller-identity
+4. Log in to AWS SSO and verify access:
+    ```bash
+    asw sso login
+    aws sts get-caller-identity
