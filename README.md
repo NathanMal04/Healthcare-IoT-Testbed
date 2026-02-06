@@ -63,7 +63,9 @@ This project uses **VS Code Dev Containers** to standardize tooling across the t
 ### Getting Started
 1. Clone the repository
 2. Open the repo in VS Code
-3. Select **“Reopen in Container”**
+3. Reopen the project in the provided container
+    - Open the Command Pallette (`Ctrl+Shift+P`)
+    - Select **`Dev Containers: Reopen in Container`**
 4. Verify AWS access:
    ```bash
    aws sts get-caller-identity
