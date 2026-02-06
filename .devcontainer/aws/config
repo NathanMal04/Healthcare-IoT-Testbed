@@ -1,0 +1,8 @@
+[profile Healthcare-IoT-Dev]
+sso_session = Healtcare-IoT-Dev
+sso_account_id = 647118473375
+sso_role_name = AdministratorAccess
+[sso-session Healtcare-IoT-Dev]
+sso_start_url = https://d-9a67549400.awsapps.com/start
+sso_region = us-east-2
+sso_registration_scopes = sso:account:access
