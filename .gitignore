@@ -1,0 +1,40 @@
+########################################
+# Terraform
+########################################
+**/.terraform/
+**/terraform.tfstate
+**/terraform.tfstate.backup
+**/crash.log
+**/*.tfplan
+**/*override.tf
+**/*override.tf.json
+**/override.tf
+**/override.tf.json
+**/*.auto.tfvars
+# Keep provider lock file
+!.terraform.lock.hcl
+
+
+########################################
+# AWS credentials / caches
+########################################
+**/.aws/
+**/sso/cache/
+**/cli/cache/
+.devcontainer/aws/credentials
+
+
+########################################
+# Dev Containers
+########################################
+.devcontainer/.cache/
+.devcontainer/**/.cache/
+.devcontainer/**/.history/
+
+
+########################################
+# Editor noise
+########################################
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
