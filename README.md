@@ -1,0 +1,69 @@
+# Healthcare IoT Vulnerability Testbed
+
+## Overview
+This repository contains the source code and infrastructure for the **Healthcare IoT Vulnerability Testbed** senior design project.  
+The goal of this project is to provide a controlled platform for collecting, analyzing, and testing the security of healthcare and IoT devices.
+
+## High-Level Architecture
+- AWS VPC with **Public**, **Private**, and **Database** subnets
+- Public subnet hosts the web interface
+- Private subnet hosts backend services (ECS, Lambda)
+- Database subnet hosts RDS for metadata storage
+- S3 (outside the VPC) stores user-uploaded artifacts
+
+## Repository Structure
+platform/
+infra/ # Infrastructure as Code (VPC, subnets, ECS, RDS, IAM, S3)
+services/ # Deployable services (API, web app, Lambda functions)
+data-contracts/ # Shared schemas, API specs, and data definitions
+scripts/ # Helper scripts (dev and ops)
+docs/ # Architecture docs, runbooks, decision records
+.devcontainer/ # Standardized development environment
+.github/workflows/ # CI/CD pipelines
+compose.yaml # Optional local development stack
+
+
+### Folder Responsibilities
+- **infra/**  
+  Source of truth for all AWS infrastructure. No manual changes in the AWS console.
+
+- **services/**  
+  Application code that runs on AWS (containers and Lambda functions).
+
+- **data-contracts/**  
+  Defines shared data formats used across services (API schemas, DB schemas).
+
+- **scripts/**  
+  Non-deployable helper scripts for development and operations.
+
+- **docs/**  
+  Project documentation, diagrams, and operational guides.
+
+## Repository Structure
+
+```
+platform/
+  infra/            # Infrastructure as Code (VPC, subnets, ECS, RDS, IAM, S3)
+  services/         # Deployable services (API, web app, Lambda functions)
+  data-contracts/   # Shared schemas, API specs, and data definitions
+  scripts/          # Helper scripts (dev and ops)
+  docs/             # Architecture docs, runbooks, decision records
+.devcontainer/      # Standardized development environment
+```
+
+## Development Environment
+This project uses **VS Code Dev Containers** to standardize tooling across the team.
+
+### Requirements
+- Docker
+- VS Code
+- VS Code Dev Containers extension
+- AWS credentials (via IAM Identity Center or named profiles)
+
+### Getting Started
+1. Clone the repository
+2. Open the repo in VS Code
+3. Select **“Reopen in Container”**
+4. Verify AWS access:
+   ```bash
+   aws sts get-caller-identity
