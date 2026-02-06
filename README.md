@@ -11,16 +11,6 @@ The goal of this project is to provide a controlled platform for collecting, ana
 - Database subnet hosts RDS for metadata storage
 - S3 (outside the VPC) stores user-uploaded artifacts
 
-## Repository Structure
-platform/
-infra/ # Infrastructure as Code (VPC, subnets, ECS, RDS, IAM, S3)
-services/ # Deployable services (API, web app, Lambda functions)
-data-contracts/ # Shared schemas, API specs, and data definitions
-scripts/ # Helper scripts (dev and ops)
-docs/ # Architecture docs, runbooks, decision records
-.devcontainer/ # Standardized development environment
-.github/workflows/ # CI/CD pipelines
-compose.yaml # Optional local development stack
 
 
 ### Folder Responsibilities
@@ -43,11 +33,10 @@ compose.yaml # Optional local development stack
 
 ```
 platform/
-  infra/            # Infrastructure as Code (VPC, subnets, ECS, RDS, IAM, S3)
-  services/         # Deployable services (API, web app, Lambda functions)
-  data-contracts/   # Shared schemas, API specs, and data definitions
-  scripts/          # Helper scripts (dev and ops)
-  docs/             # Architecture docs, runbooks, decision records
+  infra/            # Infrastructure as Code
+  services/         # Deployable services
+  scripts/          # Helper scripts
+docs/               # Architecture docs, runbooks, decision records
 .devcontainer/      # Standardized development environment
 ```
 
