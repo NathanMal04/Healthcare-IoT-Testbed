@@ -19,8 +19,7 @@
         "ms-python.python",
         "ms-python.vscode-pylance",
         "amazonwebservices.aws-toolkit-vscode",
-        "esbenp.prettier-vscode",
-        "dbaeumer.vscode-eslint"
+        "esbenp.prettier-vscode"
       ]
     }
   },
