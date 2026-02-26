@@ -5,11 +5,11 @@ This repository contains the source code and infrastructure for the **Healthcare
 The goal of this project is to provide a controlled platform for collecting, analyzing, and testing the security of healthcare and IoT devices.
 
 ## High-Level Architecture
-- AWS VPC with **Public**, **Private**, and **Database** subnets
+- AWS VPC with **Public**, and **Private** subnets
 - Public subnet hosts the web interface
 - Private subnet hosts backend services (ECS, Lambda)
-- Database subnet hosts RDS for metadata storage
-- S3 (outside the VPC) stores user-uploaded artifacts
+- DynamoDB stores device data
+- S3 stores user-uploaded scripts
 
 
 
