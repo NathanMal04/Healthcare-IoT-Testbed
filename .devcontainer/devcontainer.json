@@ -9,6 +9,9 @@
     },
     "ghcr.io/devcontainers/features/python:1": {
       "version": "3.14"
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts"
     }
   },
 
@@ -19,7 +22,9 @@
         "ms-python.python",
         "ms-python.vscode-pylance",
         "amazonwebservices.aws-toolkit-vscode",
-        "esbenp.prettier-vscode"
+        "esbenp.prettier-vscode",
+        "bradlc.vscode-tailwindcss",
+        "dbaeumer.vscode-eslint"
       ]
     }
   },
@@ -29,7 +34,7 @@
     "AWS_PROFILE": "Healthcare-IoT-Dev"
   },
 
-  "postCreateCommand": "pip install --upgrade pip",
+  "postCreateCommand": "pip install --upgrade pip && cd ${containerWorkspaceFolder}/Platform/services/web && npm install",
 
   "remoteUser": "vscode"
 }
