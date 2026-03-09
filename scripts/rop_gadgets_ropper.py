@@ -33,9 +33,9 @@ gadgets_to_search = [
     "pop rbx; ret",
     "syscall",
     "int 0x80",
-    "pop rsp; ret",          # stack pivot
+    "pop rsp; ret",          #stack pivot
     "leave; ret",
-    "system",                # ret2libc
+    "system",                #ret2libc
     "execve"
 ]
 
@@ -67,3 +67,4 @@ except OSError:
     print("ERROR: ropper not found in PATH.")
 except Exception as e:
     print(f"Unexpected error: {str(e)}")
+
