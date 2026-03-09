@@ -13,7 +13,7 @@ print("--- ROP Gadget Finder w/ Ropper (ret2libc / ret2win / ret2syscall) Utilit
 
 #Get Ghidra's image base (required for correct offsets)
 image_base = currentProgram.getImageBase().getOffset()
-print("Ghidra Image Base: 0x%x" % image_base)
+print(f"Ghidra Image Base: 0x{image_base:x}")
 
 #Ask user for the original binary file (ropper needs the raw ELF/PE on disk)
 binary_file = askFile("Select ORIGINAL binary file for ropper", "Select")
@@ -22,7 +22,7 @@ if not binary_file:
     exit()
 
 binary_path = binary_file.getAbsolutePath()
-print("Analyzing: %s" % binary_path)
+print(f"Analyzing: {binary_path}")
 
 #Common gadget patterns relevant to exploitation techniques
 gadgets_to_search = [
@@ -33,9 +33,9 @@ gadgets_to_search = [
     "pop rbx; ret",
     "syscall",
     "int 0x80",
-    "pop rsp; ret",          #stack pivot
+    "pop rsp; ret",          # stack pivot
     "leave; ret",
-    "system",                #ret2libc
+    "system",                # ret2libc
     "execve"
 ]
 
@@ -43,7 +43,7 @@ try:
     for gadget in gadgets_to_search:
         if monitor.isCancelled():
             break
-        print("\n[+] Searching for: %s" % gadget)
+        print(f"\n[+] Searching for: {gadget}")
         
         cmd = [
             "ropper", "--file", binary_path,
@@ -52,7 +52,7 @@ try:
             "--nocolor", "--quiet"
         ]
         
-        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, universal_newlines=True)
+        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True)
         if output.strip():
             print(output)
         else:
@@ -62,8 +62,8 @@ try:
     print("Tip: Use these gadgets for ret2libc (system + /bin/sh), ret2syscall, or ret2win chains.")
 
 except subprocess.CalledProcessError as e:
-    print("Ropper error: %s" % e.output)
+    print(f"Ropper error: {e.stdout}")
 except OSError:
     print("ERROR: ropper not found in PATH.")
 except Exception as e:
-    print("Unexpected error: %s" % str(e))
+    print(f"Unexpected error: {str(e)}")
