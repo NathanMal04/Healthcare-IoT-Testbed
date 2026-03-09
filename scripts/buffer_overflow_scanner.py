@@ -30,14 +30,14 @@ for func_name, description in DANGEROUS_FUNCTIONS.items():
     
     funcs = [f for f in fm.getFunctions(True) if f.getName() == func_name]
     for f in funcs:
-        print("\n[!] %s found at 0x%x" % (func_name, f.getEntryPoint().getOffset()))
-        print("    → %s" % description)
+        print(f"\n[!] {func_name} found at 0x{f.getEntryPoint().getOffset():x}")
+        print(f"    → {description}")
         
         #Show callers
         for ref in getReferencesTo(f.getEntryPoint()):
             if ref.getReferenceType() == FlowType.UNCONDITIONAL_CALL:
                 caller = ref.getFromAddress()
-                print("    Called from: 0x%x" % caller.getOffset())
+                print(f"    Called from: 0x{caller.getOffset():x}")
 
 #Bonus: ret2* primitives
 print("\n --- Check for ret2* Primitives ---")
@@ -45,24 +45,24 @@ print("\n --- Check for ret2* Primitives ---")
 #Find system / execve for ret2libc
 for name in ["system", "execve"]:
     for f in [f for f in fm.getFunctions(True) if name in f.getName().lower()]:
-        print("[+] ret2libc candidate: %s @ 0x%x" % (f.getName(), f.getEntryPoint().getOffset()))
+        print(f"[+] ret2libc candidate: {f.getName()} @ 0x{f.getEntryPoint().getOffset():x}")
 
 #Find /bin/sh string
 mem = currentProgram.getMemory()
 addr = mem.findBytes(currentProgram.getMinAddress(), "/bin/sh", None, True, monitor)
 if addr:
-    print("[+] ret2libc /bin/sh string @ 0x%x" % addr.getOffset())
+    print(f"[+] ret2libc /bin/sh string @ 0x{addr.getOffset():x}")
 
 #ret2win functions
 for f in fm.getFunctions(True):
     if "win" in f.getName().lower() or "flag" in f.getName().lower() or "success" in f.getName().lower():
-        print("[+] ret2win candidate: %s @ 0x%x" % (f.getName(), f.getEntryPoint().getOffset()))
+        print(f"[+] ret2win candidate: {f.getName()} @ 0x{f.getEntryPoint().getOffset():x}")
 
 #ret2syscall
 for instr in currentProgram.getListing().getInstructions(True):
     if "syscall" in instr.getMnemonicString() or ("int" in instr.getMnemonicString() and "80" in str(instr)):
-        print("[+] ret2syscall candidate @ 0x%x" % instr.getAddress().getOffset())
-        break  #one candidate is enough for the template
+        print(f"[+] ret2syscall candidate @ 0x{instr.getAddress().getOffset():x}")
+        break  # one candidate is enough for the template
 
 print("\n --- Scan Complete --- ")
 print("Next step: Use the ROP script above to build a chain to the chosen primitives.")
