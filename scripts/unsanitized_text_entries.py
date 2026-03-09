@@ -1,4 +1,4 @@
-#Unsanitized Text/Input Scanner - Vulnerability Research Script Template
+#Unsanitized Text/Input Scanner - Vulnerability Research Template
 #@author Justin Bower
 #@category Vulnerability Research
 #@keybinding 
@@ -29,13 +29,13 @@ for func_name, risk in INPUT_FUNCTIONS.items():
     
     funcs = [f for f in fm.getFunctions(True) if func_name in f.getName()]
     for f in funcs:
-        print("\n[!] Unsanitized input: %s @ 0x%x" % (f.getName(), f.getEntryPoint().getOffset()))
-        print("    Risk: %s" % risk)
+        print(f"\n[!] Unsanitized input: {f.getName()} @ 0x{f.getEntryPoint().getOffset():x}")
+        print(f"    Risk: {risk}")
         
         for ref in getReferencesTo(f.getEntryPoint()):
             if ref.getReferenceType() == FlowType.UNCONDITIONAL_CALL:
                 caller = ref.getFromAddress()
-                print("    → Called from: 0x%x (check sanitization here)" % caller.getOffset())
+                print(f"    → Called from: 0x{caller.getOffset():x} (check sanitization here)")
 
 #Quick string check for user-controlled text
 print("\n--- Potential User-Controlled Strings ---")
@@ -43,8 +43,7 @@ for data in currentProgram.getListing().getDefinedData(True):
     if data.isString():
         s = str(data.getValue())
         if len(s) > 10 and any(kw in s.lower() for kw in ["input", "user", "name", "pass", "cmd"]):
-            print("    Suspicious string @ 0x%x: %s" % (data.getAddress().getOffset(), s[:60]))
+            print(f"    Suspicious string @ 0x{data.getAddress().getOffset():x}: {s[:60]}")
 
 print("\n--- Unsanitized input scan complete ---")
 print("Tip: Cross-reference these calls with the buffer overflow scanner for full exploit paths.")
-
