@@ -1,4 +1,4 @@
-#Unsanitized Text/Input Scanner - Vulnerability Research Template
+#Unsanitized Text/Input Scanner - Vulnerability Research Script Template
 #@author Justin Bower
 #@category Vulnerability Research
 #@keybinding 
@@ -47,3 +47,4 @@ for data in currentProgram.getListing().getDefinedData(True):
 
 print("\n--- Unsanitized input scan complete ---")
 print("Tip: Cross-reference these calls with the buffer overflow scanner for full exploit paths.")
+
