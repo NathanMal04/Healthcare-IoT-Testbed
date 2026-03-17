@@ -55,4 +55,4 @@ jobs:
         run: |
           aws cloudfront create-invalidation \
             --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
-            --paths "/*"
+            --invalidation-batch '{"Paths":{"Quantity":1,"Items":["/*"]},"CallerReference":"deploy-'"$(date +%s)"'"}'
