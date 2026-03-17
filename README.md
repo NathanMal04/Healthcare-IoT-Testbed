@@ -63,13 +63,19 @@ This project uses **VS Code Dev Containers** to standardize tooling across the t
 
 ## Web Frontend
 
-The web frontend is a **Next.js** app configured for static export (client-side rendering only).
+The web frontend is a **Next.js** app configured for static export (client-side rendering only), served at **vzoniq.com** via S3 + CloudFront.
 
 ### Local Development
 ```bash
 cd Platform/services/web
 npm install
 npm run dev
+```
+
+Create a `.env` file in `Platform/services/web/` with:
+```
+NEXT_PUBLIC_COGNITO_USER_POOL_ID=<your-user-pool-id>
+NEXT_PUBLIC_COGNITO_CLIENT_ID=<your-app-client-id>
 ```
 
 ### Build
@@ -85,7 +91,7 @@ The workflow (`.github/workflows/deploy-web.yml`):
 2. Syncs the `out/` folder to S3
 3. Invalidates the CloudFront distribution cache
 
-Authentication uses **OIDC** (no long-lived AWS credentials). Required GitHub secrets:
+GitHub Actions authenticates to AWS via **OIDC** (no long-lived credentials). Required GitHub secrets:
 
 | Secret | Description |
 |---|---|
@@ -93,3 +99,13 @@ Authentication uses **OIDC** (no long-lived AWS credentials). Required GitHub se
 | `AWS_REGION` | AWS region (e.g. `us-east-1`) |
 | `S3_BUCKET_NAME` | S3 bucket hosting the static site |
 | `CLOUDFRONT_DISTRIBUTION_ID` | CloudFront distribution ID |
+
+## Authentication
+
+Authentication is handled by **AWS Cognito** using the Amplify v6 library.
+
+- Users sign up and sign in via custom forms at `/signup` and `/login`
+- Email is used as the username (Cognito User Pool sign-in: email only)
+- Email verification is required via a 6-digit code sent to the user (`/confirm`)
+- Session state is managed via `AuthContext` — the dashboard redirects to `/login` if unauthenticated
+- Sign out is available in the navbar

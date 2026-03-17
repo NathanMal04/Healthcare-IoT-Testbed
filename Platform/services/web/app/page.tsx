@@ -1,3 +1,9 @@
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
+
 // Dashboard — currently uses hardcoded demo data.
 // TODO: Replace `devices` and `stats` with fetch() calls to the backend API.
 
@@ -87,6 +93,15 @@ const statusLabel: Record<DeviceStatus, string> = {
 };
 
 export default function DashboardPage() {
+  const { user, loading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!loading && !user) router.push("/login");
+  }, [user, loading, router]);
+
+  if (loading || !user) return null;
+
   return (
     <div>
       <div className="mb-8 flex items-center justify-between">
