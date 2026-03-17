@@ -5,11 +5,11 @@ This repository contains the source code and infrastructure for the **Healthcare
 The goal of this project is to provide a controlled platform for collecting, analyzing, and testing the security of healthcare and IoT devices.
 
 ## High-Level Architecture
-- AWS VPC with **Public**, and **Private** subnets
-- Public subnet hosts the web interface
+- AWS VPC with **Public** and **Private** subnets
+- Web frontend served as a static site via **S3 + CloudFront** (client-side rendering)
 - Private subnet hosts backend services (ECS, Lambda)
 - DynamoDB stores device data
-- S3 stores user-uploaded scripts
+- S3 stores user-uploaded scripts and the static web build
 
 
 
@@ -57,5 +57,39 @@ This project uses **VS Code Dev Containers** to standardize tooling across the t
     - Select **`Dev Containers: Reopen in Container`**
 4. Log in to AWS SSO and verify access:
     ```bash
-    asw sso login
+    aws sso login
     aws sts get-caller-identity
+    ```
+
+## Web Frontend
+
+The web frontend is a **Next.js** app configured for static export (client-side rendering only).
+
+### Local Development
+```bash
+cd Platform/services/web
+npm install
+npm run dev
+```
+
+### Build
+```bash
+npm run build   # outputs static files to Platform/services/web/out/
+```
+
+### Deployment
+Deployment is automated via **GitHub Actions** on every push to `main` that changes files under `Platform/services/web/`.
+
+The workflow (`.github/workflows/deploy-web.yml`):
+1. Builds the Next.js static export
+2. Syncs the `out/` folder to S3
+3. Invalidates the CloudFront distribution cache
+
+Authentication uses **OIDC** (no long-lived AWS credentials). Required GitHub secrets:
+
+| Secret | Description |
+|---|---|
+| `AWS_ROLE_ARN` | IAM role ARN with S3 + CloudFront permissions |
+| `AWS_REGION` | AWS region (e.g. `us-east-1`) |
+| `S3_BUCKET_NAME` | S3 bucket hosting the static site |
+| `CLOUDFRONT_DISTRIBUTION_ID` | CloudFront distribution ID |
