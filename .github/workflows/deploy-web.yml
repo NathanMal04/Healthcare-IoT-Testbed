@@ -32,6 +32,9 @@ jobs:
 
       - name: Build
         working-directory: Platform/services/web
+        env:
+          NEXT_PUBLIC_COGNITO_USER_POOL_ID: ${{ secrets.NEXT_PUBLIC_COGNITO_USER_POOL_ID }}
+          NEXT_PUBLIC_COGNITO_CLIENT_ID: ${{ secrets.NEXT_PUBLIC_COGNITO_CLIENT_ID }}
         run: npm run build
 
       - name: Configure AWS credentials
