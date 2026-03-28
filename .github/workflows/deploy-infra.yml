@@ -1,11 +1,13 @@
 name: Deploy Infrastructure
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
     paths:
       - 'Platform/infra/**'
+      - '.github/workflows/deploy-infra.yml'
 
 permissions:
   id-token: write
