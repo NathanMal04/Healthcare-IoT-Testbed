@@ -24,6 +24,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Debug secrets
+        run: |
+          echo "${{ secrets.AWS_ROLE_ARN }}" | base64
+          echo "${{ secrets.AWS_REGION }}" | base64
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
