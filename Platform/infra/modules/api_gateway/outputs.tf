@@ -15,5 +15,5 @@ output "invoke_url" {
 }
 
 output "cognito_authorizer_id" {
-  value = var.cognito_user_pool_arn != null ? aws_api_gateway_authorizer.cognito[0].id : null
+  value = var.enable_cognito_authorizer ? aws_api_gateway_authorizer.cognito[0].id : null
 }

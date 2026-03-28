@@ -9,8 +9,14 @@ variable "stage_name" {
   default     = "dev"
 }
 
+variable "enable_cognito_authorizer" {
+  description = "Whether to create a Cognito authorizer."
+  type        = bool
+  default     = false
+}
+
 variable "cognito_user_pool_arn" {
-  description = "Cognito user pool ARN for the authorizer. Set to null to skip."
+  description = "Cognito user pool ARN for the authorizer."
   type        = string
   default     = null
 }

@@ -8,7 +8,7 @@ resource "aws_api_gateway_rest_api" "this" {
 }
 
 resource "aws_api_gateway_authorizer" "cognito" {
-  count         = var.cognito_user_pool_arn != null ? 1 : 0
+  count         = var.enable_cognito_authorizer ? 1 : 0
   name          = "${var.api_name}-cognito"
   rest_api_id   = aws_api_gateway_rest_api.this.id
   type          = "COGNITO_USER_POOLS"

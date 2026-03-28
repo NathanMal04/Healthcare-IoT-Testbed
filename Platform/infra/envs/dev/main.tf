@@ -68,10 +68,11 @@ resource "aws_iam_policy" "lambda_dynamodb" {
 module "api" {
   source = "../../modules/api_gateway"
 
-  api_name              = "${var.name}-api"
-  stage_name            = "dev"
-  cognito_user_pool_arn = module.auth.user_pool_arn
-  project               = var.name
+  api_name                  = "${var.name}-api"
+  stage_name                = "dev"
+  enable_cognito_authorizer = true
+  cognito_user_pool_arn     = module.auth.user_pool_arn
+  project                   = var.name
   environment           = "dev"
 
   # Add each route's resource_id here to trigger redeployment on changes
