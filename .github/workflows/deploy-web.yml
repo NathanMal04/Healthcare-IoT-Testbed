@@ -19,6 +19,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Read Terraform outputs
+        id: tf
+        working-directory: Platform/infra/envs/dev
+        run: |
+          terraform init -input=false
+          echo "bucket_name=$(terraform output -raw web_bucket_name)" >> "$GITHUB_OUTPUT"
+          echo "distribution_id=$(terraform output -raw cloudfront_distribution_id)" >> "$GITHUB_OUTPUT"
+          echo "cognito_user_pool_id=$(terraform output -raw cognito_user_pool_id)" >> "$GITHUB_OUTPUT"
+          echo "cognito_client_id=$(terraform output -raw cognito_user_pool_client_id)" >> "$GITHUB_OUTPUT"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -33,23 +54,17 @@ jobs:
       - name: Build
         working-directory: Platform/services/web
         env:
-          NEXT_PUBLIC_COGNITO_USER_POOL_ID: ${{ secrets.NEXT_PUBLIC_COGNITO_USER_POOL_ID }}
-          NEXT_PUBLIC_COGNITO_CLIENT_ID: ${{ secrets.NEXT_PUBLIC_COGNITO_CLIENT_ID }}
+          NEXT_PUBLIC_COGNITO_USER_POOL_ID: ${{ steps.tf.outputs.cognito_user_pool_id }}
+          NEXT_PUBLIC_COGNITO_CLIENT_ID: ${{ steps.tf.outputs.cognito_client_id }}
         run: npm run build
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Sync to S3
         run: |
-          aws s3 sync Platform/services/web/out/ s3://${{ secrets.S3_BUCKET_NAME }} \
+          aws s3 sync Platform/services/web/out/ s3://${{ steps.tf.outputs.bucket_name }} \
             --delete \
             --cache-control "public, max-age=31536000, immutable" \
             --exclude "*.html"
-          aws s3 sync Platform/services/web/out/ s3://${{ secrets.S3_BUCKET_NAME }} \
+          aws s3 sync Platform/services/web/out/ s3://${{ steps.tf.outputs.bucket_name }} \
             --delete \
             --cache-control "no-cache" \
             --include "*.html"
@@ -57,5 +72,5 @@ jobs:
       - name: Invalidate CloudFront cache
         run: |
           aws cloudfront create-invalidation \
-            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --distribution-id ${{ steps.tf.outputs.distribution_id }} \
             --invalidation-batch '{"Paths":{"Quantity":1,"Items":["/*"]},"CallerReference":"deploy-'"$(date +%s)"'"}'

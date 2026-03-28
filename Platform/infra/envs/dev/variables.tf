@@ -1,4 +1,4 @@
-# Stores variables being used in centra location
+# Stores variables being used in central location
 
 variable "aws_region" {
   type    = string
@@ -7,7 +7,8 @@ variable "aws_region" {
 
 variable "aws_profile" {
   type        = string
-  description = "AWS CLI profile name"
+  description = "AWS CLI profile name (set to empty string in CI)."
+  default     = null
 }
 
 variable "name" {
@@ -15,22 +16,33 @@ variable "name" {
   default = "healthcare-iot-testbed-dev"
 }
 
-variable "vpc_cidr" {
-  type    = string
-  default = "10.10.0.0/16"
+variable "cognito_callback_urls" {
+  type    = list(string)
+  default = ["https://localhost:3000"]
 }
 
-variable "public_subnet_cidr" {
-  type    = string
-  default = "10.10.1.0/24"
+variable "cognito_logout_urls" {
+  type    = list(string)
+  default = ["https://localhost:3000"]
 }
 
-variable "private_app_subnet_cidr" {
+variable "dynamodb_hash_key" {
   type    = string
-  default = "10.10.2.0/24"
+  default = "pk"
 }
 
-variable "private_db_subnet_cidr" {
+variable "dynamodb_range_key" {
   type    = string
-  default = "10.10.3.0/24"
+  default = "sk"
+}
+
+variable "dynamodb_attributes" {
+  type = list(object({
+    name = string
+    type = string
+  }))
+  default = [
+    { name = "pk", type = "S" },
+    { name = "sk", type = "S" },
+  ]
 }

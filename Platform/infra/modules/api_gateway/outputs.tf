@@ -1,0 +1,19 @@
+output "rest_api_id" {
+  value = aws_api_gateway_rest_api.this.id
+}
+
+output "root_resource_id" {
+  value = aws_api_gateway_rest_api.this.root_resource_id
+}
+
+output "execution_arn" {
+  value = aws_api_gateway_rest_api.this.execution_arn
+}
+
+output "invoke_url" {
+  value = aws_api_gateway_stage.this.invoke_url
+}
+
+output "cognito_authorizer_id" {
+  value = var.cognito_user_pool_arn != null ? aws_api_gateway_authorizer.cognito[0].id : null
+}
