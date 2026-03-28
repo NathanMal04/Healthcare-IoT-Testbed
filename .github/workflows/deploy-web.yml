@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - 'Platform/services/web/**'
+      - '.github/workflows/deploy-web.yml'
 
 permissions:
   id-token: write

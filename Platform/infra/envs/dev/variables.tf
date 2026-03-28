@@ -18,12 +18,12 @@ variable "name" {
 
 variable "cognito_callback_urls" {
   type    = list(string)
-  default = ["https://localhost:3000"]
+  default = ["https://localhost:3000", "d83vem2v9vlw.cloudfront.net"]
 }
 
 variable "cognito_logout_urls" {
   type    = list(string)
-  default = ["https://localhost:3000"]
+  default = ["https://localhost:3000", "d83vem2v9vlw.cloudfront.net"]
 }
 
 variable "dynamodb_hash_key" {
