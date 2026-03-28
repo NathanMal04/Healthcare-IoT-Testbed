@@ -75,7 +75,8 @@ module "api" {
   project                   = var.name
   environment           = "dev"
 
-  # Add each route's resource_id here to trigger redeployment on changes
+  # Set deploy = true and uncomment deployment_trigger once you add your first route
+  # deploy             = true
   # deployment_trigger = sha1(jsonencode([
   #   module.route_example.resource_id,
   # ]))

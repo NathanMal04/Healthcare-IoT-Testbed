@@ -11,7 +11,7 @@ output "execution_arn" {
 }
 
 output "invoke_url" {
-  value = aws_api_gateway_stage.this.invoke_url
+  value = var.deploy ? aws_api_gateway_stage.this[0].invoke_url : null
 }
 
 output "cognito_authorizer_id" {

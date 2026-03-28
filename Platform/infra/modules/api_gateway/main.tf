@@ -16,6 +16,7 @@ resource "aws_api_gateway_authorizer" "cognito" {
 }
 
 resource "aws_api_gateway_deployment" "this" {
+  count       = var.deploy ? 1 : 0
   rest_api_id = aws_api_gateway_rest_api.this.id
 
   triggers = {
@@ -28,7 +29,8 @@ resource "aws_api_gateway_deployment" "this" {
 }
 
 resource "aws_api_gateway_stage" "this" {
-  deployment_id = aws_api_gateway_deployment.this.id
+  count         = var.deploy ? 1 : 0
+  deployment_id = aws_api_gateway_deployment.this[0].id
   rest_api_id   = aws_api_gateway_rest_api.this.id
   stage_name    = var.stage_name
 

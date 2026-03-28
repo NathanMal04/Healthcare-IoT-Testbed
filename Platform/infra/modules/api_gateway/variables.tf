@@ -21,6 +21,12 @@ variable "cognito_user_pool_arn" {
   default     = null
 }
 
+variable "deploy" {
+  description = "Set to true once routes exist. API Gateway cannot deploy without at least one method."
+  type        = bool
+  default     = false
+}
+
 variable "deployment_trigger" {
   description = "Change this value to trigger a redeployment (use a hash of route resource IDs)."
   type        = string
