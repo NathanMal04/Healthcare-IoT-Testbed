@@ -1,0 +1,48 @@
+#docker-compose.yml
+#
+#This Docker Compose file sets up a single-container environment for reverse engineering and analysis tools.
+#It includes Ghidra (for reverse engineering), Binwalk (for firmware analysis), Python (for scripting),
+#GDB (debugger), and Pwndbg (GDB enhancement for exploit development).
+#
+#Design Choices:
+#- Single service for simplicity and resource efficiency: All tools are installed in one container to minimize overhead.
+#- Base image: Ubuntu 22.04 for compatibility with the required tools (e.g., apt packages for Binwalk, GDB).
+#  This keeps the image reasonably lightweight (~2-3GB built size) while ensuring stability.
+#- No GUI setup: Assumes CLI/headless usage to keep resources low (e.g., no X11 or VNC overhead).
+#  Ghidra can be run in headless mode via 'analyzeHeadless'.
+#- Resource optimization: Uses apt's no-install-recommends to reduce package bloat.
+#- AWS Integration: Includes boto3 (AWS SDK for Python) for readiness to invoke AWS Lambda or other services.
+#  Container can run on AWS EC2 with an IAM role for credential-free AWS access.
+#- Volumes: Mounts a workspace for persistent data/scripts.
+#- Command: Starts a bash shell for interactive use.
+#
+#Usage:
+#- Build and run: docker-compose up --build
+#- Access: docker-compose exec rev-tools /bin/bash (if already running)
+#
+#Resource Limits: Configured with low defaults (512MB memory, 0.5 CPU) – adjust as needed.
+#For AWS deployment: See README.md for EC2/ECS instructions.
+
+version: '3.8'
+
+services:
+  rev-tools:
+    #Build from local Dockerfile for custom tool installation.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    #Container name for easy reference.
+    container_name: rev-tools-container
+    #Resource constraints to keep it lightweight.
+    mem_limit: 512m
+    cpus: 0.5
+    #Mount current directory as workspace for scripts/files.
+    volumes:
+      - .:/workspace
+    #Working directory inside container.
+    working_dir: /workspace
+    #Keep container running with a bash shell.
+    command: /bin/bash
+    #Allow stdin for interactive sessions.
+    stdin_open: true
+    tty: true
