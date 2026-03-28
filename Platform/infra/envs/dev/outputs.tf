@@ -27,3 +27,11 @@ output "dynamodb_table_name" {
 output "dynamodb_table_arn" {
   value = module.database.table_arn
 }
+
+output "lambda_dynamodb_policy_arn" {
+  value = aws_iam_policy.lambda_dynamodb.arn
+}
+
+output "api_invoke_url" {
+  value = module.api.invoke_url
+}
