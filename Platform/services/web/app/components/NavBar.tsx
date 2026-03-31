@@ -1,18 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useSession, signOut } from "@/app/lib/auth-client";
+import { useAuth } from "@/context/AuthContext";
 
 export default function NavBar() {
-  const { data: session } = useSession();
-  const router = useRouter();
-
-  const handleSignOut = async () => {
-    await signOut();
-    router.push("/login");
-    router.refresh();
-  };
+  const { user, loading, signOut } = useAuth();
 
   return (
     <nav className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
@@ -25,11 +17,11 @@ export default function NavBar() {
 
       <div className="flex items-center gap-4">
         <span className="text-sm text-slate-400">Florida Institute of Technology</span>
-        {session ? (
+        {!loading && user ? (
           <div className="flex items-center gap-3">
-            <span className="text-sm text-slate-300">{session.user.name}</span>
+            <span className="text-sm text-slate-300">{user.username}</span>
             <button
-              onClick={handleSignOut}
+              onClick={signOut}
               className="text-sm bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg transition-colors"
             >
               Sign out
