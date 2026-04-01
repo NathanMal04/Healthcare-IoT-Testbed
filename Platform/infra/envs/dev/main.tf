@@ -28,6 +28,14 @@ module "auth" {
   environment   = "dev"
 }
 
+module "data_lake" {
+  source = "../../modules/s3_bucket"
+
+  bucket_name = "${var.name}-data-lake"
+  project     = var.name
+  environment = "dev"
+}
+
 module "database" {
   source = "../../modules/dynamodb"
 
