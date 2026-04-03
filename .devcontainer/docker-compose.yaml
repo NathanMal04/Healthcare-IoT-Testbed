@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+  devcontainer:
+    image: mcr.microsoft.com/devcontainers/base:ubuntu-22.04
+    volumes:
+      - ..:/workspaces/Healthcare-IoT-Testbed:cached
+    command: sleep infinity
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: localstack
+    env_file:
+      - ../secrets.env
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=dynamodb,s3,lambda,apigateway,cognito-idp,iam,sts,cloudwatch,logs
+      - DEBUG=0
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  localstack-data:

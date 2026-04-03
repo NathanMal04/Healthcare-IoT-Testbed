@@ -1,6 +1,8 @@
 {
   "name": "Healthcare IoT Testbed Dev",
-  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+  "dockerComposeFile": "docker-compose.yaml",
+  "service": "devcontainer",
+  "workspaceFolder": "/workspaces/Healthcare-IoT-Testbed",
 
   "features": {
     "ghcr.io/devcontainers/features/aws-cli:1": {},
@@ -36,10 +38,12 @@
 
   "containerEnv": {
     "AWS_CONFIG_FILE": "${containerWorkspaceFolder}/.devcontainer/aws/config",
-    "AWS_PROFILE": "Healthcare-IoT-Dev"
+    "AWS_PROFILE": "Healthcare-IoT-Dev",
+    "LOCALSTACK_ENDPOINT": "http://localstack:4566"
   },
 
-  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y jq && pip install --upgrade pip && cd ${containerWorkspaceFolder}/Platform/services/web && npm install",
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y jq curl && pip install --upgrade pip && cd ${containerWorkspaceFolder}/Platform/services/web && npm install",
+  "postStartCommand": "bash ${containerWorkspaceFolder}/.devcontainer/localstack/setup-localstack.sh",
 
   "remoteUser": "vscode"
 }
