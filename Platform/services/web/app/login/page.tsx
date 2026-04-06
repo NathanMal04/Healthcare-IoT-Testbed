@@ -5,9 +5,11 @@ import { signIn } from "aws-amplify/auth";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import "@/lib/amplify";
+import { useAuth } from "@/context/AuthContext";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { refreshUser } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -19,6 +21,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await signIn({ username: email, password });
+      await refreshUser();
       router.push("/");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Sign in failed.");

@@ -13,12 +13,14 @@ interface AuthContextType {
   user: AuthUser | null;
   loading: boolean;
   signOut: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
   signOut: async () => {},
+  refreshUser: async () => {},
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -32,13 +34,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
+  const refreshUser = async () => {
+    try {
+      const u = await getCurrentUser();
+      setUser({ username: u.username, userId: u.userId });
+    } catch {
+      setUser(null);
+    }
+  };
+
   const signOut = async () => {
     await amplifySignOut();
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signOut, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );
