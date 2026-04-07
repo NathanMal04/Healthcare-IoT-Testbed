@@ -30,3 +30,9 @@ variable "environment" {
   description = "Environment tag value (dev/staging/prod)."
   type        = string
 }
+
+variable "post_confirmation_lambda_arn" {
+  description = "ARN of Lambda to invoke after user confirmation."
+  type        = string
+  default     = null
+}

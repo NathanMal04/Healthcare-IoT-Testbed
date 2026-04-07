@@ -24,6 +24,13 @@ resource "aws_cognito_user_pool" "this" {
     }
   }
 
+  dynamic "lambda_config" {
+    for_each = var.post_confirmation_lambda_arn != null ? [1] : []
+    content {
+      post_confirmation = var.post_confirmation_lambda_arn
+    }
+  }
+
   tags = {
     Project = var.project
     Env     = var.environment

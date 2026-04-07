@@ -24,6 +24,9 @@ module "auth" {
   pool_name     = "${var.name}-users"
   callback_urls = var.cognito_callback_urls
   logout_urls   = var.cognito_logout_urls
+
+  post_confirmation_lambda_arn = module.post_confirmation_create_user_fn.function_arn
+
   project       = var.name
   environment   = "dev"
 }
@@ -47,6 +50,50 @@ module "database" {
   environment = "dev"
 }
 
+module "users_table" {
+  source = "../../modules/dynamodb"
+
+  table_name = "${var.name}-users"
+
+  hash_key  = "userId"
+  range_key = null
+
+  attributes = [
+    {
+      name = "userId"
+      type = "S"
+    }
+  ]
+
+  project     = var.name
+  environment = "dev"
+}
+
+module "post_confirmation_create_user_fn" {
+  source        = "../../modules/lambda"
+  function_name = "${var.name}-post-confirmation-create-user"
+  source_dir    = "../../../services/lambdas/post-confirmation-create-user"
+  handler       = "index.handler"
+  runtime       = "nodejs20.x"
+
+  additional_policy_arns = [aws_iam_policy.lambda_dynamodb.arn]
+
+  environment_variables = {
+    USERS_TABLE_NAME = module.users_table.table_name
+  }
+
+  project     = var.name
+  environment = "dev"
+}
+
+resource "aws_lambda_permission" "allow_cognito_post_confirmation" {
+  statement_id  = "AllowCognitoPostConfirmationInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = module.post_confirmation_create_user_fn.function_name
+  principal     = "cognito-idp.amazonaws.com"
+  source_arn    = module.auth.user_pool_arn
+}
+
 # Shared IAM policy granting Lambda functions read/write access to DynamoDB
 resource "aws_iam_policy" "lambda_dynamodb" {
   name = "${var.name}-lambda-dynamodb"
@@ -67,7 +114,9 @@ resource "aws_iam_policy" "lambda_dynamodb" {
       ]
       Resource = [
         module.database.table_arn,
-        "${module.database.table_arn}/index/*"
+        "${module.database.table_arn}/index/*",
+        module.users_table.table_arn,
+        "${module.users_table.table_arn}/index/*"
       ]
     }]
   })
