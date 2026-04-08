@@ -5,11 +5,11 @@ output "web_bucket_name" {
 }
 
 output "data_lake_bucket_name" {
-  value = module.data_lake.bucket_name
+  value = module.data_lake_bucket.bucket_name
 }
 
 output "data_lake_bucket_arn" {
-  value = module.data_lake.bucket_arn
+  value = module.data_lake_bucket.bucket_arn
 }
 
 output "cloudfront_distribution_id" {
@@ -28,12 +28,20 @@ output "cognito_user_pool_client_id" {
   value = module.auth.user_pool_client_id
 }
 
-output "dynamodb_table_name" {
-  value = module.database.table_name
+output "metadata_table_name" {
+  value = module.metadata_table.table_name
 }
 
-output "dynamodb_table_arn" {
-  value = module.database.table_arn
+output "metadata_table_arn" {
+  value = module.metadata_table.table_arn
+}
+
+output "users_table_name" {
+  value = module.users_table.table_name
+}
+
+output "users_table_arn" {
+  value = module.users_table.table_arn
 }
 
 output "lambda_dynamodb_policy_arn" {

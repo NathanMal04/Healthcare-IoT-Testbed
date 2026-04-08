@@ -27,14 +27,21 @@ module "auth" {
   environment   = "local"
 }
 
-module "database" {
+# Single-table design for all entity metadata (devices, tests, scripts, tools)
+module "metadata" {
   source = "../../modules/dynamodb_local"
 
-  table_name = "${var.name}-data"
-  hash_key   = var.dynamodb_hash_key
-  range_key  = var.dynamodb_range_key
-  attributes = var.dynamodb_attributes
-  project    = var.name
+  table_name = "${var.name}-metadata"
+
+  hash_key  = "pk"
+  range_key = "sk"
+
+  attributes = [
+    { name = "pk", type = "S" },
+    { name = "sk", type = "S" },
+  ]
+
+  project     = var.name
   environment = "local"
 }
 
@@ -57,8 +64,8 @@ resource "aws_iam_policy" "lambda_dynamodb" {
         "dynamodb:BatchWriteItem"
       ]
       Resource = [
-        module.database.table_arn,
-        "${module.database.table_arn}/index/*"
+        module.metadata.table_arn,
+        "${module.metadata.table_arn}/index/*"
       ]
     }]
   })
@@ -104,7 +111,7 @@ module "api" {
 #     runtime       = "nodejs20.x"
 #     additional_policy_arns = [aws_iam_policy.lambda_dynamodb.arn]
 #     environment_variables = {
-#       TABLE_NAME = module.database.table_name
+#       TABLE_NAME = module.metadata.table_name
 #     }
 #     project     = var.name
 #     environment = "local"

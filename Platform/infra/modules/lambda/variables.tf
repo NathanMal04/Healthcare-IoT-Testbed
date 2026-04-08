@@ -26,7 +26,7 @@ variable "handler" {
 variable "runtime" {
   description = "Lambda runtime e.g. nodejs20.x, python3.12 (Zip only)."
   type        = string
-  default     = "nodejs20.x"
+  default     = "python3.12"
 }
 
 # --- Container deployment ---

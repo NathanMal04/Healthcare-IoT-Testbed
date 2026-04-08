@@ -14,8 +14,8 @@ output "cognito_user_pool_client_id" {
   value = module.auth.user_pool_client_id
 }
 
-output "dynamodb_table_name" {
-  value = module.database.table_name
+output "metadata_table_name" {
+  value = module.metadata.table_name
 }
 
 output "api_invoke_url" {

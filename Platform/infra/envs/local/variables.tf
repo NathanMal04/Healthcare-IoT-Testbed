@@ -18,23 +18,3 @@ variable "cognito_logout_urls" {
   default = ["http://localhost:3000"]
 }
 
-variable "dynamodb_hash_key" {
-  type    = string
-  default = "pk"
-}
-
-variable "dynamodb_range_key" {
-  type    = string
-  default = "sk"
-}
-
-variable "dynamodb_attributes" {
-  type = list(object({
-    name = string
-    type = string
-  }))
-  default = [
-    { name = "pk", type = "S" },
-    { name = "sk", type = "S" },
-  ]
-}

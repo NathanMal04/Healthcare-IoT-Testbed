@@ -1,5 +1,6 @@
 # Main infrastructure definitions
 
+# S3 bucket for hosting static web assets
 module "web_bucket" {
   source = "../../modules/s3_bucket"
 
@@ -8,6 +9,7 @@ module "web_bucket" {
   environment = "dev"
 }
 
+# CloudFront distribution for serving web assets from S3 bucket
 module "cdn" {
   source = "../../modules/cloudfront"
 
@@ -18,6 +20,7 @@ module "cdn" {
   environment                    = "dev"
 }
 
+# Cognito User Pool for authentication
 module "auth" {
   source = "../../modules/cognito"
 
@@ -31,7 +34,8 @@ module "auth" {
   environment   = "dev"
 }
 
-module "data_lake" {
+# S3 bucket for general data storage
+module "data_lake_bucket" {
   source = "../../modules/s3_bucket"
 
   bucket_name = "${var.name}-data-lake"
@@ -39,14 +43,21 @@ module "data_lake" {
   environment = "dev"
 }
 
-module "database" {
+# Single-table design for all entity metadata (devices, tests, scripts, tools)
+module "metadata_table" {
   source = "../../modules/dynamodb"
 
-  table_name = "${var.name}-data"
-  hash_key   = var.dynamodb_hash_key
-  range_key  = var.dynamodb_range_key
-  attributes = var.dynamodb_attributes
-  project    = var.name
+  table_name = "${var.name}-metadata"
+
+  hash_key  = "pk"
+  range_key = "sk"
+
+  attributes = [
+    { name = "pk", type = "S" },
+    { name = "sk", type = "S" },
+  ]
+
+  project     = var.name
   environment = "dev"
 }
 
@@ -59,10 +70,7 @@ module "users_table" {
   range_key = null
 
   attributes = [
-    {
-      name = "userId"
-      type = "S"
-    }
+    { name = "userId", type = "S" }
   ]
 
   project     = var.name
@@ -113,8 +121,8 @@ resource "aws_iam_policy" "lambda_dynamodb" {
         "dynamodb:BatchWriteItem"
       ]
       Resource = [
-        module.database.table_arn,
-        "${module.database.table_arn}/index/*",
+        module.metadata_table.table_arn,
+        "${module.metadata_table.table_arn}/index/*",
         module.users_table.table_arn,
         "${module.users_table.table_arn}/index/*"
       ]
@@ -179,23 +187,11 @@ module "api" {
 #   Node.js:  "index.handler"     (exports.handler in index.js)
 #   Python:   "app.handler"       (def handler in app.py)
 #
-# 1. Zip-based (Node.js):
-#   module "example_fn" {
+# 1. Zip-based (Python):
+#   module "example_py_fn" {
 #     source        = "../../modules/lambda"
 #     function_name = "${var.name}-example"
 #     source_dir    = "../../services/lambdas/example"
-#     handler       = "index.handler"
-#     runtime       = "nodejs20.x"
-#     additional_policy_arns = [aws_iam_policy.lambda_dynamodb.arn]
-#     project     = var.name
-#     environment = "dev"
-#   }
-#
-# 2. Zip-based (Python):
-#   module "example_py_fn" {
-#     source        = "../../modules/lambda"
-#     function_name = "${var.name}-example-py"
-#     source_dir    = "../../services/lambdas/example-py"
 #     handler       = "app.handler"
 #     runtime       = "python3.12"
 #     additional_policy_arns = [aws_iam_policy.lambda_dynamodb.arn]
@@ -203,7 +199,7 @@ module "api" {
 #     environment = "dev"
 #   }
 #
-# 3. Container-based (runtime is in the image, no handler/runtime needed):
+# 2. Container-based (runtime is in the image, no handler/runtime needed):
 #   module "example_container_fn" {
 #     source        = "../../modules/lambda"
 #     function_name = "${var.name}-example-container"
@@ -216,27 +212,31 @@ module "api" {
 #     environment = "dev"
 #   }
 #
-# 4. Durable zip-based (add durable = true to any zip lambda):
+# 3. Durable zip-based (add durable = true to any zip lambda):
 #   module "example_durable_fn" {
 #     source        = "../../modules/lambda"
 #     function_name = "${var.name}-example-durable"
 #     source_dir    = "../../services/lambdas/example-durable"
-#     handler       = "index.handler"
-#     runtime       = "nodejs22.x"
+#     handler       = "app.handler"
+#     runtime       = "python3.12"
 #     memory_size   = 512
+#     timeout       = 300
 #     durable       = true
+#     durable_execution_timeout = 900
+#     durable_retention_period  = 7
 #     additional_policy_arns = [aws_iam_policy.lambda_dynamodb.arn]
 #     project     = var.name
 #     environment = "dev"
 #   }
 #
-# 5. Durable container-based (add durable = true to any container lambda):
+# 4. Durable container-based (add durable = true to any container lambda):
 #   module "example_durable_container_fn" {
 #     source        = "../../modules/lambda"
 #     function_name = "${var.name}-example-durable-container"
 #     package_type  = "Image"
 #     image_uri     = "<account_id>.dkr.ecr.us-east-2.amazonaws.com/repo:tag"
 #     memory_size   = 1024
+#     timeout       = 300
 #     durable       = true
 #     durable_execution_timeout = 900
 #     durable_retention_period  = 7

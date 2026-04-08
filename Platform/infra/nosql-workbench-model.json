@@ -1,0 +1,400 @@
+{
+  "ModelName": "HealthcareIoTTestbed",
+  "ModelMetadata": {
+    "Author": "",
+    "DateCreated": "2026-04-08T00:00:00Z",
+    "DateLastModified": "2026-04-08T00:00:00Z",
+    "Description": "Healthcare IoT Testbed - Users table and Metadata table (single-table design for devices, modules, outputs, sessions, and access control)",
+    "Version": "1.0"
+  },
+  "DataModel": [
+    {
+      "TableName": "healthcare-iot-testbed-dev-users",
+      "KeyAttributes": {
+        "PartitionKey": {
+          "AttributeName": "userId",
+          "AttributeType": "S"
+        }
+      },
+      "NonKeyAttributes": [
+        { "AttributeName": "email", "AttributeType": "S" },
+        { "AttributeName": "fullName", "AttributeType": "S" },
+        { "AttributeName": "role", "AttributeType": "S" },
+        { "AttributeName": "status", "AttributeType": "S" },
+        { "AttributeName": "createdAt", "AttributeType": "S" },
+        { "AttributeName": "updatedAt", "AttributeType": "S" }
+      ],
+      "TableData": [
+        {
+          "userId": { "S": "user-001" },
+          "email": { "S": "alice@example.com" },
+          "fullName": { "S": "Alice Johnson" },
+          "role": { "S": "admin" },
+          "status": { "S": "active" },
+          "createdAt": { "S": "2026-04-01T10:00:00Z" },
+          "updatedAt": { "S": "2026-04-01T10:00:00Z" }
+        },
+        {
+          "userId": { "S": "user-002" },
+          "email": { "S": "bob@example.com" },          "fullName": { "S": "Bob Smith" },
+          "role": { "S": "user" },
+          "status": { "S": "active" },
+          "createdAt": { "S": "2026-04-02T14:00:00Z" },
+          "updatedAt": { "S": "2026-04-02T14:00:00Z" }
+        }
+      ]
+    },
+    {
+      "TableName": "healthcare-iot-testbed-dev-metadata",
+      "KeyAttributes": {
+        "PartitionKey": {
+          "AttributeName": "pk",
+          "AttributeType": "S"
+        },
+        "SortKey": {
+          "AttributeName": "sk",
+          "AttributeType": "S"
+        }
+      },
+      "NonKeyAttributes": [
+        { "AttributeName": "entity", "AttributeType": "S" },
+        { "AttributeName": "name", "AttributeType": "S" },
+        { "AttributeName": "status", "AttributeType": "S" },
+        { "AttributeName": "role", "AttributeType": "S" },
+        { "AttributeName": "type", "AttributeType": "S" },
+        { "AttributeName": "version", "AttributeType": "S" },
+        { "AttributeName": "fileSize", "AttributeType": "S" },
+        { "AttributeName": "uploadedAt", "AttributeType": "S" },
+        { "AttributeName": "dataPath", "AttributeType": "S" },
+        { "AttributeName": "moduleId", "AttributeType": "S" },
+        { "AttributeName": "startedAt", "AttributeType": "S" },
+        { "AttributeName": "endedAt", "AttributeType": "S" },
+        { "AttributeName": "createdAt", "AttributeType": "S" },
+        { "AttributeName": "updatedAt", "AttributeType": "S" }
+      ],
+      "TableData": [
+        {
+          "pk": { "S": "DEVICE#dev-001" },
+          "sk": { "S": "METADATA" },
+          "entity": { "S": "device" },
+          "name": { "S": "Blood Pressure Monitor A" },
+          "type": { "S": "blood-pressure" },
+          "version": { "S": "v2.1.0" },
+          "status": { "S": "active" },
+          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/devices/dev-001/" },
+          "createdAt": { "S": "2026-04-01T10:00:00Z" },
+          "updatedAt": { "S": "2026-04-01T10:00:00Z" }
+        },
+        {
+          "pk": { "S": "DEVICE#dev-001" },
+          "sk": { "S": "FIRMWARE#v1.0.0" },
+          "entity": { "S": "firmware" },
+          "version": { "S": "v1.0.0" },
+          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/devices/dev-001/v1.0.0/" },
+          "fileSize": { "S": "2.4MB" },
+          "uploadedAt": { "S": "2026-03-01T10:00:00Z" }
+        },
+        {
+          "pk": { "S": "DEVICE#dev-001" },
+          "sk": { "S": "FIRMWARE#v2.0.0" },
+          "entity": { "S": "firmware" },
+          "version": { "S": "v2.0.0" },
+          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/devices/dev-001/v2.0.0/" },
+          "fileSize": { "S": "2.8MB" },
+          "uploadedAt": { "S": "2026-03-15T10:00:00Z" }
+        },
+        {
+          "pk": { "S": "DEVICE#dev-001" },
+          "sk": { "S": "FIRMWARE#v2.1.0" },
+          "entity": { "S": "firmware" },
+          "version": { "S": "v2.1.0" },
+          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/devices/dev-001/v2.1.0/" },
+          "fileSize": { "S": "2.9MB" },
+          "uploadedAt": { "S": "2026-04-01T10:00:00Z" }
+        },
+        {
+          "pk": { "S": "DEVICE#dev-002" },
+          "sk": { "S": "METADATA" },
+          "entity": { "S": "device" },
+          "name": { "S": "Heart Rate Sensor B" },
+          "type": { "S": "heart-rate" },
+          "version": { "S": "v1.3.2" },
+          "status": { "S": "active" },
+          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/devices/dev-002/" },
+          "createdAt": { "S": "2026-04-01T11:00:00Z" },
+          "updatedAt": { "S": "2026-04-01T11:00:00Z" }
+        },
+        {
+          "pk": { "S": "DEVICE#dev-002" },
+          "sk": { "S": "FIRMWARE#v1.0.0" },
+          "entity": { "S": "firmware" },
+          "version": { "S": "v1.0.0" },
+          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/devices/dev-002/v1.0.0/" },
+          "fileSize": { "S": "1.2MB" },
+          "uploadedAt": { "S": "2026-02-15T10:00:00Z" }
+        },
+        {
+          "pk": { "S": "DEVICE#dev-002" },
+          "sk": { "S": "FIRMWARE#v1.3.2" },
+          "entity": { "S": "firmware" },
+          "version": { "S": "v1.3.2" },
+          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/devices/dev-002/v1.3.2/" },
+          "fileSize": { "S": "1.4MB" },
+          "uploadedAt": { "S": "2026-03-20T10:00:00Z" }
+        },
+        {
+          "pk": { "S": "OUTPUT#out-001" },
+          "sk": { "S": "SCRIPT" },
+          "entity": { "S": "output" },
+          "name": { "S": "BP Bulk Firmware Patch - Run 1" },
+          "status": { "S": "completed" },
+          "moduleId": { "S": "mod-001" },
+          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/outputs/out-001/" },
+          "startedAt": { "S": "2026-04-03T09:00:00Z" },
+          "endedAt": { "S": "2026-04-03T09:02:30Z" },
+          "createdAt": { "S": "2026-04-03T09:00:00Z" },
+          "updatedAt": { "S": "2026-04-03T09:02:30Z" }
+        },
+        {
+          "pk": { "S": "OUTPUT#out-002" },
+          "sk": { "S": "TOOL" },
+          "entity": { "S": "output" },
+          "name": { "S": "Nmap Scan - BP Monitor Network" },
+          "status": { "S": "completed" },
+          "moduleId": { "S": "mod-002" },
+          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/outputs/out-002/" },
+          "startedAt": { "S": "2026-04-04T14:00:00Z" },
+          "endedAt": { "S": "2026-04-04T14:15:00Z" },
+          "createdAt": { "S": "2026-04-04T14:00:00Z" },
+          "updatedAt": { "S": "2026-04-04T14:15:00Z" }
+        },
+        {
+          "pk": { "S": "OUTPUT#out-001" },
+          "sk": { "S": "DEVICE#dev-001" },
+          "entity": { "S": "output-device" },
+          "name": { "S": "Blood Pressure Monitor A" }
+        },
+        {
+          "pk": { "S": "OUTPUT#out-001" },
+          "sk": { "S": "MODULE#mod-001" },
+          "entity": { "S": "output-module" },
+          "name": { "S": "BP Validation Script" }
+        },
+        {
+          "pk": { "S": "OUTPUT#out-002" },
+          "sk": { "S": "DEVICE#dev-001" },
+          "entity": { "S": "output-device" },
+          "name": { "S": "Blood Pressure Monitor A" }
+        },
+        {
+          "pk": { "S": "OUTPUT#out-002" },
+          "sk": { "S": "MODULE#mod-002" },
+          "entity": { "S": "output-module" },
+          "name": { "S": "Nmap Network Scanner" }
+        },
+        {
+          "pk": { "S": "DEVICE#dev-001" },
+          "sk": { "S": "OUTPUT#out-001" },
+          "entity": { "S": "device-output" },
+          "name": { "S": "BP Bulk Firmware Patch - Run 1" }
+        },
+        {
+          "pk": { "S": "DEVICE#dev-001" },
+          "sk": { "S": "OUTPUT#out-002" },
+          "entity": { "S": "device-output" },
+          "name": { "S": "Nmap Scan - BP Monitor Network" }
+        },
+        {
+          "pk": { "S": "MODULE#mod-001" },
+          "sk": { "S": "SCRIPT" },
+          "entity": { "S": "module" },
+          "name": { "S": "BP Validation Script" },
+          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/modules/mod-001/" },
+          "createdAt": { "S": "2026-04-02T08:00:00Z" },
+          "updatedAt": { "S": "2026-04-02T08:00:00Z" }
+        },
+        {
+          "pk": { "S": "MODULE#mod-002" },
+          "sk": { "S": "TOOL" },
+          "entity": { "S": "module" },
+          "name": { "S": "Nmap Network Scanner" },
+          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/modules/mod-002/" },
+          "createdAt": { "S": "2026-04-01T10:00:00Z" },
+          "updatedAt": { "S": "2026-04-01T10:00:00Z" }
+        },
+        {
+          "pk": { "S": "USER#user-001" },
+          "sk": { "S": "OUTPUT#out-001" },
+          "entity": { "S": "user-output" },
+          "role": { "S": "owner" },
+          "name": { "S": "BP Bulk Firmware Patch - Run 1" }
+        },
+        {
+          "pk": { "S": "USER#user-001" },
+          "sk": { "S": "OUTPUT#out-002" },
+          "entity": { "S": "user-output" },
+          "role": { "S": "owner" },
+          "name": { "S": "Nmap Scan - BP Monitor Network" }
+        },
+        {
+          "pk": { "S": "USER#user-002" },
+          "sk": { "S": "OUTPUT#out-001" },
+          "entity": { "S": "user-output" },
+          "role": { "S": "viewer" },
+          "name": { "S": "BP Bulk Firmware Patch - Run 1" }
+        },
+        {
+          "pk": { "S": "OUTPUT#out-001" },
+          "sk": { "S": "USER#user-001" },
+          "entity": { "S": "output-user" },
+          "role": { "S": "owner" }
+        },
+        {
+          "pk": { "S": "OUTPUT#out-001" },
+          "sk": { "S": "USER#user-002" },
+          "entity": { "S": "output-user" },
+          "role": { "S": "viewer" }
+        },
+        {
+          "pk": { "S": "OUTPUT#out-002" },
+          "sk": { "S": "USER#user-001" },
+          "entity": { "S": "output-user" },
+          "role": { "S": "owner" }
+        },
+        {
+          "pk": { "S": "USER#user-001" },
+          "sk": { "S": "DEVICE#dev-001" },
+          "entity": { "S": "user-device" },
+          "role": { "S": "owner" },
+          "name": { "S": "Blood Pressure Monitor A" }
+        },
+        {
+          "pk": { "S": "USER#user-001" },
+          "sk": { "S": "DEVICE#dev-002" },
+          "entity": { "S": "user-device" },
+          "role": { "S": "owner" },
+          "name": { "S": "Heart Rate Sensor B" }
+        },
+        {
+          "pk": { "S": "DEVICE#dev-001" },
+          "sk": { "S": "USER#user-001" },
+          "entity": { "S": "device-user" },
+          "role": { "S": "owner" }
+        },
+        {
+          "pk": { "S": "DEVICE#dev-002" },
+          "sk": { "S": "USER#user-001" },
+          "entity": { "S": "device-user" },
+          "role": { "S": "owner" }
+        },
+        {
+          "pk": { "S": "USER#user-001" },
+          "sk": { "S": "MODULE#mod-001" },
+          "entity": { "S": "user-module" },
+          "role": { "S": "owner" },
+          "name": { "S": "BP Validation Script" }
+        },
+        {
+          "pk": { "S": "USER#user-001" },
+          "sk": { "S": "MODULE#mod-002" },
+          "entity": { "S": "user-module" },
+          "role": { "S": "owner" },
+          "name": { "S": "Nmap Network Scanner" }
+        },
+        {
+          "pk": { "S": "MODULE#mod-001" },
+          "sk": { "S": "USER#user-001" },
+          "entity": { "S": "module-user" },
+          "role": { "S": "owner" }
+        },
+        {
+          "pk": { "S": "MODULE#mod-002" },
+          "sk": { "S": "USER#user-001" },
+          "entity": { "S": "module-user" },
+          "role": { "S": "owner" }
+        },
+        {
+          "pk": { "S": "SESSION#sess-001" },
+          "sk": { "S": "TOOL" },
+          "entity": { "S": "session" },
+          "name": { "S": "Nmap Scan - Live Session" },
+          "status": { "S": "running" },
+          "moduleId": { "S": "mod-002" },
+          "startedAt": { "S": "2026-04-08T09:00:00Z" }
+        },
+        {
+          "pk": { "S": "SESSION#sess-002" },
+          "sk": { "S": "SCRIPT" },
+          "entity": { "S": "session" },
+          "name": { "S": "BP Bulk Firmware Patch" },
+          "status": { "S": "running" },
+          "moduleId": { "S": "mod-001" },
+          "startedAt": { "S": "2026-04-08T09:15:00Z" }
+        },
+        {
+          "pk": { "S": "SESSION#sess-003" },
+          "sk": { "S": "TOOL" },
+          "entity": { "S": "session" },
+          "name": { "S": "Nmap Scan - HR Sensor Network" },
+          "status": { "S": "running" },
+          "moduleId": { "S": "mod-002" },
+          "startedAt": { "S": "2026-04-08T10:00:00Z" }
+        },
+        {
+          "pk": { "S": "USER#user-001" },
+          "sk": { "S": "SESSION#sess-001" },
+          "entity": { "S": "user-session" },
+          "name": { "S": "Nmap Scan - Live Session" },
+          "status": { "S": "running" }
+        },
+        {
+          "pk": { "S": "USER#user-001" },
+          "sk": { "S": "SESSION#sess-002" },
+          "entity": { "S": "user-session" },
+          "name": { "S": "BP Bulk Firmware Patch" },
+          "status": { "S": "running" }
+        },
+        {
+          "pk": { "S": "USER#user-002" },
+          "sk": { "S": "SESSION#sess-003" },
+          "entity": { "S": "user-session" },
+          "name": { "S": "Nmap Scan - HR Sensor Network" },
+          "status": { "S": "running" }
+        },
+        {
+          "pk": { "S": "SESSION#sess-001" },
+          "sk": { "S": "USER#user-001" },
+          "entity": { "S": "session-user" }
+        },
+        {
+          "pk": { "S": "SESSION#sess-002" },
+          "sk": { "S": "USER#user-001" },
+          "entity": { "S": "session-user" }
+        },
+        {
+          "pk": { "S": "SESSION#sess-003" },
+          "sk": { "S": "USER#user-002" },
+          "entity": { "S": "session-user" }
+        },
+        {
+          "pk": { "S": "MODULE#mod-002" },
+          "sk": { "S": "SESSION#sess-001" },
+          "entity": { "S": "module-session" },
+          "status": { "S": "running" }
+        },
+        {
+          "pk": { "S": "MODULE#mod-001" },
+          "sk": { "S": "SESSION#sess-002" },
+          "entity": { "S": "module-session" },
+          "status": { "S": "running" }
+        },
+        {
+          "pk": { "S": "MODULE#mod-002" },
+          "sk": { "S": "SESSION#sess-003" },
+          "entity": { "S": "module-session" },
+          "status": { "S": "running" }
+        }
+      ]
+    }
+  ]
+}
