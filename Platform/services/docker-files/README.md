@@ -1,6 +1,6 @@
-#README.md
+# README.md
 
-##Overview
+## Overview
 
 This project provides a Docker Compose setup for a reverse engineering and firmware analysis environment.
 
@@ -14,7 +14,7 @@ The included applications are:
 
 The setup uses a multi-stage Dockerfile to minimize image size and is designed for deployment on AWS infrastructure such as EC2, with readiness for further integration like executing Python scripts via AWS Lambda.
 
-###Key Features
+### Key Features
 
 - **Single Container**: All tools in one service to reduce overhead (no inter-service networking).
 - **AWS Readiness**: `boto3` allows Python scripts to interact with AWS services. Run on EC2 with an IAM role for seamless credential-free access.
@@ -22,13 +22,13 @@ The setup uses a multi-stage Dockerfile to minimize image size and is designed f
 - **Headless/CLI Focus**: No GUI to save resources. Ghidra runs in headless mode; extend with X11 forwarding if a GUI is needed.
 - **Resource Limits**: Memory and CPU limits are set in `docker-compose.yaml`. Defaults are `4g` memory and `1.0` CPU — sufficient for Ghidra analysis. Adjust as needed for your host.
 
-###Image Size Note
+### Image Size Note
 
 The final image is approximately **3–4 GB** due to Ghidra (requires OpenJDK 17) and Pwndbg (installed with its full Python dependency set in the runtime stage). Pwndbg is intentionally installed in the runtime stage rather than the builder stage so its Python packages are available to GDB at runtime.
 
 ---
 
-##Prerequisites
+## Prerequisites
 
 - Docker version 20+.
 - Docker Compose version 1.29+ (or Docker Desktop). The `docker-compose.yaml` uses **version 2.4** syntax for correct enforcement of `mem_limit` and `cpus` outside of Swarm mode.
@@ -36,9 +36,9 @@ The final image is approximately **3–4 GB** due to Ghidra (requires OpenJDK 17
 
 ---
 
-##Setup and Usage
+## Setup and Usage
 
-###Local Development
+### Local Development
 
 1. Clone or download this repository (contains `docker-compose.yaml`, `Dockerfile`, `parse_firmware.py`, `analyze_entropy.py`, and this README).
 2. Build and start the container:
@@ -51,31 +51,31 @@ The final image is approximately **3–4 GB** due to Ghidra (requires OpenJDK 17
    ```
 4. Example tool commands inside the container:
    ```bash
-   #Firmware analysis
+   # Firmware analysis
    binwalk firmware.bin
 
-   #Entropy analysis (saves log to /workspace/out/)
+   # Entropy analysis (saves log to /workspace/out/)
    python3 analyze_entropy.py firmware.bin --out /workspace/out
 
-   #Pull firmware from a device over SSH
+   # Pull firmware from a device over SSH
    python3 parse_firmware.py --method ssh --host 192.168.1.1 --user admin --pass secret \
        --cmd "dd if=/dev/mtd0 of=/tmp/fw.bin bs=64k" --get /tmp/fw.bin
 
-   #Pull firmware over HTTP
+   # Pull firmware over HTTP
    python3 parse_firmware.py --method http --url http://192.168.1.1/firmware.bin
 
-   #GDB with Pwndbg (auto-loads)
+   # GDB with Pwndbg (auto-loads)
    gdb ./binary
 
-   #Ghidra headless analysis
+   # Ghidra headless analysis
    analyzeHeadless /workspace/project -import /workspace/binary
    ```
 
 ---
 
-##Python Scripts
+## Python Scripts
 
-###`analyze_entropy.py`
+### `analyze_entropy.py`
 
 Runs Binwalk entropy analysis (`-E`) on a firmware file and optionally saves the output log.
 
@@ -89,7 +89,7 @@ optional arguments:
   --out OUT   Output directory for the entropy log
 ```
 
-###`parse_firmware.py`
+### `parse_firmware.py`
 
 Pulls a firmware image from a device over SSH or HTTP.
 
@@ -111,16 +111,16 @@ optional arguments:
 
 ---
 
-##AWS Deployment
+## AWS Deployment
 
-###On EC2
+### On EC2
 
 1. Launch an EC2 instance (Ubuntu 22.04 AMI). Use at least a **t3.medium** (2 vCPU, 4 GB RAM) to satisfy Ghidra's memory requirements.
 2. Install Docker and Compose:
    ```bash
    sudo apt update
    sudo apt install docker.io docker-compose -y
-   sudo usermod -aG docker ubuntu   #or your username
+   sudo usermod -aG docker ubuntu   # or your username
    ```
 3. Copy project files to the instance:
    ```bash
@@ -137,7 +137,7 @@ optional arguments:
    ```
 6. Monitor resource usage via AWS CloudWatch on the EC2 instance.
 
-###On ECS (Advanced)
+### On ECS (Advanced)
 
 Use AWS ECS with Docker Compose integration.
 
@@ -153,7 +153,7 @@ Use AWS ECS with Docker Compose integration.
 
 This runs the service on Fargate. When configuring the task definition, allocate at least **1 vCPU and 4 GB memory** — the previous recommendation of 0.5 vCPU / 512 MB is insufficient for Ghidra and will cause the container to OOM crash.
 
-###Integrating with AWS Lambda
+### Integrating with AWS Lambda
 
 The container includes `boto3` for Python scripts to invoke Lambda functions, allowing specific workloads to be offloaded to serverless compute.
 
@@ -187,6 +187,6 @@ The container includes `boto3` for Python scripts to invoke Lambda functions, al
 
 ---
 
-##Updating Ghidra
+## Updating Ghidra
 
 The Dockerfile downloads a pinned Ghidra release. To upgrade, update the download URL in the `Dockerfile` builder stage to the desired release from the [Ghidra GitHub releases page](https://github.com/NationalSecurityAgency/ghidra/releases).
