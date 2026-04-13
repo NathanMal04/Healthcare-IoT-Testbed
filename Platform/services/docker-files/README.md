@@ -176,13 +176,35 @@ The container includes `boto3` for Python scripts to invoke Lambda functions, al
 2. **Invoke from Python**:
    ```python
    import boto3
-   client = boto3.client('lambda', region_name='us-east-1')
-   response = client.invoke(
+   import json
+
+   # Specify region explicitly rather than relying on environment config,
+   # which may not be set inside the container.
+   lambda_client = boto3.client('lambda', region_name='us-east-1')
+
+   response = lambda_client.invoke(
        FunctionName='my-function',
-       InvocationType='RequestResponse',
-       Payload=b'{"key": "value"}'
+       InvocationType='RequestResponse',  # Or 'Event' for async
+       Payload=json.dumps({'key': 'value'})
    )
-   print(response['Payload'].read())
+
+   # Check StatusCode first. A 200 means the invoke request was accepted;
+   # anything else (e.g. 400, 429) is a client/throttling error whose payload
+   # is not valid JSON and will crash json.loads.
+   status = response['StatusCode']
+   if status != 200:
+       raise RuntimeError(f'Lambda invoke failed with status {status}')
+
+   payload = json.loads(response['Payload'].read().decode())
+
+   # Check for FunctionError. When the Lambda function itself throws an
+   # exception, AWS still returns HTTP 200 but sets this key to 'Handled'
+   # or 'Unhandled'. Without this check, execution errors are silently
+   # treated as successful results.
+   if response.get('FunctionError'):
+       raise RuntimeError(f"Lambda function error ({response['FunctionError']}): {payload}")
+
+   print(payload)
    ```
 
 ---
