@@ -6,3 +6,10 @@ sso_role_name = AdministratorAccess
 sso_start_url = https://d-9a67549400.awsapps.com/start
 sso_region = us-east-2
 sso_registration_scopes = sso:account:access
+
+[profile localstack]
+region = us-east-2
+output = json
+aws_access_key_id = test
+aws_secret_access_key = test
+endpoint_url = http://localstack:4566

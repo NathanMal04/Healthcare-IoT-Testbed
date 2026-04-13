@@ -1,0 +1,44 @@
+variable "api_name" {
+  description = "Name of the REST API."
+  type        = string
+}
+
+variable "stage_name" {
+  description = "Deployment stage name (e.g. dev, prod)."
+  type        = string
+  default     = "dev"
+}
+
+variable "enable_cognito_authorizer" {
+  description = "Whether to create a Cognito authorizer."
+  type        = bool
+  default     = false
+}
+
+variable "cognito_user_pool_arn" {
+  description = "Cognito user pool ARN for the authorizer."
+  type        = string
+  default     = null
+}
+
+variable "deploy" {
+  description = "Set to true once routes exist. API Gateway cannot deploy without at least one method."
+  type        = bool
+  default     = false
+}
+
+variable "deployment_trigger" {
+  description = "Change this value to trigger a redeployment (use a hash of route resource IDs)."
+  type        = string
+  default     = "initial"
+}
+
+variable "project" {
+  description = "Project tag value."
+  type        = string
+}
+
+variable "environment" {
+  description = "Environment tag value (dev/staging/prod)."
+  type        = string
+}
