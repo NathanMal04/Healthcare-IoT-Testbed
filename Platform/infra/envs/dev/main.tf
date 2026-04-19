@@ -81,8 +81,8 @@ module "post_confirmation_create_user_fn" {
   source        = "../../modules/lambda"
   function_name = "${var.name}-post-confirmation-create-user"
   source_dir    = "../../../services/lambdas/post-confirmation-create-user"
-  handler       = "index.handler"
-  runtime       = "nodejs20.x"
+  handler       = "lambda_function.handler"
+  runtime       = "python3.12"
 
   additional_policy_arns = [aws_iam_policy.lambda_dynamodb.arn]
 
