@@ -5,44 +5,42 @@
 #GDB (debugger), and Pwndbg (GDB enhancement for exploit development).
 #
 #Design Choices:
-#- Single service for simplicity and resource efficiency: All tools are installed in one container to minimize overhead.
-#- Base image: Ubuntu 22.04 for compatibility with the required tools (e.g., apt packages for Binwalk, GDB).
-#  This keeps the image reasonably lightweight (~2-3GB built size) while ensuring stability.
-#- No GUI setup: Assumes CLI/headless usage to keep resources low (e.g., no X11 or VNC overhead).
-#  Ghidra can be run in headless mode via 'analyzeHeadless'.
-#- Resource optimization: Uses apt's no-install-recommends to reduce package bloat.
-#- AWS Integration: Includes boto3 (AWS SDK for Python) for readiness to invoke AWS Lambda or other services.
-#  Container can run on AWS EC2 with an IAM role for credential-free AWS access.
-#- Volumes: Mounts a workspace for persistent data/scripts.
-#- Command: Starts a bash shell for interactive use.
+#- Single service for simplicity and resource efficiency.
+#- Base image: Ubuntu 22.04 for compatibility with the required tools.
+#- No GUI setup: Assumes CLI/headless usage. Ghidra runs via 'analyzeHeadless'.
+#- AWS Integration: Includes boto3 for Python scripts to invoke AWS Lambda or other services.
+#- Volumes: Mounts a #for persistent data/scripts.
 #
 #Usage:
 #- Build and run: docker-compose up --build
 #- Access: docker-compose exec rev-tools /bin/bash (if already running)
 #
-#Resource Limits: Configured with low defaults (512MB memory, 0.5 CPU) – adjust as needed.
 #For AWS deployment: See README.md for EC2/ECS instructions.
 
-version: '3.8'
+#FIX: Downgraded from version '3.8' to '2.4'. The mem_limit and cpus keys
+#are Compose v2 syntax; in v3 they must go under deploy.resources.limits
+#(which only takes effect in Swarm mode). Using v2.4 makes these limits
+#apply correctly in a plain docker-compose context without a Swarm cluster.
+version: '2.4'
 
 services:
   rev-tools:
-    #Build from local Dockerfile for custom tool installation.
     build:
       context: .
       dockerfile: Dockerfile
-    #Container name for easy reference.
     container_name: rev-tools-container
-    #Resource constraints to keep it lightweight.
-    mem_limit: 512m
-    cpus: 0.5
-    #Mount current directory as workspace for scripts/files.
+
+    #FIX: Increased memory limit from 512m to 4g. Ghidra requires a minimum
+    #of ~1GB just to start the JVM, and needs 2–4GB for real analysis.
+    #512MB would cause an OOM kill on every Ghidra invocation. The CPU limit
+    #is raised to 1.0 so analysis jobs complete in a reasonable time; lower
+    #it again if you need to share the host CPU more aggressively.
+    mem_limit: 4g
+    cpus: 1.0
+
     volumes:
-      - .:/workspace
-    #Working directory inside container.
-    working_dir: /workspace
-    #Keep container running with a bash shell.
+      - .:/#
+    working_dir: /#
     command: /bin/bash
-    #Allow stdin for interactive sessions.
     stdin_open: true
     tty: true
