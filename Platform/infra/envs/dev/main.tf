@@ -18,6 +18,9 @@ module "cdn" {
   s3_bucket_arn                  = module.web_bucket.bucket_arn
   project                        = var.name
   environment                    = "dev"
+
+   aliases             = [var.domain_name, "www.${var.domain_name}"]
+  acm_certificate_arn = aws_acm_certificate.frontend.arn
 }
 
 # Cognito User Pool for authentication
@@ -61,6 +64,21 @@ module "metadata_table" {
   environment = "dev"
 }
 
+module "database" {
+  source      = "../../modules/dynamodb"
+  table_name  = "${var.name}-data"
+  hash_key    = "pk"
+  range_key   = "sk"
+
+  attributes = [
+    { name = "pk", type = "S" },
+    { name = "sk", type = "S" },
+  ]
+
+  project     = var.name
+  environment = "dev"
+}
+
 module "users_table" {
   source = "../../modules/dynamodb"
 
@@ -76,6 +94,8 @@ module "users_table" {
   project     = var.name
   environment = "dev"
 }
+
+
 
 module "post_confirmation_create_user_fn" {
   source        = "../../modules/lambda"

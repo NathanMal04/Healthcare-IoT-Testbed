@@ -7,6 +7,7 @@ terraform {
     bucket = "healthcare-iot-testbed-tf-state"
     key    = "dev/terraform.tfstate"
     region = "us-east-2"
+    profile = "Healthcare-IoT-Dev"
   }
 
   required_providers {
