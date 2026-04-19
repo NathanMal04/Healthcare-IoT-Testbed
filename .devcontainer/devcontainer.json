@@ -1,6 +1,8 @@
 {
   "name": "Healthcare IoT Testbed Dev",
-  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+  "dockerComposeFile": "docker-compose.yaml",
+  "service": "devcontainer",
+  "workspaceFolder": "/workspaces/Healthcare-IoT-Testbed",
 
   "features": {
     "ghcr.io/devcontainers/features/aws-cli:1": {},
@@ -11,7 +13,11 @@
       "version": "3.14"
     },
     "ghcr.io/devcontainers/features/node:1": {
-      "version": "lts"
+      "version": "20"
+    },
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installOhMyZsh": false,
+      "configureZshAsDefaultShell": false
     }
   },
 
@@ -24,17 +30,20 @@
         "amazonwebservices.aws-toolkit-vscode",
         "esbenp.prettier-vscode",
         "bradlc.vscode-tailwindcss",
-        "dbaeumer.vscode-eslint"
+        "dbaeumer.vscode-eslint",
+        "github.vscode-github-actions"
       ]
     }
   },
 
   "containerEnv": {
     "AWS_CONFIG_FILE": "${containerWorkspaceFolder}/.devcontainer/aws/config",
-    "AWS_PROFILE": "Healthcare-IoT-Dev"
+    "AWS_PROFILE": "Healthcare-IoT-Dev",
+    "LOCALSTACK_ENDPOINT": "http://localstack:4566"
   },
 
-  "postCreateCommand": "pip install --upgrade pip && cd ${containerWorkspaceFolder}/Platform/services/web && npm install",
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y jq curl && pip install --upgrade pip && cd ${containerWorkspaceFolder}/Platform/services/web && npm install",
+  "postStartCommand": "bash ${containerWorkspaceFolder}/.devcontainer/localstack/setup-localstack.sh",
 
   "remoteUser": "vscode"
 }

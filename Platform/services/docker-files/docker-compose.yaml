@@ -1,0 +1,46 @@
+#docker-compose.yml
+#
+#This Docker Compose file sets up a single-container environment for reverse engineering and analysis tools.
+#It includes Ghidra (for reverse engineering), Binwalk (for firmware analysis), Python (for scripting),
+#GDB (debugger), and Pwndbg (GDB enhancement for exploit development).
+#
+#Design Choices:
+#- Single service for simplicity and resource efficiency.
+#- Base image: Ubuntu 22.04 for compatibility with the required tools.
+#- No GUI setup: Assumes CLI/headless usage. Ghidra runs via 'analyzeHeadless'.
+#- AWS Integration: Includes boto3 for Python scripts to invoke AWS Lambda or other services.
+#- Volumes: Mounts a #for persistent data/scripts.
+#
+#Usage:
+#- Build and run: docker-compose up --build
+#- Access: docker-compose exec rev-tools /bin/bash (if already running)
+#
+#For AWS deployment: See README.md for EC2/ECS instructions.
+
+#FIX: Downgraded from version '3.8' to '2.4'. The mem_limit and cpus keys
+#are Compose v2 syntax; in v3 they must go under deploy.resources.limits
+#(which only takes effect in Swarm mode). Using v2.4 makes these limits
+#apply correctly in a plain docker-compose context without a Swarm cluster.
+version: '2.4'
+
+services:
+  rev-tools:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rev-tools-container
+
+    #FIX: Increased memory limit from 512m to 4g. Ghidra requires a minimum
+    #of ~1GB just to start the JVM, and needs 2–4GB for real analysis.
+    #512MB would cause an OOM kill on every Ghidra invocation. The CPU limit
+    #is raised to 1.0 so analysis jobs complete in a reasonable time; lower
+    #it again if you need to share the host CPU more aggressively.
+    mem_limit: 4g
+    cpus: 1.0
+
+    volumes:
+      - .:/#
+    working_dir: /#
+    command: /bin/bash
+    stdin_open: true
+    tty: true

@@ -1,0 +1,90 @@
+#Dockerfile
+#
+#This Dockerfile builds a lightweight container with the required tools:
+#- Python 3 (with pip and boto3 for AWS Lambda integration)
+#- GDB (debugger)
+#- Pwndbg (GDB plugin)
+#- Binwalk (firmware analysis)
+#- Ghidra (reverse engineering, headless-capable)
+#- tshark (Wireshark CLI — required by pyshark for Bluetooth PCAP analysis)
+#
+#Base: Ubuntu 22.04 – Balanced for size and compatibility (avoids heavier full Ubuntu, but Alpine has issues with some tools like Pwndbg).
+#Multi-stage build: Used to separate Ghidra download from runtime, reducing final image size.
+#No GUI: Keeps resources low; use Ghidra's headless mode for analysis.
+#AWS Readiness: boto3 installed for Python scripts to invoke Lambda (e.g., via lambda_client.invoke()).
+#Cleanup: Removes caches and temp files to minimize size.
+
+#Stage 1: Builder stage – only used for downloading/extracting Ghidra.
+FROM ubuntu:22.04 AS builder
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    wget \
+    unzip \
+    ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# FIX: Ghidra is still fetched in the builder stage to keep the download
+# and extraction out of the runtime layer. Update this URL when a newer
+# Ghidra release is available (check https://github.com/NationalSecurityAgency/ghidra/releases).
+RUN wget https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.0_build/ghidra_11.0_PUBLIC_20231222.zip \
+        -O /tmp/ghidra.zip && \
+    unzip /tmp/ghidra.zip -d /opt && \
+    mv /opt/ghidra_* /opt/ghidra && \
+    rm /tmp/ghidra.zip
+
+#Stage 2: Runtime stage.
+FROM ubuntu:22.04
+
+# Install all runtime dependencies, including python3/python3-pip and the
+# build tools that pwndbg's setup.sh requires.
+#
+# FIX (critical – two related bugs):
+#   1. python3/python3-pip were missing from the builder stage, so
+#      pwndbg's setup.sh would fail immediately during the Docker build.
+#   2. Even if python3 had been present in the builder, setup.sh installs
+#      Python packages into the builder's system site-packages. Only the
+#      /pwndbg directory was copied to the runtime stage, leaving those
+#      pip dependencies behind. GDB would fail to load pwndbg at runtime
+#      with ImportError for every missing dependency.
+#   Solution: Install pwndbg entirely in the runtime stage so its Python
+#   packages land in the same environment that GDB will actually use.
+# tshark's apt package triggers an interactive debconf prompt asking whether
+# non-superusers should be able to capture packets. We pre-answer 'false' to
+# suppress that prompt so the build does not hang waiting for input.
+# Root inside the container can always run tshark regardless of this setting.
+RUN echo "wireshark-common wireshark-common/install-setuid boolean false" \
+        | debconf-set-selections
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    gdb \
+    git \
+    build-essential \
+    binwalk \
+    tshark \
+    openjdk-17-jre-headless \
+    ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Pwndbg in the runtime stage so all its Python dependencies are
+# available to GDB here.
+RUN git clone https://github.com/pwndbg/pwndbg /pwndbg && \
+    cd /pwndbg && \
+    ./setup.sh && \
+    echo "source /pwndbg/gdbinit.py" >> /root/.gdbinit
+
+#Copy Ghidra from builder.
+COPY --from=builder /opt/ghidra /opt/ghidra
+
+#Set Ghidra paths.
+ENV PATH="/opt/ghidra:/opt/ghidra/support:${PATH}"
+ENV GHIDRA_INSTALL_DIR="/opt/ghidra"
+
+#Install Python packages: boto3 for AWS integration, pyshark for Bluetooth PCAP analysis.
+RUN pip3 install --no-cache-dir boto3 pyshark
+
+#Default command: bash shell for interaction.
+CMD ["/bin/bash"]
