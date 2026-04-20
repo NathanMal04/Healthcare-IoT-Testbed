@@ -226,17 +226,94 @@ module "api" {
   enable_cognito_authorizer = true
   cognito_user_pool_arn     = module.auth.user_pool_arn
   project                   = var.name
-  environment           = "dev"
+  environment               = "dev"
 
-  # Set deploy = true and uncomment deployment_trigger once you add your first route
-  # deploy             = true
-  # deployment_trigger = sha1(jsonencode([
-  #   module.route_example.resource_id,
-  # ]))
+  deploy = true
+  deployment_trigger = sha1(jsonencode([
+    aws_api_gateway_resource.uploads_presign.id,
+    aws_api_gateway_resource.uploads_complete.id,
+  ]))
 }
 
 # --- API routes ---
 # Each route maps a path + method to a Lambda function.
+#
+# NOTE: the api_gateway_route module is only correct for top-level paths. For
+# nested paths (e.g. /uploads/presign) the module's source_arn would resolve
+# to /*/POST/presign instead of /*/POST/uploads/presign, causing a 403 on every
+# invocation. Nested routes must be defined inline, as shown below.
+
+# /uploads parent resource
+resource "aws_api_gateway_resource" "uploads" {
+  rest_api_id = module.api.rest_api_id
+  parent_id   = module.api.root_resource_id
+  path_part   = "uploads"
+}
+
+# POST /uploads/presign
+resource "aws_api_gateway_resource" "uploads_presign" {
+  rest_api_id = module.api.rest_api_id
+  parent_id   = aws_api_gateway_resource.uploads.id
+  path_part   = "presign"
+}
+
+resource "aws_api_gateway_method" "uploads_presign_post" {
+  rest_api_id   = module.api.rest_api_id
+  resource_id   = aws_api_gateway_resource.uploads_presign.id
+  http_method   = "POST"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = module.api.cognito_authorizer_id
+}
+
+resource "aws_api_gateway_integration" "uploads_presign_post" {
+  rest_api_id             = module.api.rest_api_id
+  resource_id             = aws_api_gateway_resource.uploads_presign.id
+  http_method             = aws_api_gateway_method.uploads_presign_post.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = module.uploads_presign_fn.invoke_arn
+}
+
+resource "aws_lambda_permission" "uploads_presign_post" {
+  statement_id  = "AllowAPIGateway-uploads-presign-POST"
+  action        = "lambda:InvokeFunction"
+  function_name = module.uploads_presign_fn.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api.execution_arn}/*/POST/uploads/presign"
+}
+
+# POST /uploads/complete
+resource "aws_api_gateway_resource" "uploads_complete" {
+  rest_api_id = module.api.rest_api_id
+  parent_id   = aws_api_gateway_resource.uploads.id
+  path_part   = "complete"
+}
+
+resource "aws_api_gateway_method" "uploads_complete_post" {
+  rest_api_id   = module.api.rest_api_id
+  resource_id   = aws_api_gateway_resource.uploads_complete.id
+  http_method   = "POST"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = module.api.cognito_authorizer_id
+}
+
+resource "aws_api_gateway_integration" "uploads_complete_post" {
+  rest_api_id             = module.api.rest_api_id
+  resource_id             = aws_api_gateway_resource.uploads_complete.id
+  http_method             = aws_api_gateway_method.uploads_complete_post.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = module.uploads_complete_fn.invoke_arn
+}
+
+resource "aws_lambda_permission" "uploads_complete_post" {
+  statement_id  = "AllowAPIGateway-uploads-complete-POST"
+  action        = "lambda:InvokeFunction"
+  function_name = module.uploads_complete_fn.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api.execution_arn}/*/POST/uploads/complete"
+}
+#
 #
 # Public route (no auth):
 #   module "route_health" {
