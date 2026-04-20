@@ -158,6 +158,23 @@ resource "aws_iam_policy" "lambda_dynamodb" {
   })
 }
 
+resource "aws_iam_policy" "lambda_s3_uploads" {
+  name = "${var.name}-lambda-s3-uploads"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:HeadObject"
+      ]
+      Resource = "${module.data_lake_bucket.bucket_arn}/devices/*"
+    }]
+  })
+}
+
 module "api" {
   source = "../../modules/api_gateway"
 
