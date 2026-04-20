@@ -10,8 +10,9 @@ It has been tested on the following platforms using Python 2.7:
 
 ## Related Links
 
-Bluefruit LE Sniffer product page: https://www.adafruit.com/product/2269
+Bluefruit LE Sniffer Product page: https://www.adafruit.com/product/2269
 Bluefruit LE Sniffer Learning Guide: https://learn.adafruit.com/introducing-the-adafruit-bluefruit-le-sniffer/introduction
+Bluetooth LE Sniffer Firmware: https://www.silabs.com/software-and-tools/usb-to-uart-bridge-vcp-drivers?tab=downloads
 
 # Sniffer Python Wrapper
 
