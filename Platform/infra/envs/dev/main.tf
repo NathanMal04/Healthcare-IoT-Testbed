@@ -230,8 +230,8 @@ module "api" {
 
   deploy = true
   deployment_trigger = sha1(jsonencode([
-    aws_api_gateway_resource.uploads_presign.id,
-    aws_api_gateway_resource.uploads_complete.id,
+    aws_api_gateway_integration.uploads_presign_post.id,
+    aws_api_gateway_integration.uploads_complete_post.id,
   ]))
 }
 
