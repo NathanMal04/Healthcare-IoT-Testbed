@@ -16,6 +16,8 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+     env:
+      TF_VAR_aws_profile: ""
     defaults:
       run:
         working-directory: Platform/infra/envs/dev
