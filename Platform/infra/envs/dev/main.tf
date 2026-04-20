@@ -197,6 +197,27 @@ module "uploads_presign_fn" {
   environment = "dev"
 }
 
+module "uploads_complete_fn" {
+  source        = "../../modules/lambda"
+  function_name = "${var.name}-uploads-complete"
+  source_dir    = "../../../services/lambdas/uploads-complete"
+  handler       = "lambda_function.handler"
+  runtime       = "python3.12"
+
+  additional_policy_arns = [
+    aws_iam_policy.lambda_dynamodb.arn,
+    aws_iam_policy.lambda_s3_uploads.arn,
+  ]
+
+  environment_variables = {
+    METADATA_TABLE_NAME = module.metadata_table.table_name
+    DATA_LAKE_BUCKET    = module.data_lake_bucket.bucket_name
+  }
+
+  project     = var.name
+  environment = "dev"
+}
+
 module "api" {
   source = "../../modules/api_gateway"
 
