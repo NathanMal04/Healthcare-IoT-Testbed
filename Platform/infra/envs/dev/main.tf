@@ -47,7 +47,7 @@ module "data_lake_bucket" {
 
   cors_rules = [{
     allowed_headers = ["*"]
-    allowed_methods = ["PUT", "OPTIONS"]
+    allowed_methods = ["PUT"]
     allowed_origins = ["https://vzoniq.com", "http://localhost:3000"]
     expose_headers  = ["ETag"]
     max_age_seconds = 3000
