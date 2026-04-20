@@ -9,7 +9,7 @@ It has been tested on the following platforms using Python 2.7:
 - Windows 10 x86
 - Ubuntu 14.04
 
-Log file(s) default location in Windows 10: C:\Users\YOUR_USERNAME\AppData\Roaming\Nordic Semiconductor\Sniffer\logs\
+PCAP/Log file(s) default location in Windows 10: C:\Users\YOUR_USERNAME\AppData\Roaming\Nordic Semiconductor\Sniffer\logs\
 
 ## Related Links
 
