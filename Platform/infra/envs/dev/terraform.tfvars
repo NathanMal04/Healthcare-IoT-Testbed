@@ -6,3 +6,6 @@ name        = "healthcare-iot-testbed-dev"
 
 cognito_callback_urls = ["https://localhost:3000"]
 cognito_logout_urls   = ["https://localhost:3000"]
+
+domain_name    = "vzoniq.com"
+domain_aliases = ["www.vzoniq.com"]

@@ -18,6 +18,9 @@ module "cdn" {
   s3_bucket_arn                  = module.web_bucket.bucket_arn
   project                        = var.name
   environment                    = "dev"
+
+   aliases             = [var.domain_name, "www.${var.domain_name}"]
+  acm_certificate_arn = aws_acm_certificate.frontend.arn
 }
 
 # Cognito User Pool for authentication
@@ -41,6 +44,14 @@ module "data_lake_bucket" {
   bucket_name = "${var.name}-data-lake"
   project     = var.name
   environment = "dev"
+
+  cors_rules = [{
+    allowed_headers = ["*"]
+    allowed_methods = ["PUT"]
+    allowed_origins = ["https://vzoniq.com", "http://localhost:3000"]
+    expose_headers  = ["ETag"]
+    max_age_seconds = 3000
+  }]
 }
 
 # Single-table design for all entity metadata (devices, tests, scripts, tools)
@@ -51,6 +62,21 @@ module "metadata_table" {
 
   hash_key  = "pk"
   range_key = "sk"
+
+  attributes = [
+    { name = "pk", type = "S" },
+    { name = "sk", type = "S" },
+  ]
+
+  project     = var.name
+  environment = "dev"
+}
+
+module "database" {
+  source      = "../../modules/dynamodb"
+  table_name  = "${var.name}-data"
+  hash_key    = "pk"
+  range_key   = "sk"
 
   attributes = [
     { name = "pk", type = "S" },
@@ -76,6 +102,8 @@ module "users_table" {
   project     = var.name
   environment = "dev"
 }
+
+
 
 module "post_confirmation_create_user_fn" {
   source        = "../../modules/lambda"
@@ -130,6 +158,66 @@ resource "aws_iam_policy" "lambda_dynamodb" {
   })
 }
 
+resource "aws_iam_policy" "lambda_s3_uploads" {
+  name = "${var.name}-lambda-s3-uploads"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:HeadObject"
+      ]
+      Resource = "${module.data_lake_bucket.bucket_arn}/devices/*"
+    }]
+  })
+}
+
+module "uploads_presign_fn" {
+  source        = "../../modules/lambda"
+  function_name = "${var.name}-uploads-presign"
+  source_dir    = "../../../services/lambdas/uploads-presign"
+  handler       = "lambda_function.handler"
+  runtime       = "python3.12"
+
+  additional_policy_arns = [
+    aws_iam_policy.lambda_dynamodb.arn,
+    aws_iam_policy.lambda_s3_uploads.arn,
+  ]
+
+  environment_variables = {
+    METADATA_TABLE_NAME = module.metadata_table.table_name
+    DATA_LAKE_BUCKET    = module.data_lake_bucket.bucket_name
+    PRESIGN_EXPIRES_SEC = "300"
+  }
+
+  project     = var.name
+  environment = "dev"
+}
+
+module "uploads_complete_fn" {
+  source        = "../../modules/lambda"
+  function_name = "${var.name}-uploads-complete"
+  source_dir    = "../../../services/lambdas/uploads-complete"
+  handler       = "lambda_function.handler"
+  runtime       = "python3.12"
+
+  additional_policy_arns = [
+    aws_iam_policy.lambda_dynamodb.arn,
+    aws_iam_policy.lambda_s3_uploads.arn,
+  ]
+
+  environment_variables = {
+    METADATA_TABLE_NAME = module.metadata_table.table_name
+    DATA_LAKE_BUCKET    = module.data_lake_bucket.bucket_name
+  }
+
+  project     = var.name
+  environment = "dev"
+}
+
 module "api" {
   source = "../../modules/api_gateway"
 
@@ -138,17 +226,94 @@ module "api" {
   enable_cognito_authorizer = true
   cognito_user_pool_arn     = module.auth.user_pool_arn
   project                   = var.name
-  environment           = "dev"
+  environment               = "dev"
 
-  # Set deploy = true and uncomment deployment_trigger once you add your first route
-  # deploy             = true
-  # deployment_trigger = sha1(jsonencode([
-  #   module.route_example.resource_id,
-  # ]))
+  deploy = true
+  deployment_trigger = sha1(jsonencode([
+    aws_api_gateway_integration.uploads_presign_post.id,
+    aws_api_gateway_integration.uploads_complete_post.id,
+  ]))
 }
 
 # --- API routes ---
 # Each route maps a path + method to a Lambda function.
+#
+# NOTE: the api_gateway_route module is only correct for top-level paths. For
+# nested paths (e.g. /uploads/presign) the module's source_arn would resolve
+# to /*/POST/presign instead of /*/POST/uploads/presign, causing a 403 on every
+# invocation. Nested routes must be defined inline, as shown below.
+
+# /uploads parent resource
+resource "aws_api_gateway_resource" "uploads" {
+  rest_api_id = module.api.rest_api_id
+  parent_id   = module.api.root_resource_id
+  path_part   = "uploads"
+}
+
+# POST /uploads/presign
+resource "aws_api_gateway_resource" "uploads_presign" {
+  rest_api_id = module.api.rest_api_id
+  parent_id   = aws_api_gateway_resource.uploads.id
+  path_part   = "presign"
+}
+
+resource "aws_api_gateway_method" "uploads_presign_post" {
+  rest_api_id   = module.api.rest_api_id
+  resource_id   = aws_api_gateway_resource.uploads_presign.id
+  http_method   = "POST"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = module.api.cognito_authorizer_id
+}
+
+resource "aws_api_gateway_integration" "uploads_presign_post" {
+  rest_api_id             = module.api.rest_api_id
+  resource_id             = aws_api_gateway_resource.uploads_presign.id
+  http_method             = aws_api_gateway_method.uploads_presign_post.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = module.uploads_presign_fn.invoke_arn
+}
+
+resource "aws_lambda_permission" "uploads_presign_post" {
+  statement_id  = "AllowAPIGateway-uploads-presign-POST"
+  action        = "lambda:InvokeFunction"
+  function_name = module.uploads_presign_fn.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api.execution_arn}/*/POST/uploads/presign"
+}
+
+# POST /uploads/complete
+resource "aws_api_gateway_resource" "uploads_complete" {
+  rest_api_id = module.api.rest_api_id
+  parent_id   = aws_api_gateway_resource.uploads.id
+  path_part   = "complete"
+}
+
+resource "aws_api_gateway_method" "uploads_complete_post" {
+  rest_api_id   = module.api.rest_api_id
+  resource_id   = aws_api_gateway_resource.uploads_complete.id
+  http_method   = "POST"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = module.api.cognito_authorizer_id
+}
+
+resource "aws_api_gateway_integration" "uploads_complete_post" {
+  rest_api_id             = module.api.rest_api_id
+  resource_id             = aws_api_gateway_resource.uploads_complete.id
+  http_method             = aws_api_gateway_method.uploads_complete_post.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = module.uploads_complete_fn.invoke_arn
+}
+
+resource "aws_lambda_permission" "uploads_complete_post" {
+  statement_id  = "AllowAPIGateway-uploads-complete-POST"
+  action        = "lambda:InvokeFunction"
+  function_name = module.uploads_complete_fn.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api.execution_arn}/*/POST/uploads/complete"
+}
+#
 #
 # Public route (no auth):
 #   module "route_health" {

@@ -26,3 +26,13 @@ variable "cognito_logout_urls" {
   default = ["https://localhost:3000", "d83vem2v9vlw.cloudfront.net"]
 }
 
+variable "domain_name" {
+  description = "Primary custom domain for the frontend"
+  type        = string
+}
+
+variable "domain_aliases" {
+  description = "Additional custom domains for the frontend certificate"
+  type        = list(string)
+  default     = []
+}

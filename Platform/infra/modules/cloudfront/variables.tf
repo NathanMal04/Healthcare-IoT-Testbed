@@ -28,3 +28,15 @@ variable "environment" {
   description = "Environment tag value (dev/staging/prod)."
   type        = string
 }
+
+variable "aliases" {
+  description = "Custom domain aliases for the CloudFront distribution"
+  type        = list(string)
+  default     = []
+}
+
+variable "acm_certificate_arn" {
+  description = "ACM certificate ARN for the CloudFront distribution"
+  type        = string
+  default     = null
+}
