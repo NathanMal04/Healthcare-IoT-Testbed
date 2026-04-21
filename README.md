@@ -142,3 +142,47 @@ The workflow reads the S3 bucket name, CloudFront distribution ID, and Cognito I
 |---|---|
 | `AWS_ROLE_ARN` | IAM role ARN with S3 + CloudFront permissions |
 | `AWS_REGION` | AWS region (e.g. `us-east-1`) |
+
+---
+
+## BLE Sniffing (Adafruit Bluefruit LE Sniffer)
+
+This project includes a Python API wrapper for [Adafruit's Bluefruit LE Sniffer](https://www.adafruit.com/product/2269), used to capture Bluetooth LE traffic from nearby IoT devices.
+
+### Requirements
+- **Python 2.7**
+- **pySerial**
+
+Tested on: OSX 10.10, Windows 7 x64, Windows 10 x86, Ubuntu 14.04.
+
+### Usage
+
+Run `sniffer.py` with the serial port of your sniffer device:
+
+```bash
+# macOS
+python sniffer.py /dev/tty.usbmodem1412311
+
+# Linux (requires sudo for log file creation)
+sudo python sniffer.py /dev/ttyACM0
+
+# Windows
+python sniffer.py COM3
+```
+
+The sniffer will scan for nearby BLE devices for 5 seconds and present a numbered list. Select a device to begin capturing — traffic is logged to `logs/capture.pcap`, which can be opened in **Wireshark**.
+
+Press **CTRL+C** to stop sniffing and close the log file.
+
+> **Tip:** If you see unexpected errors, try unplugging and re-inserting the sniffer before starting a new session.
+
+### Log File Location
+| Platform | Default Path |
+|---|---|
+| Windows 10 | `C:\Users\YOUR_USERNAME\AppData\Roaming\Nordic Semiconductor\Sniffer\logs\` |
+| macOS / Linux | `logs/capture.pcap` (relative to script directory) |
+
+### Related Links
+- [Bluefruit LE Sniffer Product Page](https://www.adafruit.com/product/2269)
+- [Bluefruit LE Sniffer Learning Guide](https://learn.adafruit.com/introducing-the-adafruit-bluefruit-le-sniffer/introduction)
+- [Sniffer Firmware (Silicon Labs VCP Chipset Drivers)](https://www.silabs.com/software-and-tools/usb-to-uart-bridge-vcp-drivers?tab=downloads)
