@@ -1,6 +1,6 @@
 ## Purpose
 
-* Serves as the client-side UI for demo and ultimately to run local tools, augmenting the web dashboard, which shows CVE information and other documentation.
+* Serves as the client-side UI for demos and running local tools, augmenting the web dashboard, which shows CVE database information and other documentation.
 
 ## Getting started
 
