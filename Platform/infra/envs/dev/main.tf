@@ -19,7 +19,7 @@ module "cdn" {
   project                        = var.name
   environment                    = "dev"
 
-   aliases             = [var.domain_name, "www.${var.domain_name}"]
+  aliases             = [var.domain_name, "www.${var.domain_name}"]
   acm_certificate_arn = aws_acm_certificate.frontend.arn
 }
 
@@ -33,8 +33,8 @@ module "auth" {
 
   post_confirmation_lambda_arn = module.post_confirmation_create_user_fn.function_arn
 
-  project       = var.name
-  environment   = "dev"
+  project     = var.name
+  environment = "dev"
 }
 
 # S3 bucket for general data storage
@@ -73,10 +73,10 @@ module "metadata_table" {
 }
 
 module "database" {
-  source      = "../../modules/dynamodb"
-  table_name  = "${var.name}-data"
-  hash_key    = "pk"
-  range_key   = "sk"
+  source     = "../../modules/dynamodb"
+  table_name = "${var.name}-data"
+  hash_key   = "pk"
+  range_key  = "sk"
 
   attributes = [
     { name = "pk", type = "S" },
