@@ -6,8 +6,7 @@ from datetime import datetime, timezone
 from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
 
-dynamodb = boto3.resource("dynamodb")
-client = dynamodb.meta.client
+client = boto3.client("dynamodb")
 serializer = TypeSerializer()
 
 TABLE = os.environ["METADATA_TABLE_NAME"]
