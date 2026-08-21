@@ -1,0 +1,49 @@
+name: Terraform PR Check
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "Platform/infra/**"
+      - ".github/workflows/terraform-pr-check.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    env:
+      TF_VAR_aws_profile: ""
+    defaults:
+      run:
+        working-directory: Platform/infra/envs/dev
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Format Check
+        working-directory: Platform/infra
+        run: terraform fmt -check -diff envs/dev/main.tf
+
+      - name: Terraform Init
+        run: terraform init -input=false
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        run: terraform plan -var 'aws_profile=' -input=false
