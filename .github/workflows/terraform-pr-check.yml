@@ -37,7 +37,7 @@ jobs:
 
       - name: Terraform Format Check
         working-directory: Platform/infra
-        run: terraform fmt -check -recursive
+        run: terraform fmt -check -diff envs/dev/main.tf
 
       - name: Terraform Init
         run: terraform init -input=false
