@@ -175,6 +175,43 @@ resource "aws_iam_policy" "lambda_s3_uploads" {
   })
 }
 
+# Scoped IAM policies for the Device Lambdas — each gets only the DynamoDB
+# actions it actually performs, rather than the broad lambda_dynamodb policy
+# used by the upload/auth Lambdas.
+#
+# create-device writes 3 items (device metadata + both relationship rows) via
+# TransactWriteItems, all as Put operations. Per AWS's DynamoDB transactions
+# IAM guide, permissions for Put/Update/Delete/Get actions inside a
+# transaction are governed entirely by the underlying PutItem/UpdateItem/
+# DeleteItem/GetItem permissions — dynamodb:TransactWriteItems itself is not
+# a required grant (see the example policies at
+# https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transaction-apis-iam.html).
+resource "aws_iam_policy" "lambda_dynamodb_create_device" {
+  name = "${var.name}-lambda-create-device"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "dynamodb:PutItem"
+      Resource = module.metadata_table.table_arn
+    }]
+  })
+}
+
+resource "aws_iam_policy" "lambda_dynamodb_list_devices" {
+  name = "${var.name}-lambda-list-devices"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "dynamodb:Query"
+      Resource = module.metadata_table.table_arn
+    }]
+  })
+}
+
 module "uploads_presign_fn" {
   source        = "../../modules/lambda"
   function_name = "${var.name}-uploads-presign"
@@ -218,6 +255,41 @@ module "uploads_complete_fn" {
   environment = "dev"
 }
 
+module "create_device_fn" {
+  source        = "../../modules/lambda"
+  function_name = "${var.name}-create-device"
+  source_dir    = "../../../services/lambdas/create-device"
+  handler       = "lambda_function.handler"
+  runtime       = "python3.12"
+
+  additional_policy_arns = [aws_iam_policy.lambda_dynamodb_create_device.arn]
+
+  environment_variables = {
+    METADATA_TABLE_NAME = module.metadata_table.table_name
+    DATA_LAKE_BUCKET    = module.data_lake_bucket.bucket_name
+  }
+
+  project     = var.name
+  environment = "dev"
+}
+
+module "list_devices_fn" {
+  source        = "../../modules/lambda"
+  function_name = "${var.name}-list-devices"
+  source_dir    = "../../../services/lambdas/list-devices"
+  handler       = "lambda_function.handler"
+  runtime       = "python3.12"
+
+  additional_policy_arns = [aws_iam_policy.lambda_dynamodb_list_devices.arn]
+
+  environment_variables = {
+    METADATA_TABLE_NAME = module.metadata_table.table_name
+  }
+
+  project     = var.name
+  environment = "dev"
+}
+
 module "api" {
   source = "../../modules/api_gateway"
 
@@ -232,6 +304,8 @@ module "api" {
   deployment_trigger = sha1(jsonencode([
     aws_api_gateway_integration.uploads_presign_post.id,
     aws_api_gateway_integration.uploads_complete_post.id,
+    aws_api_gateway_integration.devices_post.id,
+    aws_api_gateway_integration.devices_get.id,
   ]))
 }
 
@@ -312,6 +386,70 @@ resource "aws_lambda_permission" "uploads_complete_post" {
   function_name = module.uploads_complete_fn.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${module.api.execution_arn}/*/POST/uploads/complete"
+}
+
+# /devices — GET and POST both live on the same top-level resource. NOTE:
+# the generic api_gateway_route module creates its own aws_api_gateway_resource
+# per call, so calling it twice with the same path_part ("devices") would try
+# to create two resources at the same path and conflict. Hand-rolled here for
+# the same reason the /uploads/* routes above are hand-rolled.
+
+resource "aws_api_gateway_resource" "devices" {
+  rest_api_id = module.api.rest_api_id
+  parent_id   = module.api.root_resource_id
+  path_part   = "devices"
+}
+
+# POST /devices
+resource "aws_api_gateway_method" "devices_post" {
+  rest_api_id   = module.api.rest_api_id
+  resource_id   = aws_api_gateway_resource.devices.id
+  http_method   = "POST"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = module.api.cognito_authorizer_id
+}
+
+resource "aws_api_gateway_integration" "devices_post" {
+  rest_api_id             = module.api.rest_api_id
+  resource_id             = aws_api_gateway_resource.devices.id
+  http_method             = aws_api_gateway_method.devices_post.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = module.create_device_fn.invoke_arn
+}
+
+resource "aws_lambda_permission" "devices_post" {
+  statement_id  = "AllowAPIGateway-devices-POST"
+  action        = "lambda:InvokeFunction"
+  function_name = module.create_device_fn.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api.execution_arn}/*/POST/devices"
+}
+
+# GET /devices
+resource "aws_api_gateway_method" "devices_get" {
+  rest_api_id   = module.api.rest_api_id
+  resource_id   = aws_api_gateway_resource.devices.id
+  http_method   = "GET"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = module.api.cognito_authorizer_id
+}
+
+resource "aws_api_gateway_integration" "devices_get" {
+  rest_api_id             = module.api.rest_api_id
+  resource_id             = aws_api_gateway_resource.devices.id
+  http_method             = aws_api_gateway_method.devices_get.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = module.list_devices_fn.invoke_arn
+}
+
+resource "aws_lambda_permission" "devices_get" {
+  statement_id  = "AllowAPIGateway-devices-GET"
+  action        = "lambda:InvokeFunction"
+  function_name = module.list_devices_fn.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api.execution_arn}/*/GET/devices"
 }
 #
 #

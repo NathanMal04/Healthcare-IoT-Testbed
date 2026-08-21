@@ -50,3 +50,10 @@ secrets.env
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+
+
+########################################
+# Python
+########################################
+__pycache__/
+*.pyc
