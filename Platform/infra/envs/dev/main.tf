@@ -262,8 +262,6 @@ module "create_device_fn" {
   handler       = "lambda_function.handler"
   runtime       = "python3.12"
 
-  additional_policy_arns = [aws_iam_policy.lambda_dynamodb_create_device.arn]
-
   environment_variables = {
     METADATA_TABLE_NAME = module.metadata_table.table_name
     DATA_LAKE_BUCKET    = module.data_lake_bucket.bucket_name
@@ -273,6 +271,11 @@ module "create_device_fn" {
   environment = "dev"
 }
 
+resource "aws_iam_role_policy_attachment" "create_device_dynamodb" {
+  role       = module.create_device_fn.role_name
+  policy_arn = aws_iam_policy.lambda_dynamodb_create_device.arn
+}
+
 module "list_devices_fn" {
   source        = "../../modules/lambda"
   function_name = "${var.name}-list-devices"
@@ -280,14 +283,17 @@ module "list_devices_fn" {
   handler       = "lambda_function.handler"
   runtime       = "python3.12"
 
-  additional_policy_arns = [aws_iam_policy.lambda_dynamodb_list_devices.arn]
-
   environment_variables = {
     METADATA_TABLE_NAME = module.metadata_table.table_name
   }
 
   project     = var.name
   environment = "dev"
+}
+
+resource "aws_iam_role_policy_attachment" "list_devices_dynamodb" {
+  role       = module.list_devices_fn.role_name
+  policy_arn = aws_iam_policy.lambda_dynamodb_list_devices.arn
 }
 
 module "api" {
