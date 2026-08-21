@@ -78,6 +78,15 @@ def handler(event, context):
             reasons = e.response.get("CancellationReasons", [])
             if any(r.get("Code") == "ConditionalCheckFailed" for r in reasons):
                 return _resp(409, {"error": "Device already exists"})
+            print(json.dumps({
+                "event": "create_device_transaction_canceled",
+                "deviceId": device_id,
+                "message": e.response["Error"].get("Message"),
+                "cancellationReasons": [
+                    {"code": r.get("Code"), "message": r.get("Message")}
+                    for r in reasons
+                ],
+            }))
             return _resp(500, {"error": "Failed to create device"})
         raise
 
