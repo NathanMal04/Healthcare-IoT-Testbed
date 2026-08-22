@@ -312,6 +312,9 @@ module "api" {
     aws_api_gateway_integration.uploads_complete_post.id,
     aws_api_gateway_integration.devices_post.id,
     aws_api_gateway_integration.devices_get.id,
+    aws_api_gateway_integration.devices_options.id,
+    aws_api_gateway_gateway_response.default_4xx.id,
+    aws_api_gateway_gateway_response.default_5xx.id,
   ]))
 }
 
@@ -456,6 +459,75 @@ resource "aws_lambda_permission" "devices_get" {
   function_name = module.list_devices_fn.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${module.api.execution_arn}/*/GET/devices"
+}
+
+# OPTIONS /devices — CORS preflight. MOCK integration, no Lambda invocation,
+# no Cognito auth: browsers never send the Authorization header on the
+# automatic preflight, so requiring auth here would make every preflight
+# fail with 401 and permanently block the real GET/POST.
+resource "aws_api_gateway_method" "devices_options" {
+  rest_api_id   = module.api.rest_api_id
+  resource_id   = aws_api_gateway_resource.devices.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "devices_options" {
+  rest_api_id = module.api.rest_api_id
+  resource_id = aws_api_gateway_resource.devices.id
+  http_method = aws_api_gateway_method.devices_options.http_method
+  type        = "MOCK"
+
+  request_templates = {
+    "application/json" = "{\"statusCode\": 200}"
+  }
+}
+
+resource "aws_api_gateway_method_response" "devices_options_200" {
+  rest_api_id = module.api.rest_api_id
+  resource_id = aws_api_gateway_resource.devices.id
+  http_method = aws_api_gateway_method.devices_options.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Headers" = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "devices_options_200" {
+  rest_api_id = module.api.rest_api_id
+  resource_id = aws_api_gateway_resource.devices.id
+  http_method = aws_api_gateway_method.devices_options.http_method
+  status_code = aws_api_gateway_method_response.devices_options_200.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = "'https://vzoniq.com'"
+    "method.response.header.Access-Control-Allow-Methods" = "'GET,POST,OPTIONS'"
+    "method.response.header.Access-Control-Allow-Headers" = "'Authorization,Content-Type'"
+  }
+}
+
+# CORS headers for API Gateway's own generated errors (Cognito 401/403,
+# throttling, unhandled Lambda 502) — these never reach the Lambda's
+# _resp(), so the header has to be added at the gateway-response level.
+resource "aws_api_gateway_gateway_response" "default_4xx" {
+  rest_api_id   = module.api.rest_api_id
+  response_type = "DEFAULT_4XX"
+
+  response_parameters = {
+    "gatewayresponse.header.Access-Control-Allow-Origin" = "'https://vzoniq.com'"
+  }
+}
+
+resource "aws_api_gateway_gateway_response" "default_5xx" {
+  rest_api_id   = module.api.rest_api_id
+  response_type = "DEFAULT_5XX"
+
+  response_parameters = {
+    "gatewayresponse.header.Access-Control-Allow-Origin" = "'https://vzoniq.com'"
+  }
 }
 #
 #
