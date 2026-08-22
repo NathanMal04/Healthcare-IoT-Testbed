@@ -41,6 +41,7 @@ jobs:
           echo "distribution_id=$(terraform output -raw cloudfront_distribution_id)" >> "$GITHUB_OUTPUT"
           echo "cognito_user_pool_id=$(terraform output -raw cognito_user_pool_id)" >> "$GITHUB_OUTPUT"
           echo "cognito_client_id=$(terraform output -raw cognito_user_pool_client_id)" >> "$GITHUB_OUTPUT"
+          echo "api_invoke_url=$(terraform output -raw api_invoke_url)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -58,6 +59,7 @@ jobs:
         env:
           NEXT_PUBLIC_COGNITO_USER_POOL_ID: ${{ steps.tf.outputs.cognito_user_pool_id }}
           NEXT_PUBLIC_COGNITO_CLIENT_ID: ${{ steps.tf.outputs.cognito_client_id }}
+          NEXT_PUBLIC_API_URL: ${{ steps.tf.outputs.api_invoke_url }}
         run: npm run build
 
       - name: Sync to S3

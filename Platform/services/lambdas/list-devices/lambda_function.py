@@ -35,6 +35,9 @@ def handler(event, context):
 def _resp(status, body):
     return {
         "statusCode": status,
-        "headers": {"Content-Type": "application/json"},
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "https://vzoniq.com",
+        },
         "body": json.dumps(body),
     }
