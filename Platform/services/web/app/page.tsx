@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { getDevices, type Device } from "@/lib/devices";
+import { getDevices, createDevice, type Device } from "@/lib/devices";
 
 export default function DashboardPage() {
   const { user, loading } = useAuth();
@@ -13,38 +13,84 @@ export default function DashboardPage() {
   const [devicesLoading, setDevicesLoading] = useState(true);
   const [devicesError, setDevicesError] = useState<string | null>(null);
 
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [type, setType] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!loading && !user) router.push("/login");
   }, [user, loading, router]);
 
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  async function loadDevices() {
+    if (!isMountedRef.current) return;
+    setDevicesLoading(true);
+    setDevicesError(null);
+    try {
+      const result = await getDevices();
+      if (isMountedRef.current) setDevices(result);
+    } catch (err) {
+      if (isMountedRef.current) {
+        setDevicesError(
+          err instanceof Error ? err.message : "Failed to load devices"
+        );
+      }
+    } finally {
+      if (isMountedRef.current) setDevicesLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (loading || !user) return;
-
-    let cancelled = false;
-
-    async function loadDevices() {
-      setDevicesLoading(true);
-      setDevicesError(null);
-      try {
-        const result = await getDevices();
-        if (!cancelled) setDevices(result);
-      } catch (err) {
-        if (!cancelled) {
-          setDevicesError(
-            err instanceof Error ? err.message : "Failed to load devices"
-          );
-        }
-      } finally {
-        if (!cancelled) setDevicesLoading(false);
-      }
-    }
-
     loadDevices();
-
-    return () => {
-      cancelled = true;
-    };
   }, [user, loading]);
+
+  function openAddModal() {
+    setIsAddOpen(true);
+  }
+
+  function closeAddModal() {
+    if (submitting) return;
+    setIsAddOpen(false);
+    setName("");
+    setType("");
+    setSubmitError(null);
+  }
+
+  const isFormValid = name.trim() !== "" && type.trim() !== "";
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmedName = name.trim();
+    const trimmedType = type.trim();
+    if (!trimmedName || !trimmedType || submitting) return;
+
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await createDevice({ name: trimmedName, type: trimmedType });
+      await loadDevices();
+      setIsAddOpen(false);
+      setName("");
+      setType("");
+      setSubmitError(null);
+    } catch (err) {
+      setSubmitError(
+        err instanceof Error ? err.message : "Failed to create device"
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   if (loading || !user) return null;
 
@@ -57,7 +103,10 @@ export default function DashboardPage() {
             Device vulnerability analysis overview
           </p>
         </div>
-        <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm">
+        <button
+          onClick={openAddModal}
+          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm"
+        >
           + Upload Device
         </button>
       </div>
@@ -113,6 +162,77 @@ export default function DashboardPage() {
           </table>
         )}
       </div>
+
+      {/* Add Device modal */}
+      {isAddOpen && (
+        <div
+          className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 px-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeAddModal();
+          }}
+        >
+          <div className="w-full max-w-sm bg-white rounded-2xl border border-slate-100 shadow-sm p-8">
+            <div className="mb-6">
+              <h2 className="text-xl font-bold text-slate-800 tracking-tight">Add Device</h2>
+              <p className="text-slate-400 text-sm mt-1">
+                Register a new device for vulnerability analysis
+              </p>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-500 uppercase tracking-wide mb-1.5">
+                  Device Name
+                </label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  disabled={submitting}
+                  className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
+                  placeholder="Philips IntelliVue MX800"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-500 uppercase tracking-wide mb-1.5">
+                  Device Type
+                </label>
+                <input
+                  type="text"
+                  value={type}
+                  onChange={(e) => setType(e.target.value)}
+                  disabled={submitting}
+                  className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
+                  placeholder="Patient Monitor"
+                />
+              </div>
+
+              {submitError && (
+                <p className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg">{submitError}</p>
+              )}
+
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closeAddModal}
+                  disabled={submitting}
+                  className="flex-1 bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-600 border border-slate-200 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting || !isFormValid}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
+                >
+                  {submitting ? "Creating…" : "Add Device"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
