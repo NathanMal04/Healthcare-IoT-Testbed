@@ -81,11 +81,15 @@ def handler(event, context):
         )
     except ClientError as e:
         code = e.response["Error"]["Code"]
-        if code in ("404", "NoSuchKey"):
+        if code in ("404", "NoSuchKey", "403"):
             # The backend cannot distinguish "still uploading", "browser
             # never sent it", and "upload silently failed" from a missing
             # object — none of those are a definitive verification failure,
             # so this is a retryable conflict, not a transition to failed.
+            # "403" is included alongside the missing-object codes because
+            # HeadObject with only s3:GetObject (no s3:ListBucket, kept out
+            # deliberately for least privilege) returns a bare 403 rather
+            # than 404 for a key that doesn't exist yet.
             return _resp(409, {"error": "Uploaded object not found yet; retry once the upload has completed"})
         raise
 
