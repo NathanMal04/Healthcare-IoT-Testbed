@@ -47,7 +47,7 @@ module "data_lake_bucket" {
 
   cors_rules = [{
     allowed_headers = ["*"]
-    allowed_methods = ["PUT"]
+    allowed_methods = ["PUT", "POST"]
     allowed_origins = ["https://vzoniq.com", "http://localhost:3000"]
     expose_headers  = ["ETag"]
     max_age_seconds = 3000
@@ -212,6 +212,94 @@ resource "aws_iam_policy" "lambda_dynamodb_list_devices" {
   })
 }
 
+# Scoped IAM policies for the Firmware Lambdas — same narrow-per-Lambda
+# philosophy as the Device Lambdas above, rather than the broad
+# lambda_dynamodb/lambda_s3_uploads policies used by the legacy upload
+# Lambdas.
+resource "aws_iam_policy" "lambda_dynamodb_presign_firmware" {
+  name = "${var.name}-lambda-presign-firmware"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem"
+      ]
+      Resource = module.metadata_table.table_arn
+    }]
+  })
+}
+
+resource "aws_iam_policy" "lambda_dynamodb_complete_firmware" {
+  name = "${var.name}-lambda-complete-firmware"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "dynamodb:GetItem",
+        "dynamodb:UpdateItem"
+      ]
+      Resource = module.metadata_table.table_arn
+    }]
+  })
+}
+
+resource "aws_iam_policy" "lambda_dynamodb_list_firmware" {
+  name = "${var.name}-lambda-list-firmware"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "dynamodb:GetItem",
+        "dynamodb:Query"
+      ]
+      Resource = module.metadata_table.table_arn
+    }]
+  })
+}
+
+# presign-firmware never calls an S3 API itself — generate_presigned_post is
+# a local SigV4 signing operation — but the browser's later upload is
+# authorized under this role's credentials, so s3:PutObject must still be
+# granted here for the resulting presigned POST to actually succeed.
+resource "aws_iam_policy" "lambda_s3_presign_firmware" {
+  name = "${var.name}-lambda-s3-presign-firmware"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "s3:PutObject"
+      Resource = "${module.data_lake_bucket.bucket_arn}/devices/*/firmware/*"
+    }]
+  })
+}
+
+# complete-firmware's head_object(..., ChecksumMode="ENABLED") call is
+# authorized under s3:GetObject — HeadObject has no separate IAM action.
+# s3:ListBucket is deliberately not granted; complete-firmware's own
+# ClientError handling treats the resulting 403-for-a-missing-key the same
+# as a 404 (see lambda_function.py).
+resource "aws_iam_policy" "lambda_s3_complete_firmware" {
+  name = "${var.name}-lambda-s3-complete-firmware"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "s3:GetObject"
+      Resource = "${module.data_lake_bucket.bucket_arn}/devices/*/firmware/*"
+    }]
+  })
+}
+
 module "uploads_presign_fn" {
   source        = "../../modules/lambda"
   function_name = "${var.name}-uploads-presign"
@@ -296,6 +384,79 @@ resource "aws_iam_role_policy_attachment" "list_devices_dynamodb" {
   policy_arn = aws_iam_policy.lambda_dynamodb_list_devices.arn
 }
 
+module "presign_firmware_fn" {
+  source        = "../../modules/lambda"
+  function_name = "${var.name}-presign-firmware"
+  source_dir    = "../../../services/lambdas/presign-firmware"
+  handler       = "lambda_function.handler"
+  runtime       = "python3.12"
+
+  environment_variables = {
+    METADATA_TABLE_NAME     = module.metadata_table.table_name
+    DATA_LAKE_BUCKET        = module.data_lake_bucket.bucket_name
+    PRESIGN_EXPIRES_SEC     = "300"
+    MAX_FIRMWARE_SIZE_BYTES = "26214400"
+  }
+
+  project     = var.name
+  environment = "dev"
+}
+
+resource "aws_iam_role_policy_attachment" "presign_firmware_dynamodb" {
+  role       = module.presign_firmware_fn.role_name
+  policy_arn = aws_iam_policy.lambda_dynamodb_presign_firmware.arn
+}
+
+resource "aws_iam_role_policy_attachment" "presign_firmware_s3" {
+  role       = module.presign_firmware_fn.role_name
+  policy_arn = aws_iam_policy.lambda_s3_presign_firmware.arn
+}
+
+module "complete_firmware_fn" {
+  source        = "../../modules/lambda"
+  function_name = "${var.name}-complete-firmware"
+  source_dir    = "../../../services/lambdas/complete-firmware"
+  handler       = "lambda_function.handler"
+  runtime       = "python3.12"
+
+  environment_variables = {
+    METADATA_TABLE_NAME = module.metadata_table.table_name
+  }
+
+  project     = var.name
+  environment = "dev"
+}
+
+resource "aws_iam_role_policy_attachment" "complete_firmware_dynamodb" {
+  role       = module.complete_firmware_fn.role_name
+  policy_arn = aws_iam_policy.lambda_dynamodb_complete_firmware.arn
+}
+
+resource "aws_iam_role_policy_attachment" "complete_firmware_s3" {
+  role       = module.complete_firmware_fn.role_name
+  policy_arn = aws_iam_policy.lambda_s3_complete_firmware.arn
+}
+
+module "list_firmware_fn" {
+  source        = "../../modules/lambda"
+  function_name = "${var.name}-list-firmware"
+  source_dir    = "../../../services/lambdas/list-firmware"
+  handler       = "lambda_function.handler"
+  runtime       = "python3.12"
+
+  environment_variables = {
+    METADATA_TABLE_NAME = module.metadata_table.table_name
+  }
+
+  project     = var.name
+  environment = "dev"
+}
+
+resource "aws_iam_role_policy_attachment" "list_firmware_dynamodb" {
+  role       = module.list_firmware_fn.role_name
+  policy_arn = aws_iam_policy.lambda_dynamodb_list_firmware.arn
+}
+
 module "api" {
   source = "../../modules/api_gateway"
 
@@ -313,6 +474,12 @@ module "api" {
     aws_api_gateway_integration.devices_post.id,
     aws_api_gateway_integration.devices_get.id,
     aws_api_gateway_integration.devices_options.id,
+    aws_api_gateway_integration.firmware_get.id,
+    aws_api_gateway_integration.firmware_options.id,
+    aws_api_gateway_integration.firmware_presign_post.id,
+    aws_api_gateway_integration.firmware_presign_options.id,
+    aws_api_gateway_integration.firmware_complete_post.id,
+    aws_api_gateway_integration.firmware_complete_options.id,
     aws_api_gateway_gateway_response.default_4xx.id,
     aws_api_gateway_gateway_response.default_5xx.id,
   ]))
@@ -519,6 +686,10 @@ resource "aws_api_gateway_gateway_response" "default_4xx" {
   response_parameters = {
     "gatewayresponse.header.Access-Control-Allow-Origin" = "'https://vzoniq.com'"
   }
+
+  response_templates = {
+    "application/json" = "{\"message\":$context.error.messageString}"
+  }
 }
 
 resource "aws_api_gateway_gateway_response" "default_5xx" {
@@ -527,6 +698,263 @@ resource "aws_api_gateway_gateway_response" "default_5xx" {
 
   response_parameters = {
     "gatewayresponse.header.Access-Control-Allow-Origin" = "'https://vzoniq.com'"
+  }
+
+  response_templates = {
+    "application/json" = "{\"message\":$context.error.messageString}"
+  }
+}
+
+# --- Firmware routes ---
+# /devices/{deviceId}/firmware            GET  -> list-firmware
+# /devices/{deviceId}/firmware/presign    POST -> presign-firmware
+# /devices/{deviceId}/firmware/{version}/complete  POST -> complete-firmware
+#
+# Hand-rolled for the same reason as /uploads/* and /devices above: this
+# tree is several levels deep, which the generic api_gateway_route module
+# (one level of nesting only) cannot express. {deviceId} and {version} are
+# this API's first path-parameter resources.
+
+resource "aws_api_gateway_resource" "devices_device_id" {
+  rest_api_id = module.api.rest_api_id
+  parent_id   = aws_api_gateway_resource.devices.id
+  path_part   = "{deviceId}"
+}
+
+resource "aws_api_gateway_resource" "devices_device_id_firmware" {
+  rest_api_id = module.api.rest_api_id
+  parent_id   = aws_api_gateway_resource.devices_device_id.id
+  path_part   = "firmware"
+}
+
+# GET /devices/{deviceId}/firmware
+resource "aws_api_gateway_method" "firmware_get" {
+  rest_api_id   = module.api.rest_api_id
+  resource_id   = aws_api_gateway_resource.devices_device_id_firmware.id
+  http_method   = "GET"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = module.api.cognito_authorizer_id
+}
+
+resource "aws_api_gateway_integration" "firmware_get" {
+  rest_api_id             = module.api.rest_api_id
+  resource_id             = aws_api_gateway_resource.devices_device_id_firmware.id
+  http_method             = aws_api_gateway_method.firmware_get.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = module.list_firmware_fn.invoke_arn
+}
+
+resource "aws_lambda_permission" "firmware_get" {
+  statement_id  = "AllowAPIGateway-firmware-GET"
+  action        = "lambda:InvokeFunction"
+  function_name = module.list_firmware_fn.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api.execution_arn}/*/GET/devices/*/firmware"
+}
+
+# OPTIONS /devices/{deviceId}/firmware — CORS preflight for the GET above.
+resource "aws_api_gateway_method" "firmware_options" {
+  rest_api_id   = module.api.rest_api_id
+  resource_id   = aws_api_gateway_resource.devices_device_id_firmware.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "firmware_options" {
+  rest_api_id = module.api.rest_api_id
+  resource_id = aws_api_gateway_resource.devices_device_id_firmware.id
+  http_method = aws_api_gateway_method.firmware_options.http_method
+  type        = "MOCK"
+
+  request_templates = {
+    "application/json" = "{\"statusCode\": 200}"
+  }
+}
+
+resource "aws_api_gateway_method_response" "firmware_options_200" {
+  rest_api_id = module.api.rest_api_id
+  resource_id = aws_api_gateway_resource.devices_device_id_firmware.id
+  http_method = aws_api_gateway_method.firmware_options.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Headers" = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "firmware_options_200" {
+  rest_api_id = module.api.rest_api_id
+  resource_id = aws_api_gateway_resource.devices_device_id_firmware.id
+  http_method = aws_api_gateway_method.firmware_options.http_method
+  status_code = aws_api_gateway_method_response.firmware_options_200.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = "'https://vzoniq.com'"
+    "method.response.header.Access-Control-Allow-Methods" = "'GET,OPTIONS'"
+    "method.response.header.Access-Control-Allow-Headers" = "'Authorization,Content-Type'"
+  }
+}
+
+# /devices/{deviceId}/firmware/presign
+resource "aws_api_gateway_resource" "devices_device_id_firmware_presign" {
+  rest_api_id = module.api.rest_api_id
+  parent_id   = aws_api_gateway_resource.devices_device_id_firmware.id
+  path_part   = "presign"
+}
+
+resource "aws_api_gateway_method" "firmware_presign_post" {
+  rest_api_id   = module.api.rest_api_id
+  resource_id   = aws_api_gateway_resource.devices_device_id_firmware_presign.id
+  http_method   = "POST"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = module.api.cognito_authorizer_id
+}
+
+resource "aws_api_gateway_integration" "firmware_presign_post" {
+  rest_api_id             = module.api.rest_api_id
+  resource_id             = aws_api_gateway_resource.devices_device_id_firmware_presign.id
+  http_method             = aws_api_gateway_method.firmware_presign_post.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = module.presign_firmware_fn.invoke_arn
+}
+
+resource "aws_lambda_permission" "firmware_presign_post" {
+  statement_id  = "AllowAPIGateway-firmware-presign-POST"
+  action        = "lambda:InvokeFunction"
+  function_name = module.presign_firmware_fn.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api.execution_arn}/*/POST/devices/*/firmware/presign"
+}
+
+# OPTIONS /devices/{deviceId}/firmware/presign
+resource "aws_api_gateway_method" "firmware_presign_options" {
+  rest_api_id   = module.api.rest_api_id
+  resource_id   = aws_api_gateway_resource.devices_device_id_firmware_presign.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "firmware_presign_options" {
+  rest_api_id = module.api.rest_api_id
+  resource_id = aws_api_gateway_resource.devices_device_id_firmware_presign.id
+  http_method = aws_api_gateway_method.firmware_presign_options.http_method
+  type        = "MOCK"
+
+  request_templates = {
+    "application/json" = "{\"statusCode\": 200}"
+  }
+}
+
+resource "aws_api_gateway_method_response" "firmware_presign_options_200" {
+  rest_api_id = module.api.rest_api_id
+  resource_id = aws_api_gateway_resource.devices_device_id_firmware_presign.id
+  http_method = aws_api_gateway_method.firmware_presign_options.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Headers" = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "firmware_presign_options_200" {
+  rest_api_id = module.api.rest_api_id
+  resource_id = aws_api_gateway_resource.devices_device_id_firmware_presign.id
+  http_method = aws_api_gateway_method.firmware_presign_options.http_method
+  status_code = aws_api_gateway_method_response.firmware_presign_options_200.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = "'https://vzoniq.com'"
+    "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS'"
+    "method.response.header.Access-Control-Allow-Headers" = "'Authorization,Content-Type'"
+  }
+}
+
+# /devices/{deviceId}/firmware/{version}/complete
+resource "aws_api_gateway_resource" "devices_device_id_firmware_version" {
+  rest_api_id = module.api.rest_api_id
+  parent_id   = aws_api_gateway_resource.devices_device_id_firmware.id
+  path_part   = "{version}"
+}
+
+resource "aws_api_gateway_resource" "devices_device_id_firmware_version_complete" {
+  rest_api_id = module.api.rest_api_id
+  parent_id   = aws_api_gateway_resource.devices_device_id_firmware_version.id
+  path_part   = "complete"
+}
+
+resource "aws_api_gateway_method" "firmware_complete_post" {
+  rest_api_id   = module.api.rest_api_id
+  resource_id   = aws_api_gateway_resource.devices_device_id_firmware_version_complete.id
+  http_method   = "POST"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = module.api.cognito_authorizer_id
+}
+
+resource "aws_api_gateway_integration" "firmware_complete_post" {
+  rest_api_id             = module.api.rest_api_id
+  resource_id             = aws_api_gateway_resource.devices_device_id_firmware_version_complete.id
+  http_method             = aws_api_gateway_method.firmware_complete_post.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = module.complete_firmware_fn.invoke_arn
+}
+
+resource "aws_lambda_permission" "firmware_complete_post" {
+  statement_id  = "AllowAPIGateway-firmware-complete-POST"
+  action        = "lambda:InvokeFunction"
+  function_name = module.complete_firmware_fn.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api.execution_arn}/*/POST/devices/*/firmware/*/complete"
+}
+
+# OPTIONS /devices/{deviceId}/firmware/{version}/complete
+resource "aws_api_gateway_method" "firmware_complete_options" {
+  rest_api_id   = module.api.rest_api_id
+  resource_id   = aws_api_gateway_resource.devices_device_id_firmware_version_complete.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "firmware_complete_options" {
+  rest_api_id = module.api.rest_api_id
+  resource_id = aws_api_gateway_resource.devices_device_id_firmware_version_complete.id
+  http_method = aws_api_gateway_method.firmware_complete_options.http_method
+  type        = "MOCK"
+
+  request_templates = {
+    "application/json" = "{\"statusCode\": 200}"
+  }
+}
+
+resource "aws_api_gateway_method_response" "firmware_complete_options_200" {
+  rest_api_id = module.api.rest_api_id
+  resource_id = aws_api_gateway_resource.devices_device_id_firmware_version_complete.id
+  http_method = aws_api_gateway_method.firmware_complete_options.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Headers" = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "firmware_complete_options_200" {
+  rest_api_id = module.api.rest_api_id
+  resource_id = aws_api_gateway_resource.devices_device_id_firmware_version_complete.id
+  http_method = aws_api_gateway_method.firmware_complete_options.http_method
+  status_code = aws_api_gateway_method_response.firmware_complete_options_200.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = "'https://vzoniq.com'"
+    "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS'"
+    "method.response.header.Access-Control-Allow-Headers" = "'Authorization,Content-Type'"
   }
 }
 #
