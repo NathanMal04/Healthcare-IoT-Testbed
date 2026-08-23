@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import re
@@ -121,7 +122,7 @@ def _handle_first_reservation(table, pk, sk, device_id, version, user_id, body):
             return _resp(409, {"error": "An upload for this version was just started by another request"})
         raise
 
-    return _presign_response(device_id, version, firmware_id, attempt_id, s3_key)
+    return _presign_response(device_id, version, firmware_id, attempt_id, s3_key, sha256)
 
 
 def _handle_retry(table, pk, sk, device_id, version, retry_of_attempt_id):
@@ -140,6 +141,7 @@ def _handle_retry(table, pk, sk, device_id, version, retry_of_attempt_id):
         return _resp(409, {"error": "Upload attempt is no longer current"})
 
     firmware_id = existing["firmwareId"]
+    sha256 = existing["sha256"]
     new_attempt_id = str(uuid.uuid4())
     new_s3_key = _build_s3_key(device_id, version, new_attempt_id)
     now = datetime.now(timezone.utc).isoformat()
@@ -168,26 +170,34 @@ def _handle_retry(table, pk, sk, device_id, version, retry_of_attempt_id):
             return _resp(409, {"error": "Upload attempt is no longer current"})
         raise
 
-    return _presign_response(device_id, version, firmware_id, new_attempt_id, new_s3_key)
+    return _presign_response(device_id, version, firmware_id, new_attempt_id, new_s3_key, sha256)
 
 
-def _presign_response(device_id, version, firmware_id, attempt_id, s3_key):
-    # NOTE: S3-side SHA-256 enforcement (e.g. an x-amz-checksum-sha256 POST
-    # policy condition) is intentionally not implemented here. The exact
-    # generate_presigned_post/Boto3 behavior for enforcing a caller-supplied
-    # checksum has not been verified against AWS documentation, and guessing
-    # at the condition syntax risks producing a policy that silently fails to
-    # enforce anything. sizeBytes is enforced via content-length-range below;
-    # sha256 is retained as declared artifact metadata and is compared only
-    # to the extent complete-firmware's own logic allows (see that file's
-    # notes — it does not attempt checksum verification either, for the same
-    # reason).
+def _presign_response(device_id, version, firmware_id, attempt_id, s3_key, sha256_hex):
+    # S3-side SHA-256 enforcement: the browser must submit the exact
+    # Base64-encoded digest of the immutable, DynamoDB-stored hex SHA-256 as
+    # both an x-amz-checksum-sha256 form field and a matching policy
+    # condition (mirroring the existing Content-Type field/condition pair
+    # below, which is the same pairing mechanism S3 POST policies require
+    # for any non-default field). S3 verifies the uploaded bytes against
+    # this checksum at write time — the browser cannot substitute a
+    # different checksum and still use this presigned POST, since any field
+    # value that doesn't match its paired condition causes S3 to reject the
+    # POST outright.
+    checksum_b64 = _sha256_hex_to_base64(sha256_hex)
+
     presigned = s3.generate_presigned_post(
         Bucket=BUCKET,
         Key=s3_key,
-        Fields={"Content-Type": CONTENT_TYPE},
+        Fields={
+            "Content-Type": CONTENT_TYPE,
+            "x-amz-checksum-algorithm": "SHA256",
+            "x-amz-checksum-sha256": checksum_b64,
+        },
         Conditions=[
             {"Content-Type": CONTENT_TYPE},
+            {"x-amz-checksum-algorithm": "SHA256"},
+            {"x-amz-checksum-sha256": checksum_b64},
             ["content-length-range", 1, MAX_FIRMWARE_SIZE_BYTES],
         ],
         ExpiresIn=PRESIGN_EXPIRES_SEC,
@@ -221,6 +231,10 @@ def _validate_version(raw):
 
 def _has_control_chars(value):
     return any(ord(ch) < 0x20 or ord(ch) == 0x7f for ch in value)
+
+
+def _sha256_hex_to_base64(sha256_hex):
+    return base64.b64encode(bytes.fromhex(sha256_hex)).decode("ascii")
 
 
 def _validate_device_id(raw):

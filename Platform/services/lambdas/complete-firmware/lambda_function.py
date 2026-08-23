@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import re
@@ -75,7 +76,9 @@ def handler(event, context):
     # from the request — the browser only identifies which attempt it is
     # completing.
     try:
-        head = s3.head_object(Bucket=item["s3Bucket"], Key=item["s3Key"])
+        head = s3.head_object(
+            Bucket=item["s3Bucket"], Key=item["s3Key"], ChecksumMode="ENABLED"
+        )
     except ClientError as e:
         code = e.response["Error"]["Code"]
         if code in ("404", "NoSuchKey"):
@@ -88,18 +91,27 @@ def handler(event, context):
 
     now = datetime.now(timezone.utc).isoformat()
 
-    # NOTE: SHA-256 verification against the uploaded object is NOT
-    # implemented here. head_object's ETag is, for single-part uploads,
-    # generally the object's MD5 digest — not a SHA-256 — and per the
-    # approved design must not be treated as a substitute. Confirming a
-    # correct, supported way to obtain/verify a SHA-256 checksum for an
-    # already-uploaded S3 object (e.g. via S3's additional checksum
-    # algorithms or GetObjectAttributes) requires AWS documentation
-    # verification not performed as part of this step. Only ContentLength
-    # is verified below; sha256 remains stored as declared artifact
-    # metadata pending that verification.
+    # Verification requires BOTH a matching size AND a matching S3-attested
+    # SHA-256 checksum (never ETag — for single-part uploads ETag is
+    # generally an MD5, not a SHA-256, and is never treated as a substitute
+    # here). ChecksumMode="ENABLED" asks S3 to return the additional
+    # checksum it stored for the object at upload time, if any; comparing
+    # requires converting our immutable hex digest to the same Base64 form
+    # S3 reports (never hex-vs-Base64 directly).
+    #
+    # A HeadObject success with ChecksumSHA256 absent is treated as a
+    # definitive verification failure, not as "still pending". This differs
+    # from a missing object: a missing object may simply not have finished
+    # uploading yet and could legitimately succeed on a later retry of this
+    # same call, but a completed object's checksum attribute is fixed at
+    # upload time — if it isn't present now, it will never appear on a
+    # later HeadObject call for this same object, so leaving the record
+    # "pending" would misleadingly imply progress is still possible.
     actual_size = head["ContentLength"]
-    if actual_size != item["sizeBytes"]:
+    actual_checksum = head.get("ChecksumSHA256")
+    expected_checksum = _sha256_hex_to_base64(item["sha256"])
+
+    if actual_size != item["sizeBytes"] or actual_checksum != expected_checksum:
         try:
             table.update_item(
                 Key={"pk": pk, "sk": sk},
@@ -123,7 +135,7 @@ def handler(event, context):
             refreshed = table.get_item(Key={"pk": pk, "sk": sk}).get("Item")
             if refreshed and refreshed["attemptId"] != attempt_id:
                 return _resp(409, {"error": "Upload attempt is no longer current"})
-        return _resp(422, {"error": "Uploaded object does not match the registered firmware size"})
+        return _resp(422, {"error": "Uploaded object does not match the registered firmware"})
 
     try:
         table.update_item(
@@ -172,6 +184,10 @@ def _validate_version(raw):
 def _is_owner(table, user_id, device_id):
     item = table.get_item(Key={"pk": f"USER#{user_id}", "sk": f"DEVICE#{device_id}"}).get("Item")
     return item is not None and item.get("role") == "owner"
+
+
+def _sha256_hex_to_base64(sha256_hex):
+    return base64.b64encode(bytes.fromhex(sha256_hex)).decode("ascii")
 
 
 def _validate_device_id(raw):
