@@ -11,6 +11,7 @@ import {
   completeFirmware,
   type CompleteFirmwareResponse,
 } from "@/lib/firmware";
+import FirmwareListModal from "@/app/components/FirmwareListModal";
 
 const MAX_FIRMWARE_SIZE_BYTES = 26214400; // 25 MiB
 
@@ -37,6 +38,8 @@ export default function DashboardPage() {
   const [type, setType] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const [viewDevice, setViewDevice] = useState<Device | null>(null);
 
   const [uploadDevice, setUploadDevice] = useState<Device | null>(null);
   const [version, setVersion] = useState("");
@@ -122,6 +125,7 @@ export default function DashboardPage() {
 
   function openUploadModal(device: Device) {
     if (uploading) return;
+    closeViewModal();
     setUploadDevice(device);
     setVersion("");
     setFile(null);
@@ -140,6 +144,16 @@ export default function DashboardPage() {
     setUploadStage(null);
     setUploadError(null);
     setUploadResult(null);
+  }
+
+  function openViewModal(device: Device) {
+    if (uploading) return;
+    closeUploadModal();
+    setViewDevice(device);
+  }
+
+  function closeViewModal() {
+    setViewDevice(null);
   }
 
   const isUploadFormValid = version.trim() !== "" && file !== null;
@@ -270,7 +284,14 @@ export default function DashboardPage() {
                     {device.name}
                   </td>
                   <td className="px-6 py-4 text-slate-400">{device.role}</td>
-                  <td className="px-6 py-4 text-right">
+                  <td className="px-6 py-4 text-right space-x-3">
+                    <button
+                      onClick={() => openViewModal(device)}
+                      disabled={uploading}
+                      className="text-blue-600 hover:text-blue-700 disabled:opacity-50 text-xs font-medium transition-colors"
+                    >
+                      View Firmware
+                    </button>
                     <button
                       onClick={() => openUploadModal(device)}
                       disabled={uploading}
@@ -445,6 +466,10 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+      )}
+
+      {viewDevice && (
+        <FirmwareListModal device={viewDevice} onClose={closeViewModal} />
       )}
     </div>
   );
