@@ -329,7 +329,7 @@ export default function FirmwareListModal({ device, onClose }: FirmwareListModal
                       {formatDate(firmware.uploadedAt ?? firmware.createdAt)}
                     </td>
                     <td className="px-3 py-3 text-right whitespace-nowrap">
-                      {firmware.status === "failed" && (
+                      {firmware.status === "pending" && (
                         <button
                           type="button"
                           onClick={() => openRetry(firmware)}

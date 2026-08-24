@@ -87,6 +87,10 @@ def _handle_first_reservation(table, pk, sk, device_id, version, user_id, body):
     if existing is not None:
         if existing["status"] == "ready":
             return _resp(409, {"error": "Firmware version is already ready"})
+        if existing["status"] == "failed":
+            return _resp(409, {
+                "error": "Firmware version has failed and cannot be retried; choose a new version"
+            })
         return _resp(409, {
             "error": f"An upload for this version already exists ({existing['status']}); "
                      f"retry explicitly to replace it"
@@ -134,7 +138,10 @@ def _handle_retry(table, pk, sk, device_id, version, retry_of_attempt_id):
     if existing["status"] == "ready":
         return _resp(409, {"error": "Firmware version is already ready"})
 
-    if existing["status"] not in ("pending", "failed"):
+    if existing["status"] == "failed":
+        return _resp(409, {"error": "Firmware version has failed and cannot be retried; choose a new version"})
+
+    if existing["status"] != "pending":
         return _resp(409, {"error": f"Firmware version cannot be retried from status {existing['status']}"})
 
     if existing["attemptId"] != retry_of_attempt_id:
@@ -153,14 +160,13 @@ def _handle_retry(table, pk, sk, device_id, version, retry_of_attempt_id):
                 "SET attemptId = :new_attempt, s3Key = :new_key, s3Bucket = :bucket, "
                 "#st = :pending, updatedAt = :now"
             ),
-            ConditionExpression="attemptId = :expected AND (#st = :pending OR #st = :failed)",
+            ConditionExpression="attemptId = :expected AND #st = :pending",
             ExpressionAttributeNames={"#st": "status"},
             ExpressionAttributeValues={
                 ":new_attempt": new_attempt_id,
                 ":new_key": new_s3_key,
                 ":bucket": BUCKET,
                 ":pending": "pending",
-                ":failed": "failed",
                 ":expected": retry_of_attempt_id,
                 ":now": now,
             },
