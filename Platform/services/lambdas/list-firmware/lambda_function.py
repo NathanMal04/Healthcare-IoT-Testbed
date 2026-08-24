@@ -51,10 +51,18 @@ def handler(event, context):
 
 def _public_view(item):
     # Excludes pk/sk/entity (internal DynamoDB representation, redundant
-    # with deviceId + version), attemptId/s3Bucket/s3Key (internal
-    # concurrency/storage details a list view has no use for and shouldn't
-    # tempt a frontend into misusing), createdBy (a raw Cognito sub), and
+    # with deviceId + version), s3Bucket/s3Key (internal storage details a
+    # list view has no use for), createdBy (a raw Cognito sub), and
     # updatedAt (bookkeeping not needed alongside createdAt/uploadedAt).
+    #
+    # attemptId IS exposed: it's the current optimistic-concurrency token
+    # for this firmware item, not a credential — every operation that uses
+    # it (presign retry, complete) independently re-checks Cognito auth and
+    # device ownership first, and a non-matching attemptId always fails the
+    # DynamoDB conditional write regardless of what a caller supplies. The
+    # frontend needs it to let a client that has reloaded/returned later
+    # explicitly retry a failed upload via presign-firmware's existing
+    # retryOfAttemptId contract.
     return {
         "firmwareId": item.get("firmwareId"),
         "version": item.get("version"),
@@ -62,6 +70,7 @@ def _public_view(item):
         "originalFilename": item.get("originalFilename"),
         "sizeBytes": int(item["sizeBytes"]) if item.get("sizeBytes") is not None else None,
         "sha256": item.get("sha256"),
+        "attemptId": item.get("attemptId"),
         "createdAt": item.get("createdAt"),
         "uploadedAt": item.get("uploadedAt"),
     }

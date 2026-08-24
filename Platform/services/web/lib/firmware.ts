@@ -7,6 +7,7 @@ export interface Firmware {
   originalFilename: string;
   sizeBytes: number;
   sha256: string;
+  attemptId: string;
   createdAt: string;
   uploadedAt?: string;
 }
