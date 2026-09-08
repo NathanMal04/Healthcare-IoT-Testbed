@@ -14,7 +14,7 @@ Platform/
     docker-files/     # Firmware analysis tooling and Docker setup
   scripts/          # Helper scripts for development and operations
 docs/               # Project documentation (architecture, diagrams, presentations)
-.devcontainer/      # Standardized development environment (VS Code + LocalStack)
+.devcontainer/      # Standardized development environment (VS Code)
 ```
 
 ## High-Level Architecture
@@ -27,13 +27,15 @@ docs/               # Project documentation (architecture, diagrams, presentatio
 
 ## Development Environment
 
-This project uses **VS Code Dev Containers** to standardize tooling. The devcontainer starts a **LocalStack** sidecar that emulates AWS services locally so you can develop without touching the real AWS environment.
+This project uses **VS Code Dev Containers** to standardize tooling. The container ships the AWS CLI, Terraform, Python and Node, and points `AWS_CONFIG_FILE` at the profile checked in at `.devcontainer/aws/config`.
+
+There is no local AWS emulation — development runs against the real `dev` environment in AWS.
 
 ### Requirements
 - [Docker](https://www.docker.com/)
 - [VS Code](https://code.visualstudio.com/)
 - [VS Code Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
-- A free [LocalStack account](https://app.localstack.cloud) (for the local AWS emulator)
+- Access to the project AWS account via IAM Identity Center (SSO)
 
 ### Getting Started
 
@@ -43,42 +45,24 @@ This project uses **VS Code Dev Containers** to standardize tooling. The devcont
    cd Healthcare-IoT-Testbed
    ```
 
-2. **Set up your LocalStack auth token**
-
-   Create a free account at [localstack.cloud](https://app.localstack.cloud) and get your token from [Settings > Auth Tokens](https://app.localstack.cloud/settings/auth-tokens).
-
-   Create a `secrets.env` file at the **repo root** (this file is gitignored):
-   ```
-   LOCALSTACK_AUTH_TOKEN=your_token_here
-   ```
-
-3. **Open in the devcontainer**
+2. **Open in the devcontainer**
    - Open the repo in VS Code
    - Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`)
    - Select **Dev Containers: Reopen in Container**
 
-   VS Code will build the container, start LocalStack, and automatically run Terraform to provision all local AWS resources.
-
-4. **Verify LocalStack is running**
+3. **Authenticate to AWS**
    ```bash
-   .devcontainer/localstack/status.sh
+   aws sso login
+   aws sts get-caller-identity   # confirms the session works
    ```
+   The `Healthcare-IoT-Dev` profile is preselected via `AWS_PROFILE`, so no `--profile` flag is needed.
 
-5. **Check provisioned resources**
+4. **Read the deployed infrastructure values**
    ```bash
-   cd Platform/infra/envs/local
+   cd Platform/infra/envs/dev
+   terraform init      # state lives in S3, so this needs an active SSO session
    terraform output
    ```
-
-### What Gets Provisioned Locally
-| Resource | Description |
-|---|---|
-| S3 (`*-web`) | Frontend static site bucket |
-| S3 (`*-data-lake`) | Firmware and log storage |
-| DynamoDB | Device data table |
-| Cognito User Pool | Auth for local testing |
-| API Gateway | REST API endpoint |
-| IAM Policy | Lambda → DynamoDB access |
 
 ## Web Frontend
 
@@ -91,7 +75,7 @@ npm install
 npm run dev
 ```
 
-Create a `.env` file in `Platform/services/web/` with values from `terraform output` in `Platform/infra/envs/local/`:
+Create a `.env` file in `Platform/services/web/` with values from `terraform output` in `Platform/infra/envs/dev/`:
 ```
 NEXT_PUBLIC_COGNITO_USER_POOL_ID=<cognito_user_pool_id output>
 NEXT_PUBLIC_COGNITO_CLIENT_ID=<cognito_user_pool_client_id output>
@@ -120,7 +104,6 @@ Platform/infra/
   modules/          # Reusable modules (s3_bucket, lambda, api_gateway, cognito, dynamodb, etc.)
   envs/
     dev/            # Deployed to real AWS
-    local/          # Deployed to LocalStack
 ```
 
 ### Deploying Infrastructure (CI/CD)
