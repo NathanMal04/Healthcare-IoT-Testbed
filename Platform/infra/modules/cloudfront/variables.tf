@@ -40,3 +40,9 @@ variable "acm_certificate_arn" {
   type        = string
   default     = null
 }
+
+variable "canonical_host" {
+  description = "Hostname that all other hostnames 301 to. Empty string disables the redirect."
+  type        = string
+  default     = ""
+}

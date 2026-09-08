@@ -5,16 +5,40 @@ resource "aws_cloudfront_origin_access_control" "this" {
   signing_protocol                  = "sigv4"
 }
 
-# Rewrites extensionless URIs to their static-export equivalents so paths like
-# /login resolve to /login.html (and /login/ resolves to /login/index.html if
-# trailingSlash is ever enabled in next.config).
+# Serves two viewer-request concerns in one function, in order:
+#
+# 1. Redirects any non-canonical hostname (www, the *.cloudfront.net default
+#    domain) to canonical_host with a 301. The API Gateway, Lambda and S3 CORS
+#    layers each pin a single allowed origin, so an app served on a second
+#    hostname loads but has every API and upload call blocked by the browser.
+#    Collapsing to one origin here keeps that invariant in one place instead of
+#    duplicating an origin allowlist across all three layers.
+# 2. Rewrites extensionless URIs to their static-export equivalents so paths
+#    like /login resolve to /login.html (and /login/ resolves to
+#    /login/index.html if trailingSlash is ever enabled in next.config).
 resource "aws_cloudfront_function" "url_rewrite" {
   name    = "${var.project}-url-rewrite"
   runtime = "cloudfront-js-2.0"
   publish = true
   code    = <<-EOT
+    var CANONICAL_HOST = '${var.canonical_host}';
+
     function handler(event) {
       var request = event.request;
+
+      if (CANONICAL_HOST !== '' && request.headers.host.value.toLowerCase() !== CANONICAL_HOST) {
+        return {
+          statusCode: 301,
+          statusDescription: 'Moved Permanently',
+          headers: {
+            'location': {
+              value: 'https://' + CANONICAL_HOST + request.uri + buildQueryString(request.querystring)
+            },
+            'cache-control': { value: 'max-age=3600' }
+          }
+        };
+      }
+
       var uri = request.uri;
       if (uri.endsWith('/')) {
         request.uri = uri + 'index.html';
@@ -22,6 +46,26 @@ resource "aws_cloudfront_function" "url_rewrite" {
         request.uri = uri + '.html';
       }
       return request;
+    }
+
+    // Preserves the query string across the redirect. CloudFront hands it over
+    // as an object keyed by parameter name, already URL-encoded, with repeated
+    // parameters under multiValue.
+    function buildQueryString(querystring) {
+      var params = [];
+      for (var name in querystring) {
+        var param = querystring[name];
+        if (param.multiValue) {
+          for (var i = 0; i < param.multiValue.length; i++) {
+            params.push(name + '=' + param.multiValue[i].value);
+          }
+        } else if (param.value === '') {
+          params.push(name);
+        } else {
+          params.push(name + '=' + param.value);
+        }
+      }
+      return params.length > 0 ? '?' + params.join('&') : '';
     }
   EOT
 }
