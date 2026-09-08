@@ -21,6 +21,7 @@ module "cdn" {
 
   aliases             = [var.domain_name, "www.${var.domain_name}"]
   acm_certificate_arn = aws_acm_certificate.frontend.arn
+  canonical_host      = var.domain_name
 }
 
 # Cognito User Pool for authentication
@@ -62,21 +63,6 @@ module "metadata_table" {
 
   hash_key  = "pk"
   range_key = "sk"
-
-  attributes = [
-    { name = "pk", type = "S" },
-    { name = "sk", type = "S" },
-  ]
-
-  project     = var.name
-  environment = "dev"
-}
-
-module "database" {
-  source     = "../../modules/dynamodb"
-  table_name = "${var.name}-data"
-  hash_key   = "pk"
-  range_key  = "sk"
 
   attributes = [
     { name = "pk", type = "S" },
