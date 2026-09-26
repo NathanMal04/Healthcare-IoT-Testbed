@@ -262,10 +262,12 @@ resource "aws_api_gateway_rest_api" "manifest" {
 }
 
 # Only requests that arrive through our VPC endpoint are accepted.
-resource "aws_api_gateway_rest_api_policy" "manifest" {
-  rest_api_id = aws_api_gateway_rest_api.manifest.id
-
-  policy = jsonencode({
+#
+# The document is a local so the deployment trigger below can hash it: the
+# resource's own `policy` attribute comes back from AWS normalized, which
+# changed the hash mid-apply ("Provider produced inconsistent final plan").
+locals {
+  manifest_api_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
@@ -275,6 +277,11 @@ resource "aws_api_gateway_rest_api_policy" "manifest" {
       Condition = { StringEquals = { "aws:SourceVpce" = module.network.execute_api_endpoint_id } }
     }]
   })
+}
+
+resource "aws_api_gateway_rest_api_policy" "manifest" {
+  rest_api_id = aws_api_gateway_rest_api.manifest.id
+  policy      = local.manifest_api_policy
 }
 
 # And the endpoint only reaches this API, so a job can't call other private
@@ -353,7 +360,7 @@ resource "aws_api_gateway_deployment" "manifest" {
   triggers = {
     redeployment = sha1(jsonencode([
       [for i in aws_api_gateway_integration.manifest : i.id],
-      aws_api_gateway_rest_api_policy.manifest.policy,
+      local.manifest_api_policy,
     ]))
   }
 
