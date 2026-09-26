@@ -3,9 +3,9 @@
   "ModelMetadata": {
     "Author": "",
     "DateCreated": "2026-04-08T00:00:00Z",
-    "DateLastModified": "2026-04-08T00:00:00Z",
-    "Description": "Healthcare IoT Testbed - Users table and Metadata table (single-table design for devices, modules, outputs, sessions, and access control)",
-    "Version": "1.0"
+    "DateLastModified": "2026-09-26T00:00:00Z",
+    "Description": "Healthcare IoT Testbed - Users table and single-table Metadata table. Entities: DEVICE, ARTIFACT (all uploaded and produced files, incl. firmware), MODULE (kind script|tool, runtime cloud|local) with VERSION#n, ENV (interactive/run images) with VERSION#n, RUN (cloud Batch executions) with CHILD#/RESULT#, SESSION (interactive JupyterLab only), per-user BUDGET and USAGE# ledger. Ownership is stored as two-way USER#/X# + X#/USER# links with role=owner only (a GROUP# principal can reuse the same shape later). Device links are optional. Deployed firmware Lambdas still write DEVICE#/FIRMWARE# rows until the ARTIFACT# migration runs. See Platform/infra/DATABASE.md.",
+    "Version": "2.0"
   },
   "DataModel": [
     {
@@ -17,32 +17,82 @@
         }
       },
       "NonKeyAttributes": [
-        { "AttributeName": "email", "AttributeType": "S" },
-        { "AttributeName": "fullName", "AttributeType": "S" },
-        { "AttributeName": "role", "AttributeType": "S" },
-        { "AttributeName": "status", "AttributeType": "S" },
-        { "AttributeName": "createdAt", "AttributeType": "S" },
-        { "AttributeName": "updatedAt", "AttributeType": "S" }
+        {
+          "AttributeName": "email",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "fullName",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "role",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "status",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "createdAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "updatedAt",
+          "AttributeType": "S"
+        }
       ],
       "TableData": [
         {
-          "userId": { "S": "user-001" },
-          "email": { "S": "alice@example.com" },
-          "fullName": { "S": "Alice Johnson" },
-          "role": { "S": "admin" },
-          "status": { "S": "active" },
-          "createdAt": { "S": "2026-04-01T10:00:00Z" },
-          "updatedAt": { "S": "2026-04-01T10:00:00Z" }
+          "userId": {
+            "S": "user-001"
+          },
+          "email": {
+            "S": "alice@example.com"
+          },
+          "fullName": {
+            "S": "Alice Johnson"
+          },
+          "role": {
+            "S": "admin"
+          },
+          "status": {
+            "S": "active"
+          },
+          "createdAt": {
+            "S": "2026-08-28T10:00:00Z"
+          },
+          "updatedAt": {
+            "S": "2026-08-28T10:00:00Z"
+          }
         },
         {
-          "userId": { "S": "user-002" },
-          "email": { "S": "bob@example.com" },          "fullName": { "S": "Bob Smith" },
-          "role": { "S": "user" },
-          "status": { "S": "active" },
-          "createdAt": { "S": "2026-04-02T14:00:00Z" },
-          "updatedAt": { "S": "2026-04-02T14:00:00Z" }
+          "userId": {
+            "S": "user-002"
+          },
+          "email": {
+            "S": "bob@example.com"
+          },
+          "fullName": {
+            "S": "Bob Smith"
+          },
+          "role": {
+            "S": "user"
+          },
+          "status": {
+            "S": "active"
+          },
+          "createdAt": {
+            "S": "2026-08-29T14:00:00Z"
+          },
+          "updatedAt": {
+            "S": "2026-08-29T14:00:00Z"
+          }
         }
-      ]
+      ],
+      "DataAccess": {
+        "MySql": {}
+      }
     },
     {
       "TableName": "healthcare-iot-testbed-dev-metadata",
@@ -57,344 +107,5433 @@
         }
       },
       "NonKeyAttributes": [
-        { "AttributeName": "entity", "AttributeType": "S" },
-        { "AttributeName": "name", "AttributeType": "S" },
-        { "AttributeName": "status", "AttributeType": "S" },
-        { "AttributeName": "role", "AttributeType": "S" },
-        { "AttributeName": "type", "AttributeType": "S" },
-        { "AttributeName": "version", "AttributeType": "S" },
-        { "AttributeName": "fileSize", "AttributeType": "S" },
-        { "AttributeName": "uploadedAt", "AttributeType": "S" },
-        { "AttributeName": "dataPath", "AttributeType": "S" },
-        { "AttributeName": "moduleId", "AttributeType": "S" },
-        { "AttributeName": "startedAt", "AttributeType": "S" },
-        { "AttributeName": "endedAt", "AttributeType": "S" },
-        { "AttributeName": "createdAt", "AttributeType": "S" },
-        { "AttributeName": "updatedAt", "AttributeType": "S" }
+        {
+          "AttributeName": "entity",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "name",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "type",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "status",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "dataPath",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "createdAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "updatedAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "role",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "description",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "latestVersion",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "createdBy",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "baseImage",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "catalogItems",
+          "AttributeType": "SS"
+        },
+        {
+          "AttributeName": "statusReason",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "statusUpdatedAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "buildId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "imageDigest",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "freezeKey",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "taskDefArn",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "packageMode",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "parentVersion",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "kind",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "runtime",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "level",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "envId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "envVersion",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "sourceKey",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "sha256",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "command",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "sizeBytes",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "originalFilename",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "s3Bucket",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "s3Key",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "attemptId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "version",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "tags",
+          "AttributeType": "SS"
+        },
+        {
+          "AttributeName": "derivedFromRun",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "derivedFromArtifacts",
+          "AttributeType": "SS"
+        },
+        {
+          "AttributeName": "moduleId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "moduleVersion",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "query",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "mode",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "class",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "size",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "childCount",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "estimate",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "maxCost",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "held",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "costProvisional",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "costActual",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "tokenHash",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "startedAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "endedAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "batchJobId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "attempts",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "inputCount",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "inputArtifactId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "outputArtifactIds",
+          "AttributeType": "SS"
+        },
+        {
+          "AttributeName": "relation",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "durationSec",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "taskArn",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "taskIp",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "lastActivity",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "cost",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "monthlyLimit",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "heavyEnabled",
+          "AttributeType": "BOOL"
+        },
+        {
+          "AttributeName": "amount",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "resource",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "costTags",
+          "AttributeType": "M"
+        }
+      ],
+      "TableFacets": [
+        {
+          "FacetName": "Device",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "DeviceId",
+            "SortKeyAlias": "Metadata"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "DEVICE#dev-001"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "device"
+              },
+              "name": {
+                "S": "Blood Pressure Monitor A"
+              },
+              "type": {
+                "S": "blood-pressure"
+              },
+              "status": {
+                "S": "active"
+              },
+              "dataPath": {
+                "S": "s3://healthcare-iot-testbed-dev-data-lake/devices/dev-001/"
+              },
+              "createdAt": {
+                "S": "2026-09-01T10:00:00Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-01T10:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "DEVICE#dev-002"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "device"
+              },
+              "name": {
+                "S": "Heart Rate Sensor B"
+              },
+              "type": {
+                "S": "heart-rate"
+              },
+              "status": {
+                "S": "active"
+              },
+              "dataPath": {
+                "S": "s3://healthcare-iot-testbed-dev-data-lake/devices/dev-002/"
+              },
+              "createdAt": {
+                "S": "2026-09-01T11:00:00Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-01T11:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "DEVICE#dev-003"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "device"
+              },
+              "name": {
+                "S": "Insulin Pump C"
+              },
+              "type": {
+                "S": "insulin-pump"
+              },
+              "status": {
+                "S": "active"
+              },
+              "dataPath": {
+                "S": "s3://healthcare-iot-testbed-dev-data-lake/devices/dev-003/"
+              },
+              "createdAt": {
+                "S": "2026-09-03T09:30:00Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-03T09:30:00Z"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "name",
+            "type",
+            "status",
+            "dataPath",
+            "createdAt",
+            "updatedAt"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "Artifact",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "ArtifactId",
+            "SortKeyAlias": "Metadata"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "ARTIFACT#art-001"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "artifact"
+              },
+              "name": {
+                "S": "BP Monitor A firmware v1.0.0"
+              },
+              "type": {
+                "S": "firmware"
+              },
+              "sha256": {
+                "S": "e3b0c442"
+              },
+              "sizeBytes": {
+                "N": "2516582"
+              },
+              "originalFilename": {
+                "S": "bp_a_v1.0.0.bin"
+              },
+              "s3Bucket": {
+                "S": "healthcare-iot-testbed-dev-data-lake"
+              },
+              "s3Key": {
+                "S": "artifacts/art-001/bp_a_v1.0.0.bin"
+              },
+              "attemptId": {
+                "S": "att-001"
+              },
+              "status": {
+                "S": "ready"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-02T10:00:00Z"
+              },
+              "createdBy": {
+                "S": "user-001"
+              },
+              "createdAt": {
+                "S": "2026-09-02T10:00:00Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-02T10:00:00Z"
+              },
+              "version": {
+                "S": "v1.0.0"
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-002"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "artifact"
+              },
+              "name": {
+                "S": "BP Monitor A firmware v2.1.0"
+              },
+              "type": {
+                "S": "firmware"
+              },
+              "sha256": {
+                "S": "8f14e45f"
+              },
+              "sizeBytes": {
+                "N": "3040870"
+              },
+              "originalFilename": {
+                "S": "bp_a_v2.1.0.bin"
+              },
+              "s3Bucket": {
+                "S": "healthcare-iot-testbed-dev-data-lake"
+              },
+              "s3Key": {
+                "S": "artifacts/art-002/bp_a_v2.1.0.bin"
+              },
+              "attemptId": {
+                "S": "att-002"
+              },
+              "status": {
+                "S": "ready"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-04T10:00:00Z"
+              },
+              "createdBy": {
+                "S": "user-001"
+              },
+              "createdAt": {
+                "S": "2026-09-04T10:00:00Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-04T10:00:00Z"
+              },
+              "version": {
+                "S": "v2.1.0"
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-003"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "artifact"
+              },
+              "name": {
+                "S": "HR Sensor B firmware v1.3.2"
+              },
+              "type": {
+                "S": "firmware"
+              },
+              "sha256": {
+                "S": "c9f0f895"
+              },
+              "sizeBytes": {
+                "N": "1468006"
+              },
+              "originalFilename": {
+                "S": "hr_b_v1.3.2.bin"
+              },
+              "s3Bucket": {
+                "S": "healthcare-iot-testbed-dev-data-lake"
+              },
+              "s3Key": {
+                "S": "artifacts/art-003/hr_b_v1.3.2.bin"
+              },
+              "attemptId": {
+                "S": "att-003"
+              },
+              "status": {
+                "S": "ready"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-04T11:00:00Z"
+              },
+              "createdBy": {
+                "S": "user-001"
+              },
+              "createdAt": {
+                "S": "2026-09-04T11:00:00Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-04T11:00:00Z"
+              },
+              "version": {
+                "S": "v1.3.2"
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-004"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "artifact"
+              },
+              "name": {
+                "S": "Lab BLE capture"
+              },
+              "type": {
+                "S": "pcap"
+              },
+              "sha256": {
+                "S": "45c48cce"
+              },
+              "sizeBytes": {
+                "N": "48213990"
+              },
+              "originalFilename": {
+                "S": "lab_capture.pcap"
+              },
+              "s3Bucket": {
+                "S": "healthcare-iot-testbed-dev-data-lake"
+              },
+              "s3Key": {
+                "S": "artifacts/art-004/lab_capture.pcap"
+              },
+              "attemptId": {
+                "S": "att-004"
+              },
+              "status": {
+                "S": "ready"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-09T14:00:00Z"
+              },
+              "createdBy": {
+                "S": "user-001"
+              },
+              "createdAt": {
+                "S": "2026-09-09T14:00:00Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-09T14:00:00Z"
+              },
+              "tags": {
+                "SS": [
+                  "ble",
+                  "lab"
+                ]
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-005"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "artifact"
+              },
+              "name": {
+                "S": "parse_bp output - v1.0.0"
+              },
+              "type": {
+                "S": "output"
+              },
+              "sha256": {
+                "S": "d3d94468"
+              },
+              "sizeBytes": {
+                "N": "20480"
+              },
+              "originalFilename": {
+                "S": "bp_a_v1.0.0.json"
+              },
+              "s3Bucket": {
+                "S": "healthcare-iot-testbed-dev-data-lake"
+              },
+              "s3Key": {
+                "S": "artifacts/art-005/bp_a_v1.0.0.json"
+              },
+              "attemptId": {
+                "S": "att-005"
+              },
+              "status": {
+                "S": "ready"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-14T09:03:10Z"
+              },
+              "createdBy": {
+                "S": "user-001"
+              },
+              "createdAt": {
+                "S": "2026-09-14T09:03:10Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-14T09:03:10Z"
+              },
+              "derivedFromRun": {
+                "S": "run-001"
+              },
+              "derivedFromArtifacts": {
+                "SS": [
+                  "art-001"
+                ]
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-006"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "artifact"
+              },
+              "name": {
+                "S": "parse_bp output - v2.1.0"
+              },
+              "type": {
+                "S": "output"
+              },
+              "sha256": {
+                "S": "6512bd43"
+              },
+              "sizeBytes": {
+                "N": "22528"
+              },
+              "originalFilename": {
+                "S": "bp_a_v2.1.0.json"
+              },
+              "s3Bucket": {
+                "S": "healthcare-iot-testbed-dev-data-lake"
+              },
+              "s3Key": {
+                "S": "artifacts/art-006/bp_a_v2.1.0.json"
+              },
+              "attemptId": {
+                "S": "att-006"
+              },
+              "status": {
+                "S": "ready"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-14T09:03:40Z"
+              },
+              "createdBy": {
+                "S": "user-001"
+              },
+              "createdAt": {
+                "S": "2026-09-14T09:03:40Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-14T09:03:40Z"
+              },
+              "derivedFromRun": {
+                "S": "run-001"
+              },
+              "derivedFromArtifacts": {
+                "SS": [
+                  "art-002"
+                ]
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-007"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "artifact"
+              },
+              "name": {
+                "S": "Insulin Pump C firmware v0.9.4"
+              },
+              "type": {
+                "S": "firmware"
+              },
+              "sha256": {
+                "S": "c20ad4d7"
+              },
+              "sizeBytes": {
+                "N": "917504"
+              },
+              "originalFilename": {
+                "S": "pump_c_v0.9.4.hex"
+              },
+              "s3Bucket": {
+                "S": "healthcare-iot-testbed-dev-data-lake"
+              },
+              "s3Key": {
+                "S": "artifacts/art-007/pump_c_v0.9.4.hex"
+              },
+              "attemptId": {
+                "S": "att-007"
+              },
+              "status": {
+                "S": "verifying"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-10T16:00:00Z"
+              },
+              "createdBy": {
+                "S": "user-002"
+              },
+              "createdAt": {
+                "S": "2026-09-10T16:00:00Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-10T16:00:00Z"
+              },
+              "version": {
+                "S": "v0.9.4"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "name",
+            "type",
+            "sha256",
+            "sizeBytes",
+            "originalFilename",
+            "s3Bucket",
+            "s3Key",
+            "attemptId",
+            "status",
+            "statusUpdatedAt",
+            "createdBy",
+            "createdAt",
+            "updatedAt",
+            "version",
+            "tags",
+            "derivedFromRun",
+            "derivedFromArtifacts"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "Module",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "ModuleId",
+            "SortKeyAlias": "Metadata"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "MODULE#mod-001"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "module"
+              },
+              "name": {
+                "S": "BP firmware parser"
+              },
+              "kind": {
+                "S": "script"
+              },
+              "runtime": {
+                "S": "cloud"
+              },
+              "description": {
+                "S": "Extracts config blocks and strings from BP monitor firmware"
+              },
+              "latestVersion": {
+                "N": "2"
+              },
+              "createdBy": {
+                "S": "user-001"
+              },
+              "createdAt": {
+                "S": "2026-09-06T09:00:00Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-06T09:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "MODULE#mod-002"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "module"
+              },
+              "name": {
+                "S": "binwalk extract"
+              },
+              "kind": {
+                "S": "tool"
+              },
+              "runtime": {
+                "S": "cloud"
+              },
+              "description": {
+                "S": "Runs binwalk extraction on each input file"
+              },
+              "latestVersion": {
+                "N": "1"
+              },
+              "createdBy": {
+                "S": "user-001"
+              },
+              "createdAt": {
+                "S": "2026-09-06T10:00:00Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-06T10:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "MODULE#mod-003"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "module"
+              },
+              "name": {
+                "S": "BLE sniffer capture"
+              },
+              "kind": {
+                "S": "script"
+              },
+              "runtime": {
+                "S": "local"
+              },
+              "description": {
+                "S": "Captures BLE traffic with an nRF sniffer dongle on the user's machine"
+              },
+              "latestVersion": {
+                "N": "1"
+              },
+              "createdBy": {
+                "S": "user-001"
+              },
+              "createdAt": {
+                "S": "2026-09-07T12:00:00Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-07T12:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "MODULE#mod-004"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "module"
+              },
+              "name": {
+                "S": "nRF flasher"
+              },
+              "kind": {
+                "S": "tool"
+              },
+              "runtime": {
+                "S": "local"
+              },
+              "description": {
+                "S": "Flashes nRF52 boards over SWD from the user's machine"
+              },
+              "latestVersion": {
+                "N": "1"
+              },
+              "createdBy": {
+                "S": "user-002"
+              },
+              "createdAt": {
+                "S": "2026-09-08T15:00:00Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-08T15:00:00Z"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "name",
+            "kind",
+            "runtime",
+            "description",
+            "latestVersion",
+            "createdBy",
+            "createdAt",
+            "updatedAt"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "ModuleVersion",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "ModuleId",
+            "SortKeyAlias": "VersionNumber"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "MODULE#mod-001"
+              },
+              "sk": {
+                "S": "VERSION#0001"
+              },
+              "entity": {
+                "S": "module-version"
+              },
+              "level": {
+                "S": "L1"
+              },
+              "envId": {
+                "S": "env-001"
+              },
+              "envVersion": {
+                "N": "1"
+              },
+              "sourceKey": {
+                "S": "modules/mod-001/0001/parse_bp.py"
+              },
+              "sha256": {
+                "S": "9f2c1e7a"
+              },
+              "status": {
+                "S": "ready"
+              },
+              "statusReason": {
+                "S": "build succeeded"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-06T09:06:00Z"
+              },
+              "buildId": {
+                "S": "script-build:a41f09c2"
+              },
+              "imageDigest": {
+                "S": "sha256:3c4d5e6f7a8b"
+              },
+              "freezeKey": {
+                "S": "modules/mod-001/0001/freeze/"
+              },
+              "createdAt": {
+                "S": "2026-09-06T09:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "MODULE#mod-001"
+              },
+              "sk": {
+                "S": "VERSION#0002"
+              },
+              "entity": {
+                "S": "module-version"
+              },
+              "level": {
+                "S": "L1"
+              },
+              "envId": {
+                "S": "env-001"
+              },
+              "envVersion": {
+                "N": "2"
+              },
+              "sourceKey": {
+                "S": "modules/mod-001/0002/parse_bp.py"
+              },
+              "sha256": {
+                "S": "b81d4f03"
+              },
+              "status": {
+                "S": "ready"
+              },
+              "statusReason": {
+                "S": "build succeeded"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-13T11:05:00Z"
+              },
+              "buildId": {
+                "S": "script-build:c7720e5d"
+              },
+              "imageDigest": {
+                "S": "sha256:5e6f7a8b9c0d"
+              },
+              "freezeKey": {
+                "S": "modules/mod-001/0002/freeze/"
+              },
+              "createdAt": {
+                "S": "2026-09-13T11:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "MODULE#mod-002"
+              },
+              "sk": {
+                "S": "VERSION#0001"
+              },
+              "entity": {
+                "S": "module-version"
+              },
+              "command": {
+                "S": "binwalk -e -C /outputs /inputs/*"
+              },
+              "envId": {
+                "S": "env-001"
+              },
+              "envVersion": {
+                "N": "2"
+              },
+              "status": {
+                "S": "ready"
+              },
+              "statusReason": {
+                "S": "build succeeded"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-12T10:04:00Z"
+              },
+              "buildId": {
+                "S": "script-build:e19b33f8"
+              },
+              "imageDigest": {
+                "S": "sha256:0d1e2f3a4b5c"
+              },
+              "freezeKey": {
+                "S": "modules/mod-002/0001/freeze/"
+              },
+              "createdAt": {
+                "S": "2026-09-12T10:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "MODULE#mod-003"
+              },
+              "sk": {
+                "S": "VERSION#0001"
+              },
+              "entity": {
+                "S": "module-version"
+              },
+              "sourceKey": {
+                "S": "modules/mod-003/0001/ble_capture.py"
+              },
+              "sha256": {
+                "S": "4e6a0b91"
+              },
+              "sizeBytes": {
+                "N": "18342"
+              },
+              "originalFilename": {
+                "S": "ble_capture.py"
+              },
+              "status": {
+                "S": "ready"
+              },
+              "statusReason": {
+                "S": "upload verified"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-07T12:01:00Z"
+              },
+              "createdAt": {
+                "S": "2026-09-07T12:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "MODULE#mod-004"
+              },
+              "sk": {
+                "S": "VERSION#0001"
+              },
+              "entity": {
+                "S": "module-version"
+              },
+              "sourceKey": {
+                "S": "modules/mod-004/0001/nrf_flasher.zip"
+              },
+              "sha256": {
+                "S": "d05c77e2"
+              },
+              "sizeBytes": {
+                "N": "2481907"
+              },
+              "originalFilename": {
+                "S": "nrf_flasher.zip"
+              },
+              "status": {
+                "S": "pending"
+              },
+              "statusReason": {
+                "S": "awaiting upload"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-08T15:00:00Z"
+              },
+              "createdAt": {
+                "S": "2026-09-08T15:00:00Z"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "level",
+            "envId",
+            "envVersion",
+            "sourceKey",
+            "sha256",
+            "status",
+            "statusReason",
+            "statusUpdatedAt",
+            "buildId",
+            "imageDigest",
+            "freezeKey",
+            "createdAt",
+            "command",
+            "sizeBytes",
+            "originalFilename"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "Environment",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "EnvId",
+            "SortKeyAlias": "Metadata"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "ENV#env-001"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "env"
+              },
+              "name": {
+                "S": "analysis-base"
+              },
+              "description": {
+                "S": "Python 3.12 with scapy, pyshark/tshark, lief, capstone, binwalk"
+              },
+              "latestVersion": {
+                "N": "2"
+              },
+              "createdBy": {
+                "S": "user-001"
+              },
+              "createdAt": {
+                "S": "2026-09-05T08:00:00Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-12T08:20:00Z"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "name",
+            "description",
+            "latestVersion",
+            "createdBy",
+            "createdAt",
+            "updatedAt"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "EnvironmentVersion",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "EnvId",
+            "SortKeyAlias": "VersionNumber"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "ENV#env-001"
+              },
+              "sk": {
+                "S": "VERSION#0001"
+              },
+              "entity": {
+                "S": "env-version"
+              },
+              "baseImage": {
+                "S": "platform-base:analysis-base"
+              },
+              "catalogItems": {
+                "SS": [
+                  "tshark",
+                  "binwalk"
+                ]
+              },
+              "status": {
+                "S": "ready"
+              },
+              "statusReason": {
+                "S": "build succeeded"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-05T08:14:00Z"
+              },
+              "buildId": {
+                "S": "script-build:0f1c2a9e"
+              },
+              "imageDigest": {
+                "S": "sha256:1a2b3c4d5e6f"
+              },
+              "freezeKey": {
+                "S": "envs/env-001/0001/freeze/"
+              },
+              "taskDefArn": {
+                "S": "arn:aws:ecs:us-east-1:123456789012:task-definition/session-env-001-0001:1"
+              },
+              "packageMode": {
+                "S": "offline"
+              },
+              "createdAt": {
+                "S": "2026-09-05T08:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "ENV#env-001"
+              },
+              "sk": {
+                "S": "VERSION#0002"
+              },
+              "entity": {
+                "S": "env-version"
+              },
+              "baseImage": {
+                "S": "platform-base:analysis-base"
+              },
+              "catalogItems": {
+                "SS": [
+                  "tshark",
+                  "binwalk",
+                  "ghidra"
+                ]
+              },
+              "parentVersion": {
+                "N": "1"
+              },
+              "status": {
+                "S": "ready"
+              },
+              "statusReason": {
+                "S": "build succeeded"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-12T08:20:00Z"
+              },
+              "buildId": {
+                "S": "script-build:7d3e41b0"
+              },
+              "imageDigest": {
+                "S": "sha256:7a8b9c0d1e2f"
+              },
+              "freezeKey": {
+                "S": "envs/env-001/0002/freeze/"
+              },
+              "taskDefArn": {
+                "S": "arn:aws:ecs:us-east-1:123456789012:task-definition/session-env-001-0002:1"
+              },
+              "packageMode": {
+                "S": "offline"
+              },
+              "createdAt": {
+                "S": "2026-09-12T08:00:00Z"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "baseImage",
+            "catalogItems",
+            "status",
+            "statusReason",
+            "statusUpdatedAt",
+            "buildId",
+            "imageDigest",
+            "freezeKey",
+            "taskDefArn",
+            "packageMode",
+            "createdAt",
+            "parentVersion"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "Run",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "RunId",
+            "SortKeyAlias": "Metadata"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "RUN#run-001"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "run"
+              },
+              "name": {
+                "S": "BP firmware parse - all dev-001 firmware"
+              },
+              "moduleId": {
+                "S": "mod-001"
+              },
+              "moduleVersion": {
+                "N": "2"
+              },
+              "query": {
+                "S": "device=dev-001 type=firmware"
+              },
+              "mode": {
+                "S": "map"
+              },
+              "class": {
+                "S": "economy"
+              },
+              "size": {
+                "S": "S"
+              },
+              "childCount": {
+                "N": "2"
+              },
+              "estimate": {
+                "S": "0.02"
+              },
+              "maxCost": {
+                "S": "0.10"
+              },
+              "held": {
+                "S": "0"
+              },
+              "costProvisional": {
+                "S": "0.0134"
+              },
+              "costActual": {
+                "S": "0.0121"
+              },
+              "tokenHash": {
+                "S": "sha256:f0e1d2c3"
+              },
+              "status": {
+                "S": "completed"
+              },
+              "statusReason": {
+                "S": "all children succeeded"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-14T09:04:00Z"
+              },
+              "startedAt": {
+                "S": "2026-09-14T09:00:00Z"
+              },
+              "endedAt": {
+                "S": "2026-09-14T09:04:00Z"
+              },
+              "createdBy": {
+                "S": "user-001"
+              },
+              "createdAt": {
+                "S": "2026-09-14T08:59:30Z"
+              },
+              "updatedAt": {
+                "S": "2026-10-03T02:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "RUN#run-002"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "run"
+              },
+              "name": {
+                "S": "binwalk - lab capture"
+              },
+              "moduleId": {
+                "S": "mod-002"
+              },
+              "moduleVersion": {
+                "N": "1"
+              },
+              "query": {
+                "S": "artifact=art-004"
+              },
+              "mode": {
+                "S": "all"
+              },
+              "class": {
+                "S": "standard"
+              },
+              "size": {
+                "S": "M"
+              },
+              "childCount": {
+                "N": "1"
+              },
+              "estimate": {
+                "S": "0.05"
+              },
+              "maxCost": {
+                "S": "0.40"
+              },
+              "held": {
+                "S": "0.40"
+              },
+              "costProvisional": {
+                "S": "0.0210"
+              },
+              "tokenHash": {
+                "S": "sha256:a9b8c7d6"
+              },
+              "status": {
+                "S": "running"
+              },
+              "statusReason": {
+                "S": "1 of 1 children running"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-26T13:02:00Z"
+              },
+              "startedAt": {
+                "S": "2026-09-26T13:00:00Z"
+              },
+              "createdBy": {
+                "S": "user-001"
+              },
+              "createdAt": {
+                "S": "2026-09-26T12:59:40Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-26T13:02:00Z"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "name",
+            "moduleId",
+            "moduleVersion",
+            "query",
+            "mode",
+            "class",
+            "size",
+            "childCount",
+            "estimate",
+            "maxCost",
+            "held",
+            "costProvisional",
+            "costActual",
+            "tokenHash",
+            "status",
+            "statusReason",
+            "statusUpdatedAt",
+            "startedAt",
+            "endedAt",
+            "createdBy",
+            "createdAt",
+            "updatedAt"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "RunChild",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "RunId",
+            "SortKeyAlias": "ChildIndex"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "RUN#run-001"
+              },
+              "sk": {
+                "S": "CHILD#00000"
+              },
+              "entity": {
+                "S": "run-child"
+              },
+              "batchJobId": {
+                "S": "4b1e7c20-aa11-4d2e-9f00-000000000000:0"
+              },
+              "attempts": {
+                "N": "1"
+              },
+              "inputCount": {
+                "N": "1"
+              },
+              "status": {
+                "S": "succeeded"
+              },
+              "statusReason": {
+                "S": "exit 0"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-14T09:03:10Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "RUN#run-001"
+              },
+              "sk": {
+                "S": "CHILD#00001"
+              },
+              "entity": {
+                "S": "run-child"
+              },
+              "batchJobId": {
+                "S": "4b1e7c20-aa11-4d2e-9f00-000000000001:1"
+              },
+              "attempts": {
+                "N": "2"
+              },
+              "inputCount": {
+                "N": "1"
+              },
+              "status": {
+                "S": "succeeded"
+              },
+              "statusReason": {
+                "S": "exit 0 after Spot interruption retry"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-14T09:03:40Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "RUN#run-002"
+              },
+              "sk": {
+                "S": "CHILD#00000"
+              },
+              "entity": {
+                "S": "run-child"
+              },
+              "batchJobId": {
+                "S": "9c2d11f4-bb22-4e3f-8a11-000000000000:0"
+              },
+              "attempts": {
+                "N": "1"
+              },
+              "inputCount": {
+                "N": "1"
+              },
+              "status": {
+                "S": "running"
+              },
+              "statusReason": {
+                "S": "RUNNING"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-26T13:02:00Z"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "batchJobId",
+            "attempts",
+            "inputCount",
+            "status",
+            "statusReason",
+            "statusUpdatedAt"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "RunResult",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "RunId",
+            "SortKeyAlias": "InputSha256"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "RUN#run-001"
+              },
+              "sk": {
+                "S": "RESULT#e3b0c442"
+              },
+              "entity": {
+                "S": "run-result"
+              },
+              "inputArtifactId": {
+                "S": "art-001"
+              },
+              "outputArtifactIds": {
+                "SS": [
+                  "art-005"
+                ]
+              },
+              "status": {
+                "S": "done"
+              }
+            },
+            {
+              "pk": {
+                "S": "RUN#run-001"
+              },
+              "sk": {
+                "S": "RESULT#8f14e45f"
+              },
+              "entity": {
+                "S": "run-result"
+              },
+              "inputArtifactId": {
+                "S": "art-002"
+              },
+              "outputArtifactIds": {
+                "SS": [
+                  "art-006"
+                ]
+              },
+              "status": {
+                "S": "done"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "inputArtifactId",
+            "outputArtifactIds",
+            "status"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "RunArtifactLink",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "RunId",
+            "SortKeyAlias": "ArtifactId"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "RUN#run-001"
+              },
+              "sk": {
+                "S": "ARTIFACT#art-001"
+              },
+              "entity": {
+                "S": "run-artifact"
+              },
+              "relation": {
+                "S": "input"
+              },
+              "name": {
+                "S": "BP Monitor A firmware v1.0.0"
+              }
+            },
+            {
+              "pk": {
+                "S": "RUN#run-001"
+              },
+              "sk": {
+                "S": "ARTIFACT#art-005"
+              },
+              "entity": {
+                "S": "run-artifact"
+              },
+              "relation": {
+                "S": "output"
+              },
+              "name": {
+                "S": "parse_bp output - v1.0.0"
+              }
+            },
+            {
+              "pk": {
+                "S": "RUN#run-001"
+              },
+              "sk": {
+                "S": "ARTIFACT#art-002"
+              },
+              "entity": {
+                "S": "run-artifact"
+              },
+              "relation": {
+                "S": "input"
+              },
+              "name": {
+                "S": "BP Monitor A firmware v2.1.0"
+              }
+            },
+            {
+              "pk": {
+                "S": "RUN#run-001"
+              },
+              "sk": {
+                "S": "ARTIFACT#art-006"
+              },
+              "entity": {
+                "S": "run-artifact"
+              },
+              "relation": {
+                "S": "output"
+              },
+              "name": {
+                "S": "parse_bp output - v2.1.0"
+              }
+            },
+            {
+              "pk": {
+                "S": "RUN#run-002"
+              },
+              "sk": {
+                "S": "ARTIFACT#art-004"
+              },
+              "entity": {
+                "S": "run-artifact"
+              },
+              "relation": {
+                "S": "input"
+              },
+              "name": {
+                "S": "Lab BLE capture"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "relation",
+            "name"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "ModuleRunHistory",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "ModuleId",
+            "SortKeyAlias": "RunId"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "MODULE#mod-001"
+              },
+              "sk": {
+                "S": "RUN#run-001"
+              },
+              "entity": {
+                "S": "module-run"
+              },
+              "moduleVersion": {
+                "N": "2"
+              },
+              "status": {
+                "S": "completed"
+              },
+              "durationSec": {
+                "N": "240"
+              }
+            },
+            {
+              "pk": {
+                "S": "MODULE#mod-002"
+              },
+              "sk": {
+                "S": "RUN#run-002"
+              },
+              "entity": {
+                "S": "module-run"
+              },
+              "moduleVersion": {
+                "N": "1"
+              },
+              "status": {
+                "S": "running"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "moduleVersion",
+            "status",
+            "durationSec"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "Session",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "SessionId",
+            "SortKeyAlias": "Metadata"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "SESSION#sess-001"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "session"
+              },
+              "name": {
+                "S": "Firmware triage notebook"
+              },
+              "envId": {
+                "S": "env-001"
+              },
+              "envVersion": {
+                "N": "2"
+              },
+              "packageMode": {
+                "S": "offline"
+              },
+              "taskArn": {
+                "S": "arn:aws:ecs:us-east-1:123456789012:task/sessions/5f0c3e1d"
+              },
+              "taskIp": {
+                "S": "10.0.1.37"
+              },
+              "status": {
+                "S": "running"
+              },
+              "statusReason": {
+                "S": "RUNNING"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-26T12:31:00Z"
+              },
+              "startedAt": {
+                "S": "2026-09-26T12:30:00Z"
+              },
+              "lastActivity": {
+                "S": "2026-09-26T13:10:00Z"
+              },
+              "cost": {
+                "S": "0.0420"
+              },
+              "createdBy": {
+                "S": "user-001"
+              },
+              "createdAt": {
+                "S": "2026-09-26T12:29:50Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-26T13:10:00Z"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "name",
+            "envId",
+            "envVersion",
+            "packageMode",
+            "taskArn",
+            "taskIp",
+            "status",
+            "statusReason",
+            "statusUpdatedAt",
+            "startedAt",
+            "lastActivity",
+            "cost",
+            "createdBy",
+            "createdAt",
+            "updatedAt"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "UserOwnsLink",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "UserId",
+            "SortKeyAlias": "ResourceId"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "DEVICE#dev-001"
+              },
+              "entity": {
+                "S": "user-device"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "name": {
+                "S": "Blood Pressure Monitor A"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "DEVICE#dev-002"
+              },
+              "entity": {
+                "S": "user-device"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "name": {
+                "S": "Heart Rate Sensor B"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-002"
+              },
+              "sk": {
+                "S": "DEVICE#dev-003"
+              },
+              "entity": {
+                "S": "user-device"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "name": {
+                "S": "Insulin Pump C"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "ENV#env-001"
+              },
+              "entity": {
+                "S": "user-env"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "name": {
+                "S": "analysis-base"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "MODULE#mod-001"
+              },
+              "entity": {
+                "S": "user-module"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "name": {
+                "S": "BP firmware parser"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "MODULE#mod-002"
+              },
+              "entity": {
+                "S": "user-module"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "name": {
+                "S": "binwalk extract"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "MODULE#mod-003"
+              },
+              "entity": {
+                "S": "user-module"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "name": {
+                "S": "BLE sniffer capture"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-002"
+              },
+              "sk": {
+                "S": "MODULE#mod-004"
+              },
+              "entity": {
+                "S": "user-module"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "name": {
+                "S": "nRF flasher"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "ARTIFACT#art-001"
+              },
+              "entity": {
+                "S": "user-artifact"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "name": {
+                "S": "BP Monitor A firmware v1.0.0"
+              },
+              "status": {
+                "S": "ready"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "ARTIFACT#art-002"
+              },
+              "entity": {
+                "S": "user-artifact"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "name": {
+                "S": "BP Monitor A firmware v2.1.0"
+              },
+              "status": {
+                "S": "ready"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "ARTIFACT#art-003"
+              },
+              "entity": {
+                "S": "user-artifact"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "name": {
+                "S": "HR Sensor B firmware v1.3.2"
+              },
+              "status": {
+                "S": "ready"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "ARTIFACT#art-004"
+              },
+              "entity": {
+                "S": "user-artifact"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "name": {
+                "S": "Lab BLE capture"
+              },
+              "status": {
+                "S": "ready"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "ARTIFACT#art-005"
+              },
+              "entity": {
+                "S": "user-artifact"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "name": {
+                "S": "parse_bp output - v1.0.0"
+              },
+              "status": {
+                "S": "ready"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "ARTIFACT#art-006"
+              },
+              "entity": {
+                "S": "user-artifact"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "name": {
+                "S": "parse_bp output - v2.1.0"
+              },
+              "status": {
+                "S": "ready"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-002"
+              },
+              "sk": {
+                "S": "ARTIFACT#art-007"
+              },
+              "entity": {
+                "S": "user-artifact"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "name": {
+                "S": "Insulin Pump C firmware v0.9.4"
+              },
+              "status": {
+                "S": "verifying"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "RUN#run-001"
+              },
+              "entity": {
+                "S": "user-run"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "name": {
+                "S": "BP firmware parse - all dev-001 firmware"
+              },
+              "status": {
+                "S": "completed"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "RUN#run-002"
+              },
+              "entity": {
+                "S": "user-run"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "name": {
+                "S": "binwalk - lab capture"
+              },
+              "status": {
+                "S": "running"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "SESSION#sess-001"
+              },
+              "entity": {
+                "S": "user-session"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "name": {
+                "S": "Firmware triage notebook"
+              },
+              "status": {
+                "S": "running"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "role",
+            "name",
+            "status"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "OwnedByUserLink",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "ResourceId",
+            "SortKeyAlias": "UserId"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "DEVICE#dev-001"
+              },
+              "sk": {
+                "S": "USER#user-001"
+              },
+              "entity": {
+                "S": "device-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            },
+            {
+              "pk": {
+                "S": "DEVICE#dev-002"
+              },
+              "sk": {
+                "S": "USER#user-001"
+              },
+              "entity": {
+                "S": "device-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            },
+            {
+              "pk": {
+                "S": "DEVICE#dev-003"
+              },
+              "sk": {
+                "S": "USER#user-002"
+              },
+              "entity": {
+                "S": "device-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            },
+            {
+              "pk": {
+                "S": "ENV#env-001"
+              },
+              "sk": {
+                "S": "USER#user-001"
+              },
+              "entity": {
+                "S": "env-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            },
+            {
+              "pk": {
+                "S": "MODULE#mod-001"
+              },
+              "sk": {
+                "S": "USER#user-001"
+              },
+              "entity": {
+                "S": "module-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            },
+            {
+              "pk": {
+                "S": "MODULE#mod-002"
+              },
+              "sk": {
+                "S": "USER#user-001"
+              },
+              "entity": {
+                "S": "module-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            },
+            {
+              "pk": {
+                "S": "MODULE#mod-003"
+              },
+              "sk": {
+                "S": "USER#user-001"
+              },
+              "entity": {
+                "S": "module-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            },
+            {
+              "pk": {
+                "S": "MODULE#mod-004"
+              },
+              "sk": {
+                "S": "USER#user-002"
+              },
+              "entity": {
+                "S": "module-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-001"
+              },
+              "sk": {
+                "S": "USER#user-001"
+              },
+              "entity": {
+                "S": "artifact-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-002"
+              },
+              "sk": {
+                "S": "USER#user-001"
+              },
+              "entity": {
+                "S": "artifact-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-003"
+              },
+              "sk": {
+                "S": "USER#user-001"
+              },
+              "entity": {
+                "S": "artifact-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-004"
+              },
+              "sk": {
+                "S": "USER#user-001"
+              },
+              "entity": {
+                "S": "artifact-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-005"
+              },
+              "sk": {
+                "S": "USER#user-001"
+              },
+              "entity": {
+                "S": "artifact-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-006"
+              },
+              "sk": {
+                "S": "USER#user-001"
+              },
+              "entity": {
+                "S": "artifact-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-007"
+              },
+              "sk": {
+                "S": "USER#user-002"
+              },
+              "entity": {
+                "S": "artifact-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            },
+            {
+              "pk": {
+                "S": "RUN#run-001"
+              },
+              "sk": {
+                "S": "USER#user-001"
+              },
+              "entity": {
+                "S": "run-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            },
+            {
+              "pk": {
+                "S": "RUN#run-002"
+              },
+              "sk": {
+                "S": "USER#user-001"
+              },
+              "entity": {
+                "S": "run-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            },
+            {
+              "pk": {
+                "S": "SESSION#sess-001"
+              },
+              "sk": {
+                "S": "USER#user-001"
+              },
+              "entity": {
+                "S": "session-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "role"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "DeviceLink",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "DeviceId",
+            "SortKeyAlias": "ArtifactOrRunId"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "DEVICE#dev-001"
+              },
+              "sk": {
+                "S": "ARTIFACT#firmware#art-001"
+              },
+              "entity": {
+                "S": "device-artifact"
+              },
+              "name": {
+                "S": "BP Monitor A firmware v1.0.0"
+              },
+              "type": {
+                "S": "firmware"
+              }
+            },
+            {
+              "pk": {
+                "S": "DEVICE#dev-001"
+              },
+              "sk": {
+                "S": "ARTIFACT#firmware#art-002"
+              },
+              "entity": {
+                "S": "device-artifact"
+              },
+              "name": {
+                "S": "BP Monitor A firmware v2.1.0"
+              },
+              "type": {
+                "S": "firmware"
+              }
+            },
+            {
+              "pk": {
+                "S": "DEVICE#dev-002"
+              },
+              "sk": {
+                "S": "ARTIFACT#firmware#art-003"
+              },
+              "entity": {
+                "S": "device-artifact"
+              },
+              "name": {
+                "S": "HR Sensor B firmware v1.3.2"
+              },
+              "type": {
+                "S": "firmware"
+              }
+            },
+            {
+              "pk": {
+                "S": "DEVICE#dev-001"
+              },
+              "sk": {
+                "S": "ARTIFACT#output#art-005"
+              },
+              "entity": {
+                "S": "device-artifact"
+              },
+              "name": {
+                "S": "parse_bp output - v1.0.0"
+              },
+              "type": {
+                "S": "output"
+              }
+            },
+            {
+              "pk": {
+                "S": "DEVICE#dev-001"
+              },
+              "sk": {
+                "S": "ARTIFACT#output#art-006"
+              },
+              "entity": {
+                "S": "device-artifact"
+              },
+              "name": {
+                "S": "parse_bp output - v2.1.0"
+              },
+              "type": {
+                "S": "output"
+              }
+            },
+            {
+              "pk": {
+                "S": "DEVICE#dev-003"
+              },
+              "sk": {
+                "S": "ARTIFACT#firmware#art-007"
+              },
+              "entity": {
+                "S": "device-artifact"
+              },
+              "name": {
+                "S": "Insulin Pump C firmware v0.9.4"
+              },
+              "type": {
+                "S": "firmware"
+              }
+            },
+            {
+              "pk": {
+                "S": "DEVICE#dev-001"
+              },
+              "sk": {
+                "S": "RUN#run-001"
+              },
+              "entity": {
+                "S": "device-run"
+              },
+              "name": {
+                "S": "BP firmware parse - all dev-001 firmware"
+              },
+              "status": {
+                "S": "completed"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "name",
+            "type",
+            "status"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "DeviceBacklink",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "ArtifactOrRunId",
+            "SortKeyAlias": "DeviceId"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "ARTIFACT#art-001"
+              },
+              "sk": {
+                "S": "DEVICE#dev-001"
+              },
+              "entity": {
+                "S": "artifact-device"
+              },
+              "name": {
+                "S": "Blood Pressure Monitor A"
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-002"
+              },
+              "sk": {
+                "S": "DEVICE#dev-001"
+              },
+              "entity": {
+                "S": "artifact-device"
+              },
+              "name": {
+                "S": "Blood Pressure Monitor A"
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-003"
+              },
+              "sk": {
+                "S": "DEVICE#dev-002"
+              },
+              "entity": {
+                "S": "artifact-device"
+              },
+              "name": {
+                "S": "Heart Rate Sensor B"
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-005"
+              },
+              "sk": {
+                "S": "DEVICE#dev-001"
+              },
+              "entity": {
+                "S": "artifact-device"
+              },
+              "name": {
+                "S": "Blood Pressure Monitor A"
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-006"
+              },
+              "sk": {
+                "S": "DEVICE#dev-001"
+              },
+              "entity": {
+                "S": "artifact-device"
+              },
+              "name": {
+                "S": "Blood Pressure Monitor A"
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-007"
+              },
+              "sk": {
+                "S": "DEVICE#dev-003"
+              },
+              "entity": {
+                "S": "artifact-device"
+              },
+              "name": {
+                "S": "Insulin Pump C"
+              }
+            },
+            {
+              "pk": {
+                "S": "RUN#run-001"
+              },
+              "sk": {
+                "S": "DEVICE#dev-001"
+              },
+              "entity": {
+                "S": "run-device"
+              },
+              "name": {
+                "S": "Blood Pressure Monitor A"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "name"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "Budget",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "UserId",
+            "SortKeyAlias": "Budget"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "BUDGET"
+              },
+              "entity": {
+                "S": "budget"
+              },
+              "monthlyLimit": {
+                "S": "50.00"
+              },
+              "held": {
+                "S": "0.40"
+              },
+              "heavyEnabled": {
+                "BOOL": true
+              },
+              "updatedAt": {
+                "S": "2026-09-26T13:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-002"
+              },
+              "sk": {
+                "S": "BUDGET"
+              },
+              "entity": {
+                "S": "budget"
+              },
+              "monthlyLimit": {
+                "S": "10.00"
+              },
+              "held": {
+                "S": "0"
+              },
+              "heavyEnabled": {
+                "BOOL": false
+              },
+              "updatedAt": {
+                "S": "2026-09-03T09:30:00Z"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "monthlyLimit",
+            "held",
+            "heavyEnabled",
+            "updatedAt"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "Usage",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "UserId",
+            "SortKeyAlias": "TimestampSourceId"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "USAGE#2026-09-13T11:05:00Z#codebuild#mod-001-0002"
+              },
+              "entity": {
+                "S": "usage"
+              },
+              "kind": {
+                "S": "provisional"
+              },
+              "amount": {
+                "S": "0.0050"
+              },
+              "resource": {
+                "S": "build mod-001 v2"
+              },
+              "costTags": {
+                "M": {
+                  "userId": {
+                    "S": "user-001"
+                  },
+                  "resourceId": {
+                    "S": "mod-001-0002"
+                  }
+                }
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "USAGE#2026-09-14T09:04:00Z#batch#run-001"
+              },
+              "entity": {
+                "S": "usage"
+              },
+              "kind": {
+                "S": "provisional"
+              },
+              "amount": {
+                "S": "0.0134"
+              },
+              "resource": {
+                "S": "run run-001"
+              },
+              "costTags": {
+                "M": {
+                  "userId": {
+                    "S": "user-001"
+                  },
+                  "resourceId": {
+                    "S": "run-001"
+                  }
+                }
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "USAGE#2026-09-26T13:10:00Z#ecs#sess-001"
+              },
+              "entity": {
+                "S": "usage"
+              },
+              "kind": {
+                "S": "provisional"
+              },
+              "amount": {
+                "S": "0.0420"
+              },
+              "resource": {
+                "S": "session sess-001"
+              },
+              "costTags": {
+                "M": {
+                  "userId": {
+                    "S": "user-001"
+                  },
+                  "resourceId": {
+                    "S": "sess-001"
+                  }
+                }
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "USAGE#2026-10-03T02:00:00Z#cur#run-001"
+              },
+              "entity": {
+                "S": "usage"
+              },
+              "kind": {
+                "S": "actual"
+              },
+              "amount": {
+                "S": "0.0121"
+              },
+              "resource": {
+                "S": "run run-001"
+              },
+              "costTags": {
+                "M": {
+                  "userId": {
+                    "S": "user-001"
+                  },
+                  "resourceId": {
+                    "S": "run-001"
+                  }
+                }
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "kind",
+            "amount",
+            "resource",
+            "costTags"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        }
       ],
       "TableData": [
         {
-          "pk": { "S": "DEVICE#dev-001" },
-          "sk": { "S": "METADATA" },
-          "entity": { "S": "device" },
-          "name": { "S": "Blood Pressure Monitor A" },
-          "type": { "S": "blood-pressure" },
-          "version": { "S": "v2.1.0" },
-          "status": { "S": "active" },
-          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/devices/dev-001/" },
-          "createdAt": { "S": "2026-04-01T10:00:00Z" },
-          "updatedAt": { "S": "2026-04-01T10:00:00Z" }
+          "pk": {
+            "S": "DEVICE#dev-001"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "device"
+          },
+          "name": {
+            "S": "Blood Pressure Monitor A"
+          },
+          "type": {
+            "S": "blood-pressure"
+          },
+          "status": {
+            "S": "active"
+          },
+          "dataPath": {
+            "S": "s3://healthcare-iot-testbed-dev-data-lake/devices/dev-001/"
+          },
+          "createdAt": {
+            "S": "2026-09-01T10:00:00Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-01T10:00:00Z"
+          }
         },
         {
-          "pk": { "S": "DEVICE#dev-001" },
-          "sk": { "S": "FIRMWARE#v1.0.0" },
-          "entity": { "S": "firmware" },
-          "version": { "S": "v1.0.0" },
-          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/devices/dev-001/v1.0.0/" },
-          "fileSize": { "S": "2.4MB" },
-          "uploadedAt": { "S": "2026-03-01T10:00:00Z" }
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "DEVICE#dev-001"
+          },
+          "entity": {
+            "S": "user-device"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "name": {
+            "S": "Blood Pressure Monitor A"
+          }
         },
         {
-          "pk": { "S": "DEVICE#dev-001" },
-          "sk": { "S": "FIRMWARE#v2.0.0" },
-          "entity": { "S": "firmware" },
-          "version": { "S": "v2.0.0" },
-          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/devices/dev-001/v2.0.0/" },
-          "fileSize": { "S": "2.8MB" },
-          "uploadedAt": { "S": "2026-03-15T10:00:00Z" }
+          "pk": {
+            "S": "DEVICE#dev-001"
+          },
+          "sk": {
+            "S": "USER#user-001"
+          },
+          "entity": {
+            "S": "device-user"
+          },
+          "role": {
+            "S": "owner"
+          }
         },
         {
-          "pk": { "S": "DEVICE#dev-001" },
-          "sk": { "S": "FIRMWARE#v2.1.0" },
-          "entity": { "S": "firmware" },
-          "version": { "S": "v2.1.0" },
-          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/devices/dev-001/v2.1.0/" },
-          "fileSize": { "S": "2.9MB" },
-          "uploadedAt": { "S": "2026-04-01T10:00:00Z" }
+          "pk": {
+            "S": "DEVICE#dev-002"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "device"
+          },
+          "name": {
+            "S": "Heart Rate Sensor B"
+          },
+          "type": {
+            "S": "heart-rate"
+          },
+          "status": {
+            "S": "active"
+          },
+          "dataPath": {
+            "S": "s3://healthcare-iot-testbed-dev-data-lake/devices/dev-002/"
+          },
+          "createdAt": {
+            "S": "2026-09-01T11:00:00Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-01T11:00:00Z"
+          }
         },
         {
-          "pk": { "S": "DEVICE#dev-002" },
-          "sk": { "S": "METADATA" },
-          "entity": { "S": "device" },
-          "name": { "S": "Heart Rate Sensor B" },
-          "type": { "S": "heart-rate" },
-          "version": { "S": "v1.3.2" },
-          "status": { "S": "active" },
-          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/devices/dev-002/" },
-          "createdAt": { "S": "2026-04-01T11:00:00Z" },
-          "updatedAt": { "S": "2026-04-01T11:00:00Z" }
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "DEVICE#dev-002"
+          },
+          "entity": {
+            "S": "user-device"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "name": {
+            "S": "Heart Rate Sensor B"
+          }
         },
         {
-          "pk": { "S": "DEVICE#dev-002" },
-          "sk": { "S": "FIRMWARE#v1.0.0" },
-          "entity": { "S": "firmware" },
-          "version": { "S": "v1.0.0" },
-          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/devices/dev-002/v1.0.0/" },
-          "fileSize": { "S": "1.2MB" },
-          "uploadedAt": { "S": "2026-02-15T10:00:00Z" }
+          "pk": {
+            "S": "DEVICE#dev-002"
+          },
+          "sk": {
+            "S": "USER#user-001"
+          },
+          "entity": {
+            "S": "device-user"
+          },
+          "role": {
+            "S": "owner"
+          }
         },
         {
-          "pk": { "S": "DEVICE#dev-002" },
-          "sk": { "S": "FIRMWARE#v1.3.2" },
-          "entity": { "S": "firmware" },
-          "version": { "S": "v1.3.2" },
-          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/devices/dev-002/v1.3.2/" },
-          "fileSize": { "S": "1.4MB" },
-          "uploadedAt": { "S": "2026-03-20T10:00:00Z" }
+          "pk": {
+            "S": "DEVICE#dev-003"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "device"
+          },
+          "name": {
+            "S": "Insulin Pump C"
+          },
+          "type": {
+            "S": "insulin-pump"
+          },
+          "status": {
+            "S": "active"
+          },
+          "dataPath": {
+            "S": "s3://healthcare-iot-testbed-dev-data-lake/devices/dev-003/"
+          },
+          "createdAt": {
+            "S": "2026-09-03T09:30:00Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-03T09:30:00Z"
+          }
         },
         {
-          "pk": { "S": "OUTPUT#out-001" },
-          "sk": { "S": "SCRIPT" },
-          "entity": { "S": "output" },
-          "name": { "S": "BP Bulk Firmware Patch - Run 1" },
-          "status": { "S": "completed" },
-          "moduleId": { "S": "mod-001" },
-          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/outputs/out-001/" },
-          "startedAt": { "S": "2026-04-03T09:00:00Z" },
-          "endedAt": { "S": "2026-04-03T09:02:30Z" },
-          "createdAt": { "S": "2026-04-03T09:00:00Z" },
-          "updatedAt": { "S": "2026-04-03T09:02:30Z" }
+          "pk": {
+            "S": "USER#user-002"
+          },
+          "sk": {
+            "S": "DEVICE#dev-003"
+          },
+          "entity": {
+            "S": "user-device"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "name": {
+            "S": "Insulin Pump C"
+          }
         },
         {
-          "pk": { "S": "OUTPUT#out-002" },
-          "sk": { "S": "TOOL" },
-          "entity": { "S": "output" },
-          "name": { "S": "Nmap Scan - BP Monitor Network" },
-          "status": { "S": "completed" },
-          "moduleId": { "S": "mod-002" },
-          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/outputs/out-002/" },
-          "startedAt": { "S": "2026-04-04T14:00:00Z" },
-          "endedAt": { "S": "2026-04-04T14:15:00Z" },
-          "createdAt": { "S": "2026-04-04T14:00:00Z" },
-          "updatedAt": { "S": "2026-04-04T14:15:00Z" }
+          "pk": {
+            "S": "DEVICE#dev-003"
+          },
+          "sk": {
+            "S": "USER#user-002"
+          },
+          "entity": {
+            "S": "device-user"
+          },
+          "role": {
+            "S": "owner"
+          }
         },
         {
-          "pk": { "S": "OUTPUT#out-001" },
-          "sk": { "S": "DEVICE#dev-001" },
-          "entity": { "S": "output-device" },
-          "name": { "S": "Blood Pressure Monitor A" }
+          "pk": {
+            "S": "ENV#env-001"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "env"
+          },
+          "name": {
+            "S": "analysis-base"
+          },
+          "description": {
+            "S": "Python 3.12 with scapy, pyshark/tshark, lief, capstone, binwalk"
+          },
+          "latestVersion": {
+            "N": "2"
+          },
+          "createdBy": {
+            "S": "user-001"
+          },
+          "createdAt": {
+            "S": "2026-09-05T08:00:00Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-12T08:20:00Z"
+          }
         },
         {
-          "pk": { "S": "OUTPUT#out-001" },
-          "sk": { "S": "MODULE#mod-001" },
-          "entity": { "S": "output-module" },
-          "name": { "S": "BP Validation Script" }
+          "pk": {
+            "S": "ENV#env-001"
+          },
+          "sk": {
+            "S": "VERSION#0001"
+          },
+          "entity": {
+            "S": "env-version"
+          },
+          "baseImage": {
+            "S": "platform-base:analysis-base"
+          },
+          "catalogItems": {
+            "SS": [
+              "tshark",
+              "binwalk"
+            ]
+          },
+          "status": {
+            "S": "ready"
+          },
+          "statusReason": {
+            "S": "build succeeded"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-05T08:14:00Z"
+          },
+          "buildId": {
+            "S": "script-build:0f1c2a9e"
+          },
+          "imageDigest": {
+            "S": "sha256:1a2b3c4d5e6f"
+          },
+          "freezeKey": {
+            "S": "envs/env-001/0001/freeze/"
+          },
+          "taskDefArn": {
+            "S": "arn:aws:ecs:us-east-1:123456789012:task-definition/session-env-001-0001:1"
+          },
+          "packageMode": {
+            "S": "offline"
+          },
+          "createdAt": {
+            "S": "2026-09-05T08:00:00Z"
+          }
         },
         {
-          "pk": { "S": "OUTPUT#out-002" },
-          "sk": { "S": "DEVICE#dev-001" },
-          "entity": { "S": "output-device" },
-          "name": { "S": "Blood Pressure Monitor A" }
+          "pk": {
+            "S": "ENV#env-001"
+          },
+          "sk": {
+            "S": "VERSION#0002"
+          },
+          "entity": {
+            "S": "env-version"
+          },
+          "baseImage": {
+            "S": "platform-base:analysis-base"
+          },
+          "catalogItems": {
+            "SS": [
+              "tshark",
+              "binwalk",
+              "ghidra"
+            ]
+          },
+          "parentVersion": {
+            "N": "1"
+          },
+          "status": {
+            "S": "ready"
+          },
+          "statusReason": {
+            "S": "build succeeded"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-12T08:20:00Z"
+          },
+          "buildId": {
+            "S": "script-build:7d3e41b0"
+          },
+          "imageDigest": {
+            "S": "sha256:7a8b9c0d1e2f"
+          },
+          "freezeKey": {
+            "S": "envs/env-001/0002/freeze/"
+          },
+          "taskDefArn": {
+            "S": "arn:aws:ecs:us-east-1:123456789012:task-definition/session-env-001-0002:1"
+          },
+          "packageMode": {
+            "S": "offline"
+          },
+          "createdAt": {
+            "S": "2026-09-12T08:00:00Z"
+          }
         },
         {
-          "pk": { "S": "OUTPUT#out-002" },
-          "sk": { "S": "MODULE#mod-002" },
-          "entity": { "S": "output-module" },
-          "name": { "S": "Nmap Network Scanner" }
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "ENV#env-001"
+          },
+          "entity": {
+            "S": "user-env"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "name": {
+            "S": "analysis-base"
+          }
         },
         {
-          "pk": { "S": "DEVICE#dev-001" },
-          "sk": { "S": "OUTPUT#out-001" },
-          "entity": { "S": "device-output" },
-          "name": { "S": "BP Bulk Firmware Patch - Run 1" }
+          "pk": {
+            "S": "ENV#env-001"
+          },
+          "sk": {
+            "S": "USER#user-001"
+          },
+          "entity": {
+            "S": "env-user"
+          },
+          "role": {
+            "S": "owner"
+          }
         },
         {
-          "pk": { "S": "DEVICE#dev-001" },
-          "sk": { "S": "OUTPUT#out-002" },
-          "entity": { "S": "device-output" },
-          "name": { "S": "Nmap Scan - BP Monitor Network" }
+          "pk": {
+            "S": "MODULE#mod-001"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "module"
+          },
+          "name": {
+            "S": "BP firmware parser"
+          },
+          "kind": {
+            "S": "script"
+          },
+          "runtime": {
+            "S": "cloud"
+          },
+          "description": {
+            "S": "Extracts config blocks and strings from BP monitor firmware"
+          },
+          "latestVersion": {
+            "N": "2"
+          },
+          "createdBy": {
+            "S": "user-001"
+          },
+          "createdAt": {
+            "S": "2026-09-06T09:00:00Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-06T09:00:00Z"
+          }
         },
         {
-          "pk": { "S": "MODULE#mod-001" },
-          "sk": { "S": "SCRIPT" },
-          "entity": { "S": "module" },
-          "name": { "S": "BP Validation Script" },
-          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/modules/mod-001/" },
-          "createdAt": { "S": "2026-04-02T08:00:00Z" },
-          "updatedAt": { "S": "2026-04-02T08:00:00Z" }
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "MODULE#mod-001"
+          },
+          "entity": {
+            "S": "user-module"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "name": {
+            "S": "BP firmware parser"
+          }
         },
         {
-          "pk": { "S": "MODULE#mod-002" },
-          "sk": { "S": "TOOL" },
-          "entity": { "S": "module" },
-          "name": { "S": "Nmap Network Scanner" },
-          "dataPath": { "S": "s3://healthcare-iot-testbed-dev-data-lake/modules/mod-002/" },
-          "createdAt": { "S": "2026-04-01T10:00:00Z" },
-          "updatedAt": { "S": "2026-04-01T10:00:00Z" }
+          "pk": {
+            "S": "MODULE#mod-001"
+          },
+          "sk": {
+            "S": "USER#user-001"
+          },
+          "entity": {
+            "S": "module-user"
+          },
+          "role": {
+            "S": "owner"
+          }
         },
         {
-          "pk": { "S": "USER#user-001" },
-          "sk": { "S": "OUTPUT#out-001" },
-          "entity": { "S": "user-output" },
-          "role": { "S": "owner" },
-          "name": { "S": "BP Bulk Firmware Patch - Run 1" }
+          "pk": {
+            "S": "MODULE#mod-002"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "module"
+          },
+          "name": {
+            "S": "binwalk extract"
+          },
+          "kind": {
+            "S": "tool"
+          },
+          "runtime": {
+            "S": "cloud"
+          },
+          "description": {
+            "S": "Runs binwalk extraction on each input file"
+          },
+          "latestVersion": {
+            "N": "1"
+          },
+          "createdBy": {
+            "S": "user-001"
+          },
+          "createdAt": {
+            "S": "2026-09-06T10:00:00Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-06T10:00:00Z"
+          }
         },
         {
-          "pk": { "S": "USER#user-001" },
-          "sk": { "S": "OUTPUT#out-002" },
-          "entity": { "S": "user-output" },
-          "role": { "S": "owner" },
-          "name": { "S": "Nmap Scan - BP Monitor Network" }
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "MODULE#mod-002"
+          },
+          "entity": {
+            "S": "user-module"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "name": {
+            "S": "binwalk extract"
+          }
         },
         {
-          "pk": { "S": "USER#user-002" },
-          "sk": { "S": "OUTPUT#out-001" },
-          "entity": { "S": "user-output" },
-          "role": { "S": "viewer" },
-          "name": { "S": "BP Bulk Firmware Patch - Run 1" }
+          "pk": {
+            "S": "MODULE#mod-002"
+          },
+          "sk": {
+            "S": "USER#user-001"
+          },
+          "entity": {
+            "S": "module-user"
+          },
+          "role": {
+            "S": "owner"
+          }
         },
         {
-          "pk": { "S": "OUTPUT#out-001" },
-          "sk": { "S": "USER#user-001" },
-          "entity": { "S": "output-user" },
-          "role": { "S": "owner" }
+          "pk": {
+            "S": "MODULE#mod-003"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "module"
+          },
+          "name": {
+            "S": "BLE sniffer capture"
+          },
+          "kind": {
+            "S": "script"
+          },
+          "runtime": {
+            "S": "local"
+          },
+          "description": {
+            "S": "Captures BLE traffic with an nRF sniffer dongle on the user's machine"
+          },
+          "latestVersion": {
+            "N": "1"
+          },
+          "createdBy": {
+            "S": "user-001"
+          },
+          "createdAt": {
+            "S": "2026-09-07T12:00:00Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-07T12:00:00Z"
+          }
         },
         {
-          "pk": { "S": "OUTPUT#out-001" },
-          "sk": { "S": "USER#user-002" },
-          "entity": { "S": "output-user" },
-          "role": { "S": "viewer" }
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "MODULE#mod-003"
+          },
+          "entity": {
+            "S": "user-module"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "name": {
+            "S": "BLE sniffer capture"
+          }
         },
         {
-          "pk": { "S": "OUTPUT#out-002" },
-          "sk": { "S": "USER#user-001" },
-          "entity": { "S": "output-user" },
-          "role": { "S": "owner" }
+          "pk": {
+            "S": "MODULE#mod-003"
+          },
+          "sk": {
+            "S": "USER#user-001"
+          },
+          "entity": {
+            "S": "module-user"
+          },
+          "role": {
+            "S": "owner"
+          }
         },
         {
-          "pk": { "S": "USER#user-001" },
-          "sk": { "S": "DEVICE#dev-001" },
-          "entity": { "S": "user-device" },
-          "role": { "S": "owner" },
-          "name": { "S": "Blood Pressure Monitor A" }
+          "pk": {
+            "S": "MODULE#mod-004"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "module"
+          },
+          "name": {
+            "S": "nRF flasher"
+          },
+          "kind": {
+            "S": "tool"
+          },
+          "runtime": {
+            "S": "local"
+          },
+          "description": {
+            "S": "Flashes nRF52 boards over SWD from the user's machine"
+          },
+          "latestVersion": {
+            "N": "1"
+          },
+          "createdBy": {
+            "S": "user-002"
+          },
+          "createdAt": {
+            "S": "2026-09-08T15:00:00Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-08T15:00:00Z"
+          }
         },
         {
-          "pk": { "S": "USER#user-001" },
-          "sk": { "S": "DEVICE#dev-002" },
-          "entity": { "S": "user-device" },
-          "role": { "S": "owner" },
-          "name": { "S": "Heart Rate Sensor B" }
+          "pk": {
+            "S": "USER#user-002"
+          },
+          "sk": {
+            "S": "MODULE#mod-004"
+          },
+          "entity": {
+            "S": "user-module"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "name": {
+            "S": "nRF flasher"
+          }
         },
         {
-          "pk": { "S": "DEVICE#dev-001" },
-          "sk": { "S": "USER#user-001" },
-          "entity": { "S": "device-user" },
-          "role": { "S": "owner" }
+          "pk": {
+            "S": "MODULE#mod-004"
+          },
+          "sk": {
+            "S": "USER#user-002"
+          },
+          "entity": {
+            "S": "module-user"
+          },
+          "role": {
+            "S": "owner"
+          }
         },
         {
-          "pk": { "S": "DEVICE#dev-002" },
-          "sk": { "S": "USER#user-001" },
-          "entity": { "S": "device-user" },
-          "role": { "S": "owner" }
+          "pk": {
+            "S": "MODULE#mod-001"
+          },
+          "sk": {
+            "S": "VERSION#0001"
+          },
+          "entity": {
+            "S": "module-version"
+          },
+          "level": {
+            "S": "L1"
+          },
+          "envId": {
+            "S": "env-001"
+          },
+          "envVersion": {
+            "N": "1"
+          },
+          "sourceKey": {
+            "S": "modules/mod-001/0001/parse_bp.py"
+          },
+          "sha256": {
+            "S": "9f2c1e7a"
+          },
+          "status": {
+            "S": "ready"
+          },
+          "statusReason": {
+            "S": "build succeeded"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-06T09:06:00Z"
+          },
+          "buildId": {
+            "S": "script-build:a41f09c2"
+          },
+          "imageDigest": {
+            "S": "sha256:3c4d5e6f7a8b"
+          },
+          "freezeKey": {
+            "S": "modules/mod-001/0001/freeze/"
+          },
+          "createdAt": {
+            "S": "2026-09-06T09:00:00Z"
+          }
         },
         {
-          "pk": { "S": "USER#user-001" },
-          "sk": { "S": "MODULE#mod-001" },
-          "entity": { "S": "user-module" },
-          "role": { "S": "owner" },
-          "name": { "S": "BP Validation Script" }
+          "pk": {
+            "S": "MODULE#mod-001"
+          },
+          "sk": {
+            "S": "VERSION#0002"
+          },
+          "entity": {
+            "S": "module-version"
+          },
+          "level": {
+            "S": "L1"
+          },
+          "envId": {
+            "S": "env-001"
+          },
+          "envVersion": {
+            "N": "2"
+          },
+          "sourceKey": {
+            "S": "modules/mod-001/0002/parse_bp.py"
+          },
+          "sha256": {
+            "S": "b81d4f03"
+          },
+          "status": {
+            "S": "ready"
+          },
+          "statusReason": {
+            "S": "build succeeded"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-13T11:05:00Z"
+          },
+          "buildId": {
+            "S": "script-build:c7720e5d"
+          },
+          "imageDigest": {
+            "S": "sha256:5e6f7a8b9c0d"
+          },
+          "freezeKey": {
+            "S": "modules/mod-001/0002/freeze/"
+          },
+          "createdAt": {
+            "S": "2026-09-13T11:00:00Z"
+          }
         },
         {
-          "pk": { "S": "USER#user-001" },
-          "sk": { "S": "MODULE#mod-002" },
-          "entity": { "S": "user-module" },
-          "role": { "S": "owner" },
-          "name": { "S": "Nmap Network Scanner" }
+          "pk": {
+            "S": "MODULE#mod-002"
+          },
+          "sk": {
+            "S": "VERSION#0001"
+          },
+          "entity": {
+            "S": "module-version"
+          },
+          "command": {
+            "S": "binwalk -e -C /outputs /inputs/*"
+          },
+          "envId": {
+            "S": "env-001"
+          },
+          "envVersion": {
+            "N": "2"
+          },
+          "status": {
+            "S": "ready"
+          },
+          "statusReason": {
+            "S": "build succeeded"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-12T10:04:00Z"
+          },
+          "buildId": {
+            "S": "script-build:e19b33f8"
+          },
+          "imageDigest": {
+            "S": "sha256:0d1e2f3a4b5c"
+          },
+          "freezeKey": {
+            "S": "modules/mod-002/0001/freeze/"
+          },
+          "createdAt": {
+            "S": "2026-09-12T10:00:00Z"
+          }
         },
         {
-          "pk": { "S": "MODULE#mod-001" },
-          "sk": { "S": "USER#user-001" },
-          "entity": { "S": "module-user" },
-          "role": { "S": "owner" }
+          "pk": {
+            "S": "MODULE#mod-003"
+          },
+          "sk": {
+            "S": "VERSION#0001"
+          },
+          "entity": {
+            "S": "module-version"
+          },
+          "sourceKey": {
+            "S": "modules/mod-003/0001/ble_capture.py"
+          },
+          "sha256": {
+            "S": "4e6a0b91"
+          },
+          "sizeBytes": {
+            "N": "18342"
+          },
+          "originalFilename": {
+            "S": "ble_capture.py"
+          },
+          "status": {
+            "S": "ready"
+          },
+          "statusReason": {
+            "S": "upload verified"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-07T12:01:00Z"
+          },
+          "createdAt": {
+            "S": "2026-09-07T12:00:00Z"
+          }
         },
         {
-          "pk": { "S": "MODULE#mod-002" },
-          "sk": { "S": "USER#user-001" },
-          "entity": { "S": "module-user" },
-          "role": { "S": "owner" }
+          "pk": {
+            "S": "MODULE#mod-004"
+          },
+          "sk": {
+            "S": "VERSION#0001"
+          },
+          "entity": {
+            "S": "module-version"
+          },
+          "sourceKey": {
+            "S": "modules/mod-004/0001/nrf_flasher.zip"
+          },
+          "sha256": {
+            "S": "d05c77e2"
+          },
+          "sizeBytes": {
+            "N": "2481907"
+          },
+          "originalFilename": {
+            "S": "nrf_flasher.zip"
+          },
+          "status": {
+            "S": "pending"
+          },
+          "statusReason": {
+            "S": "awaiting upload"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-08T15:00:00Z"
+          },
+          "createdAt": {
+            "S": "2026-09-08T15:00:00Z"
+          }
         },
         {
-          "pk": { "S": "SESSION#sess-001" },
-          "sk": { "S": "TOOL" },
-          "entity": { "S": "session" },
-          "name": { "S": "Nmap Scan - Live Session" },
-          "status": { "S": "running" },
-          "moduleId": { "S": "mod-002" },
-          "startedAt": { "S": "2026-04-08T09:00:00Z" }
+          "pk": {
+            "S": "ARTIFACT#art-001"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "artifact"
+          },
+          "name": {
+            "S": "BP Monitor A firmware v1.0.0"
+          },
+          "type": {
+            "S": "firmware"
+          },
+          "sha256": {
+            "S": "e3b0c442"
+          },
+          "sizeBytes": {
+            "N": "2516582"
+          },
+          "originalFilename": {
+            "S": "bp_a_v1.0.0.bin"
+          },
+          "s3Bucket": {
+            "S": "healthcare-iot-testbed-dev-data-lake"
+          },
+          "s3Key": {
+            "S": "artifacts/art-001/bp_a_v1.0.0.bin"
+          },
+          "attemptId": {
+            "S": "att-001"
+          },
+          "status": {
+            "S": "ready"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-02T10:00:00Z"
+          },
+          "createdBy": {
+            "S": "user-001"
+          },
+          "createdAt": {
+            "S": "2026-09-02T10:00:00Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-02T10:00:00Z"
+          },
+          "version": {
+            "S": "v1.0.0"
+          }
         },
         {
-          "pk": { "S": "SESSION#sess-002" },
-          "sk": { "S": "SCRIPT" },
-          "entity": { "S": "session" },
-          "name": { "S": "BP Bulk Firmware Patch" },
-          "status": { "S": "running" },
-          "moduleId": { "S": "mod-001" },
-          "startedAt": { "S": "2026-04-08T09:15:00Z" }
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "ARTIFACT#art-001"
+          },
+          "entity": {
+            "S": "user-artifact"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "name": {
+            "S": "BP Monitor A firmware v1.0.0"
+          },
+          "status": {
+            "S": "ready"
+          }
         },
         {
-          "pk": { "S": "SESSION#sess-003" },
-          "sk": { "S": "TOOL" },
-          "entity": { "S": "session" },
-          "name": { "S": "Nmap Scan - HR Sensor Network" },
-          "status": { "S": "running" },
-          "moduleId": { "S": "mod-002" },
-          "startedAt": { "S": "2026-04-08T10:00:00Z" }
+          "pk": {
+            "S": "ARTIFACT#art-001"
+          },
+          "sk": {
+            "S": "USER#user-001"
+          },
+          "entity": {
+            "S": "artifact-user"
+          },
+          "role": {
+            "S": "owner"
+          }
         },
         {
-          "pk": { "S": "USER#user-001" },
-          "sk": { "S": "SESSION#sess-001" },
-          "entity": { "S": "user-session" },
-          "name": { "S": "Nmap Scan - Live Session" },
-          "status": { "S": "running" }
+          "pk": {
+            "S": "DEVICE#dev-001"
+          },
+          "sk": {
+            "S": "ARTIFACT#firmware#art-001"
+          },
+          "entity": {
+            "S": "device-artifact"
+          },
+          "name": {
+            "S": "BP Monitor A firmware v1.0.0"
+          },
+          "type": {
+            "S": "firmware"
+          }
         },
         {
-          "pk": { "S": "USER#user-001" },
-          "sk": { "S": "SESSION#sess-002" },
-          "entity": { "S": "user-session" },
-          "name": { "S": "BP Bulk Firmware Patch" },
-          "status": { "S": "running" }
+          "pk": {
+            "S": "ARTIFACT#art-001"
+          },
+          "sk": {
+            "S": "DEVICE#dev-001"
+          },
+          "entity": {
+            "S": "artifact-device"
+          },
+          "name": {
+            "S": "Blood Pressure Monitor A"
+          }
         },
         {
-          "pk": { "S": "USER#user-002" },
-          "sk": { "S": "SESSION#sess-003" },
-          "entity": { "S": "user-session" },
-          "name": { "S": "Nmap Scan - HR Sensor Network" },
-          "status": { "S": "running" }
+          "pk": {
+            "S": "ARTIFACT#art-002"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "artifact"
+          },
+          "name": {
+            "S": "BP Monitor A firmware v2.1.0"
+          },
+          "type": {
+            "S": "firmware"
+          },
+          "sha256": {
+            "S": "8f14e45f"
+          },
+          "sizeBytes": {
+            "N": "3040870"
+          },
+          "originalFilename": {
+            "S": "bp_a_v2.1.0.bin"
+          },
+          "s3Bucket": {
+            "S": "healthcare-iot-testbed-dev-data-lake"
+          },
+          "s3Key": {
+            "S": "artifacts/art-002/bp_a_v2.1.0.bin"
+          },
+          "attemptId": {
+            "S": "att-002"
+          },
+          "status": {
+            "S": "ready"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-04T10:00:00Z"
+          },
+          "createdBy": {
+            "S": "user-001"
+          },
+          "createdAt": {
+            "S": "2026-09-04T10:00:00Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-04T10:00:00Z"
+          },
+          "version": {
+            "S": "v2.1.0"
+          }
         },
         {
-          "pk": { "S": "SESSION#sess-001" },
-          "sk": { "S": "USER#user-001" },
-          "entity": { "S": "session-user" }
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "ARTIFACT#art-002"
+          },
+          "entity": {
+            "S": "user-artifact"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "name": {
+            "S": "BP Monitor A firmware v2.1.0"
+          },
+          "status": {
+            "S": "ready"
+          }
         },
         {
-          "pk": { "S": "SESSION#sess-002" },
-          "sk": { "S": "USER#user-001" },
-          "entity": { "S": "session-user" }
+          "pk": {
+            "S": "ARTIFACT#art-002"
+          },
+          "sk": {
+            "S": "USER#user-001"
+          },
+          "entity": {
+            "S": "artifact-user"
+          },
+          "role": {
+            "S": "owner"
+          }
         },
         {
-          "pk": { "S": "SESSION#sess-003" },
-          "sk": { "S": "USER#user-002" },
-          "entity": { "S": "session-user" }
+          "pk": {
+            "S": "DEVICE#dev-001"
+          },
+          "sk": {
+            "S": "ARTIFACT#firmware#art-002"
+          },
+          "entity": {
+            "S": "device-artifact"
+          },
+          "name": {
+            "S": "BP Monitor A firmware v2.1.0"
+          },
+          "type": {
+            "S": "firmware"
+          }
         },
         {
-          "pk": { "S": "MODULE#mod-002" },
-          "sk": { "S": "SESSION#sess-001" },
-          "entity": { "S": "module-session" },
-          "status": { "S": "running" }
+          "pk": {
+            "S": "ARTIFACT#art-002"
+          },
+          "sk": {
+            "S": "DEVICE#dev-001"
+          },
+          "entity": {
+            "S": "artifact-device"
+          },
+          "name": {
+            "S": "Blood Pressure Monitor A"
+          }
         },
         {
-          "pk": { "S": "MODULE#mod-001" },
-          "sk": { "S": "SESSION#sess-002" },
-          "entity": { "S": "module-session" },
-          "status": { "S": "running" }
+          "pk": {
+            "S": "ARTIFACT#art-003"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "artifact"
+          },
+          "name": {
+            "S": "HR Sensor B firmware v1.3.2"
+          },
+          "type": {
+            "S": "firmware"
+          },
+          "sha256": {
+            "S": "c9f0f895"
+          },
+          "sizeBytes": {
+            "N": "1468006"
+          },
+          "originalFilename": {
+            "S": "hr_b_v1.3.2.bin"
+          },
+          "s3Bucket": {
+            "S": "healthcare-iot-testbed-dev-data-lake"
+          },
+          "s3Key": {
+            "S": "artifacts/art-003/hr_b_v1.3.2.bin"
+          },
+          "attemptId": {
+            "S": "att-003"
+          },
+          "status": {
+            "S": "ready"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-04T11:00:00Z"
+          },
+          "createdBy": {
+            "S": "user-001"
+          },
+          "createdAt": {
+            "S": "2026-09-04T11:00:00Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-04T11:00:00Z"
+          },
+          "version": {
+            "S": "v1.3.2"
+          }
         },
         {
-          "pk": { "S": "MODULE#mod-002" },
-          "sk": { "S": "SESSION#sess-003" },
-          "entity": { "S": "module-session" },
-          "status": { "S": "running" }
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "ARTIFACT#art-003"
+          },
+          "entity": {
+            "S": "user-artifact"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "name": {
+            "S": "HR Sensor B firmware v1.3.2"
+          },
+          "status": {
+            "S": "ready"
+          }
+        },
+        {
+          "pk": {
+            "S": "ARTIFACT#art-003"
+          },
+          "sk": {
+            "S": "USER#user-001"
+          },
+          "entity": {
+            "S": "artifact-user"
+          },
+          "role": {
+            "S": "owner"
+          }
+        },
+        {
+          "pk": {
+            "S": "DEVICE#dev-002"
+          },
+          "sk": {
+            "S": "ARTIFACT#firmware#art-003"
+          },
+          "entity": {
+            "S": "device-artifact"
+          },
+          "name": {
+            "S": "HR Sensor B firmware v1.3.2"
+          },
+          "type": {
+            "S": "firmware"
+          }
+        },
+        {
+          "pk": {
+            "S": "ARTIFACT#art-003"
+          },
+          "sk": {
+            "S": "DEVICE#dev-002"
+          },
+          "entity": {
+            "S": "artifact-device"
+          },
+          "name": {
+            "S": "Heart Rate Sensor B"
+          }
+        },
+        {
+          "pk": {
+            "S": "ARTIFACT#art-004"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "artifact"
+          },
+          "name": {
+            "S": "Lab BLE capture"
+          },
+          "type": {
+            "S": "pcap"
+          },
+          "sha256": {
+            "S": "45c48cce"
+          },
+          "sizeBytes": {
+            "N": "48213990"
+          },
+          "originalFilename": {
+            "S": "lab_capture.pcap"
+          },
+          "s3Bucket": {
+            "S": "healthcare-iot-testbed-dev-data-lake"
+          },
+          "s3Key": {
+            "S": "artifacts/art-004/lab_capture.pcap"
+          },
+          "attemptId": {
+            "S": "att-004"
+          },
+          "status": {
+            "S": "ready"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-09T14:00:00Z"
+          },
+          "createdBy": {
+            "S": "user-001"
+          },
+          "createdAt": {
+            "S": "2026-09-09T14:00:00Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-09T14:00:00Z"
+          },
+          "tags": {
+            "SS": [
+              "ble",
+              "lab"
+            ]
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "ARTIFACT#art-004"
+          },
+          "entity": {
+            "S": "user-artifact"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "name": {
+            "S": "Lab BLE capture"
+          },
+          "status": {
+            "S": "ready"
+          }
+        },
+        {
+          "pk": {
+            "S": "ARTIFACT#art-004"
+          },
+          "sk": {
+            "S": "USER#user-001"
+          },
+          "entity": {
+            "S": "artifact-user"
+          },
+          "role": {
+            "S": "owner"
+          }
+        },
+        {
+          "pk": {
+            "S": "ARTIFACT#art-005"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "artifact"
+          },
+          "name": {
+            "S": "parse_bp output - v1.0.0"
+          },
+          "type": {
+            "S": "output"
+          },
+          "sha256": {
+            "S": "d3d94468"
+          },
+          "sizeBytes": {
+            "N": "20480"
+          },
+          "originalFilename": {
+            "S": "bp_a_v1.0.0.json"
+          },
+          "s3Bucket": {
+            "S": "healthcare-iot-testbed-dev-data-lake"
+          },
+          "s3Key": {
+            "S": "artifacts/art-005/bp_a_v1.0.0.json"
+          },
+          "attemptId": {
+            "S": "att-005"
+          },
+          "status": {
+            "S": "ready"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-14T09:03:10Z"
+          },
+          "createdBy": {
+            "S": "user-001"
+          },
+          "createdAt": {
+            "S": "2026-09-14T09:03:10Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-14T09:03:10Z"
+          },
+          "derivedFromRun": {
+            "S": "run-001"
+          },
+          "derivedFromArtifacts": {
+            "SS": [
+              "art-001"
+            ]
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "ARTIFACT#art-005"
+          },
+          "entity": {
+            "S": "user-artifact"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "name": {
+            "S": "parse_bp output - v1.0.0"
+          },
+          "status": {
+            "S": "ready"
+          }
+        },
+        {
+          "pk": {
+            "S": "ARTIFACT#art-005"
+          },
+          "sk": {
+            "S": "USER#user-001"
+          },
+          "entity": {
+            "S": "artifact-user"
+          },
+          "role": {
+            "S": "owner"
+          }
+        },
+        {
+          "pk": {
+            "S": "DEVICE#dev-001"
+          },
+          "sk": {
+            "S": "ARTIFACT#output#art-005"
+          },
+          "entity": {
+            "S": "device-artifact"
+          },
+          "name": {
+            "S": "parse_bp output - v1.0.0"
+          },
+          "type": {
+            "S": "output"
+          }
+        },
+        {
+          "pk": {
+            "S": "ARTIFACT#art-005"
+          },
+          "sk": {
+            "S": "DEVICE#dev-001"
+          },
+          "entity": {
+            "S": "artifact-device"
+          },
+          "name": {
+            "S": "Blood Pressure Monitor A"
+          }
+        },
+        {
+          "pk": {
+            "S": "ARTIFACT#art-006"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "artifact"
+          },
+          "name": {
+            "S": "parse_bp output - v2.1.0"
+          },
+          "type": {
+            "S": "output"
+          },
+          "sha256": {
+            "S": "6512bd43"
+          },
+          "sizeBytes": {
+            "N": "22528"
+          },
+          "originalFilename": {
+            "S": "bp_a_v2.1.0.json"
+          },
+          "s3Bucket": {
+            "S": "healthcare-iot-testbed-dev-data-lake"
+          },
+          "s3Key": {
+            "S": "artifacts/art-006/bp_a_v2.1.0.json"
+          },
+          "attemptId": {
+            "S": "att-006"
+          },
+          "status": {
+            "S": "ready"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-14T09:03:40Z"
+          },
+          "createdBy": {
+            "S": "user-001"
+          },
+          "createdAt": {
+            "S": "2026-09-14T09:03:40Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-14T09:03:40Z"
+          },
+          "derivedFromRun": {
+            "S": "run-001"
+          },
+          "derivedFromArtifacts": {
+            "SS": [
+              "art-002"
+            ]
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "ARTIFACT#art-006"
+          },
+          "entity": {
+            "S": "user-artifact"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "name": {
+            "S": "parse_bp output - v2.1.0"
+          },
+          "status": {
+            "S": "ready"
+          }
+        },
+        {
+          "pk": {
+            "S": "ARTIFACT#art-006"
+          },
+          "sk": {
+            "S": "USER#user-001"
+          },
+          "entity": {
+            "S": "artifact-user"
+          },
+          "role": {
+            "S": "owner"
+          }
+        },
+        {
+          "pk": {
+            "S": "DEVICE#dev-001"
+          },
+          "sk": {
+            "S": "ARTIFACT#output#art-006"
+          },
+          "entity": {
+            "S": "device-artifact"
+          },
+          "name": {
+            "S": "parse_bp output - v2.1.0"
+          },
+          "type": {
+            "S": "output"
+          }
+        },
+        {
+          "pk": {
+            "S": "ARTIFACT#art-006"
+          },
+          "sk": {
+            "S": "DEVICE#dev-001"
+          },
+          "entity": {
+            "S": "artifact-device"
+          },
+          "name": {
+            "S": "Blood Pressure Monitor A"
+          }
+        },
+        {
+          "pk": {
+            "S": "ARTIFACT#art-007"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "artifact"
+          },
+          "name": {
+            "S": "Insulin Pump C firmware v0.9.4"
+          },
+          "type": {
+            "S": "firmware"
+          },
+          "sha256": {
+            "S": "c20ad4d7"
+          },
+          "sizeBytes": {
+            "N": "917504"
+          },
+          "originalFilename": {
+            "S": "pump_c_v0.9.4.hex"
+          },
+          "s3Bucket": {
+            "S": "healthcare-iot-testbed-dev-data-lake"
+          },
+          "s3Key": {
+            "S": "artifacts/art-007/pump_c_v0.9.4.hex"
+          },
+          "attemptId": {
+            "S": "att-007"
+          },
+          "status": {
+            "S": "verifying"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-10T16:00:00Z"
+          },
+          "createdBy": {
+            "S": "user-002"
+          },
+          "createdAt": {
+            "S": "2026-09-10T16:00:00Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-10T16:00:00Z"
+          },
+          "version": {
+            "S": "v0.9.4"
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-002"
+          },
+          "sk": {
+            "S": "ARTIFACT#art-007"
+          },
+          "entity": {
+            "S": "user-artifact"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "name": {
+            "S": "Insulin Pump C firmware v0.9.4"
+          },
+          "status": {
+            "S": "verifying"
+          }
+        },
+        {
+          "pk": {
+            "S": "ARTIFACT#art-007"
+          },
+          "sk": {
+            "S": "USER#user-002"
+          },
+          "entity": {
+            "S": "artifact-user"
+          },
+          "role": {
+            "S": "owner"
+          }
+        },
+        {
+          "pk": {
+            "S": "DEVICE#dev-003"
+          },
+          "sk": {
+            "S": "ARTIFACT#firmware#art-007"
+          },
+          "entity": {
+            "S": "device-artifact"
+          },
+          "name": {
+            "S": "Insulin Pump C firmware v0.9.4"
+          },
+          "type": {
+            "S": "firmware"
+          }
+        },
+        {
+          "pk": {
+            "S": "ARTIFACT#art-007"
+          },
+          "sk": {
+            "S": "DEVICE#dev-003"
+          },
+          "entity": {
+            "S": "artifact-device"
+          },
+          "name": {
+            "S": "Insulin Pump C"
+          }
+        },
+        {
+          "pk": {
+            "S": "RUN#run-001"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "run"
+          },
+          "name": {
+            "S": "BP firmware parse - all dev-001 firmware"
+          },
+          "moduleId": {
+            "S": "mod-001"
+          },
+          "moduleVersion": {
+            "N": "2"
+          },
+          "query": {
+            "S": "device=dev-001 type=firmware"
+          },
+          "mode": {
+            "S": "map"
+          },
+          "class": {
+            "S": "economy"
+          },
+          "size": {
+            "S": "S"
+          },
+          "childCount": {
+            "N": "2"
+          },
+          "estimate": {
+            "S": "0.02"
+          },
+          "maxCost": {
+            "S": "0.10"
+          },
+          "held": {
+            "S": "0"
+          },
+          "costProvisional": {
+            "S": "0.0134"
+          },
+          "costActual": {
+            "S": "0.0121"
+          },
+          "tokenHash": {
+            "S": "sha256:f0e1d2c3"
+          },
+          "status": {
+            "S": "completed"
+          },
+          "statusReason": {
+            "S": "all children succeeded"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-14T09:04:00Z"
+          },
+          "startedAt": {
+            "S": "2026-09-14T09:00:00Z"
+          },
+          "endedAt": {
+            "S": "2026-09-14T09:04:00Z"
+          },
+          "createdBy": {
+            "S": "user-001"
+          },
+          "createdAt": {
+            "S": "2026-09-14T08:59:30Z"
+          },
+          "updatedAt": {
+            "S": "2026-10-03T02:00:00Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "RUN#run-001"
+          },
+          "sk": {
+            "S": "CHILD#00000"
+          },
+          "entity": {
+            "S": "run-child"
+          },
+          "batchJobId": {
+            "S": "4b1e7c20-aa11-4d2e-9f00-000000000000:0"
+          },
+          "attempts": {
+            "N": "1"
+          },
+          "inputCount": {
+            "N": "1"
+          },
+          "status": {
+            "S": "succeeded"
+          },
+          "statusReason": {
+            "S": "exit 0"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-14T09:03:10Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "RUN#run-001"
+          },
+          "sk": {
+            "S": "RESULT#e3b0c442"
+          },
+          "entity": {
+            "S": "run-result"
+          },
+          "inputArtifactId": {
+            "S": "art-001"
+          },
+          "outputArtifactIds": {
+            "SS": [
+              "art-005"
+            ]
+          },
+          "status": {
+            "S": "done"
+          }
+        },
+        {
+          "pk": {
+            "S": "RUN#run-001"
+          },
+          "sk": {
+            "S": "ARTIFACT#art-001"
+          },
+          "entity": {
+            "S": "run-artifact"
+          },
+          "relation": {
+            "S": "input"
+          },
+          "name": {
+            "S": "BP Monitor A firmware v1.0.0"
+          }
+        },
+        {
+          "pk": {
+            "S": "RUN#run-001"
+          },
+          "sk": {
+            "S": "ARTIFACT#art-005"
+          },
+          "entity": {
+            "S": "run-artifact"
+          },
+          "relation": {
+            "S": "output"
+          },
+          "name": {
+            "S": "parse_bp output - v1.0.0"
+          }
+        },
+        {
+          "pk": {
+            "S": "RUN#run-001"
+          },
+          "sk": {
+            "S": "CHILD#00001"
+          },
+          "entity": {
+            "S": "run-child"
+          },
+          "batchJobId": {
+            "S": "4b1e7c20-aa11-4d2e-9f00-000000000001:1"
+          },
+          "attempts": {
+            "N": "2"
+          },
+          "inputCount": {
+            "N": "1"
+          },
+          "status": {
+            "S": "succeeded"
+          },
+          "statusReason": {
+            "S": "exit 0 after Spot interruption retry"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-14T09:03:40Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "RUN#run-001"
+          },
+          "sk": {
+            "S": "RESULT#8f14e45f"
+          },
+          "entity": {
+            "S": "run-result"
+          },
+          "inputArtifactId": {
+            "S": "art-002"
+          },
+          "outputArtifactIds": {
+            "SS": [
+              "art-006"
+            ]
+          },
+          "status": {
+            "S": "done"
+          }
+        },
+        {
+          "pk": {
+            "S": "RUN#run-001"
+          },
+          "sk": {
+            "S": "ARTIFACT#art-002"
+          },
+          "entity": {
+            "S": "run-artifact"
+          },
+          "relation": {
+            "S": "input"
+          },
+          "name": {
+            "S": "BP Monitor A firmware v2.1.0"
+          }
+        },
+        {
+          "pk": {
+            "S": "RUN#run-001"
+          },
+          "sk": {
+            "S": "ARTIFACT#art-006"
+          },
+          "entity": {
+            "S": "run-artifact"
+          },
+          "relation": {
+            "S": "output"
+          },
+          "name": {
+            "S": "parse_bp output - v2.1.0"
+          }
+        },
+        {
+          "pk": {
+            "S": "DEVICE#dev-001"
+          },
+          "sk": {
+            "S": "RUN#run-001"
+          },
+          "entity": {
+            "S": "device-run"
+          },
+          "name": {
+            "S": "BP firmware parse - all dev-001 firmware"
+          },
+          "status": {
+            "S": "completed"
+          }
+        },
+        {
+          "pk": {
+            "S": "RUN#run-001"
+          },
+          "sk": {
+            "S": "DEVICE#dev-001"
+          },
+          "entity": {
+            "S": "run-device"
+          },
+          "name": {
+            "S": "Blood Pressure Monitor A"
+          }
+        },
+        {
+          "pk": {
+            "S": "MODULE#mod-001"
+          },
+          "sk": {
+            "S": "RUN#run-001"
+          },
+          "entity": {
+            "S": "module-run"
+          },
+          "moduleVersion": {
+            "N": "2"
+          },
+          "status": {
+            "S": "completed"
+          },
+          "durationSec": {
+            "N": "240"
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "RUN#run-001"
+          },
+          "entity": {
+            "S": "user-run"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "name": {
+            "S": "BP firmware parse - all dev-001 firmware"
+          },
+          "status": {
+            "S": "completed"
+          }
+        },
+        {
+          "pk": {
+            "S": "RUN#run-001"
+          },
+          "sk": {
+            "S": "USER#user-001"
+          },
+          "entity": {
+            "S": "run-user"
+          },
+          "role": {
+            "S": "owner"
+          }
+        },
+        {
+          "pk": {
+            "S": "RUN#run-002"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "run"
+          },
+          "name": {
+            "S": "binwalk - lab capture"
+          },
+          "moduleId": {
+            "S": "mod-002"
+          },
+          "moduleVersion": {
+            "N": "1"
+          },
+          "query": {
+            "S": "artifact=art-004"
+          },
+          "mode": {
+            "S": "all"
+          },
+          "class": {
+            "S": "standard"
+          },
+          "size": {
+            "S": "M"
+          },
+          "childCount": {
+            "N": "1"
+          },
+          "estimate": {
+            "S": "0.05"
+          },
+          "maxCost": {
+            "S": "0.40"
+          },
+          "held": {
+            "S": "0.40"
+          },
+          "costProvisional": {
+            "S": "0.0210"
+          },
+          "tokenHash": {
+            "S": "sha256:a9b8c7d6"
+          },
+          "status": {
+            "S": "running"
+          },
+          "statusReason": {
+            "S": "1 of 1 children running"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-26T13:02:00Z"
+          },
+          "startedAt": {
+            "S": "2026-09-26T13:00:00Z"
+          },
+          "createdBy": {
+            "S": "user-001"
+          },
+          "createdAt": {
+            "S": "2026-09-26T12:59:40Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-26T13:02:00Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "RUN#run-002"
+          },
+          "sk": {
+            "S": "CHILD#00000"
+          },
+          "entity": {
+            "S": "run-child"
+          },
+          "batchJobId": {
+            "S": "9c2d11f4-bb22-4e3f-8a11-000000000000:0"
+          },
+          "attempts": {
+            "N": "1"
+          },
+          "inputCount": {
+            "N": "1"
+          },
+          "status": {
+            "S": "running"
+          },
+          "statusReason": {
+            "S": "RUNNING"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-26T13:02:00Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "RUN#run-002"
+          },
+          "sk": {
+            "S": "ARTIFACT#art-004"
+          },
+          "entity": {
+            "S": "run-artifact"
+          },
+          "relation": {
+            "S": "input"
+          },
+          "name": {
+            "S": "Lab BLE capture"
+          }
+        },
+        {
+          "pk": {
+            "S": "MODULE#mod-002"
+          },
+          "sk": {
+            "S": "RUN#run-002"
+          },
+          "entity": {
+            "S": "module-run"
+          },
+          "moduleVersion": {
+            "N": "1"
+          },
+          "status": {
+            "S": "running"
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "RUN#run-002"
+          },
+          "entity": {
+            "S": "user-run"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "name": {
+            "S": "binwalk - lab capture"
+          },
+          "status": {
+            "S": "running"
+          }
+        },
+        {
+          "pk": {
+            "S": "RUN#run-002"
+          },
+          "sk": {
+            "S": "USER#user-001"
+          },
+          "entity": {
+            "S": "run-user"
+          },
+          "role": {
+            "S": "owner"
+          }
+        },
+        {
+          "pk": {
+            "S": "SESSION#sess-001"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "session"
+          },
+          "name": {
+            "S": "Firmware triage notebook"
+          },
+          "envId": {
+            "S": "env-001"
+          },
+          "envVersion": {
+            "N": "2"
+          },
+          "packageMode": {
+            "S": "offline"
+          },
+          "taskArn": {
+            "S": "arn:aws:ecs:us-east-1:123456789012:task/sessions/5f0c3e1d"
+          },
+          "taskIp": {
+            "S": "10.0.1.37"
+          },
+          "status": {
+            "S": "running"
+          },
+          "statusReason": {
+            "S": "RUNNING"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-26T12:31:00Z"
+          },
+          "startedAt": {
+            "S": "2026-09-26T12:30:00Z"
+          },
+          "lastActivity": {
+            "S": "2026-09-26T13:10:00Z"
+          },
+          "cost": {
+            "S": "0.0420"
+          },
+          "createdBy": {
+            "S": "user-001"
+          },
+          "createdAt": {
+            "S": "2026-09-26T12:29:50Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-26T13:10:00Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "SESSION#sess-001"
+          },
+          "entity": {
+            "S": "user-session"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "name": {
+            "S": "Firmware triage notebook"
+          },
+          "status": {
+            "S": "running"
+          }
+        },
+        {
+          "pk": {
+            "S": "SESSION#sess-001"
+          },
+          "sk": {
+            "S": "USER#user-001"
+          },
+          "entity": {
+            "S": "session-user"
+          },
+          "role": {
+            "S": "owner"
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "BUDGET"
+          },
+          "entity": {
+            "S": "budget"
+          },
+          "monthlyLimit": {
+            "S": "50.00"
+          },
+          "held": {
+            "S": "0.40"
+          },
+          "heavyEnabled": {
+            "BOOL": true
+          },
+          "updatedAt": {
+            "S": "2026-09-26T13:00:00Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-002"
+          },
+          "sk": {
+            "S": "BUDGET"
+          },
+          "entity": {
+            "S": "budget"
+          },
+          "monthlyLimit": {
+            "S": "10.00"
+          },
+          "held": {
+            "S": "0"
+          },
+          "heavyEnabled": {
+            "BOOL": false
+          },
+          "updatedAt": {
+            "S": "2026-09-03T09:30:00Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "USAGE#2026-09-13T11:05:00Z#codebuild#mod-001-0002"
+          },
+          "entity": {
+            "S": "usage"
+          },
+          "kind": {
+            "S": "provisional"
+          },
+          "amount": {
+            "S": "0.0050"
+          },
+          "resource": {
+            "S": "build mod-001 v2"
+          },
+          "costTags": {
+            "M": {
+              "userId": {
+                "S": "user-001"
+              },
+              "resourceId": {
+                "S": "mod-001-0002"
+              }
+            }
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "USAGE#2026-09-14T09:04:00Z#batch#run-001"
+          },
+          "entity": {
+            "S": "usage"
+          },
+          "kind": {
+            "S": "provisional"
+          },
+          "amount": {
+            "S": "0.0134"
+          },
+          "resource": {
+            "S": "run run-001"
+          },
+          "costTags": {
+            "M": {
+              "userId": {
+                "S": "user-001"
+              },
+              "resourceId": {
+                "S": "run-001"
+              }
+            }
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "USAGE#2026-09-26T13:10:00Z#ecs#sess-001"
+          },
+          "entity": {
+            "S": "usage"
+          },
+          "kind": {
+            "S": "provisional"
+          },
+          "amount": {
+            "S": "0.0420"
+          },
+          "resource": {
+            "S": "session sess-001"
+          },
+          "costTags": {
+            "M": {
+              "userId": {
+                "S": "user-001"
+              },
+              "resourceId": {
+                "S": "sess-001"
+              }
+            }
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "USAGE#2026-10-03T02:00:00Z#cur#run-001"
+          },
+          "entity": {
+            "S": "usage"
+          },
+          "kind": {
+            "S": "actual"
+          },
+          "amount": {
+            "S": "0.0121"
+          },
+          "resource": {
+            "S": "run run-001"
+          },
+          "costTags": {
+            "M": {
+              "userId": {
+                "S": "user-001"
+              },
+              "resourceId": {
+                "S": "run-001"
+              }
+            }
+          }
         }
-      ]
+      ],
+      "DataAccess": {
+        "MySql": {}
+      }
     }
   ]
 }
