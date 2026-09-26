@@ -24,3 +24,14 @@ variable "cors_rules" {
   }))
   default = []
 }
+variable "lifecycle_rules" {
+  description = "Optional lifecycle rules. Each rule filters on a key prefix and, optionally, object tags."
+  type = list(object({
+    id                                     = string
+    prefix                                 = optional(string, "")
+    tags                                   = optional(map(string), {})
+    abort_incomplete_multipart_upload_days = optional(number)
+    expiration_days                        = optional(number)
+  }))
+  default = []
+}

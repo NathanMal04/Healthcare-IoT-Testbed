@@ -53,6 +53,21 @@ module "data_lake_bucket" {
     expose_headers  = ["ETag"]
     max_age_seconds = 3000
   }]
+
+  lifecycle_rules = [
+    {
+      id                                     = "abort-incomplete-multipart-uploads"
+      abort_incomplete_multipart_upload_days = 1
+    },
+    {
+      # Artifact objects are tagged upload-state=pending until they are
+      # verified, so superseded retry attempts and abandoned uploads expire.
+      id              = "expire-unverified-artifact-uploads"
+      prefix          = "artifacts/"
+      tags            = { "upload-state" = "pending" }
+      expiration_days = 7
+    },
+  ]
 }
 
 # Single-table design for all entity metadata (devices, tests, scripts, tools)
@@ -144,26 +159,9 @@ resource "aws_iam_policy" "lambda_dynamodb" {
   })
 }
 
-resource "aws_iam_policy" "lambda_s3_uploads" {
-  name = "${var.name}-lambda-s3-uploads"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "s3:PutObject",
-        "s3:GetObject",
-        "s3:HeadObject"
-      ]
-      Resource = "${module.data_lake_bucket.bucket_arn}/devices/*"
-    }]
-  })
-}
-
 # Scoped IAM policies for the Device Lambdas — each gets only the DynamoDB
 # actions it actually performs, rather than the broad lambda_dynamodb policy
-# used by the upload/auth Lambdas.
+# used by the auth Lambda.
 #
 # create-device writes 3 items (device metadata + both relationship rows) via
 # TransactWriteItems, all as Put operations. Per AWS's DynamoDB transactions
@@ -200,8 +198,7 @@ resource "aws_iam_policy" "lambda_dynamodb_list_devices" {
 
 # Scoped IAM policies for the Firmware Lambdas — same narrow-per-Lambda
 # philosophy as the Device Lambdas above, rather than the broad
-# lambda_dynamodb/lambda_s3_uploads policies used by the legacy upload
-# Lambdas.
+# lambda_dynamodb policy.
 resource "aws_iam_policy" "lambda_dynamodb_presign_firmware" {
   name = "${var.name}-lambda-presign-firmware"
 
@@ -284,49 +281,6 @@ resource "aws_iam_policy" "lambda_s3_complete_firmware" {
       Resource = "${module.data_lake_bucket.bucket_arn}/devices/*/firmware/*"
     }]
   })
-}
-
-module "uploads_presign_fn" {
-  source        = "../../modules/lambda"
-  function_name = "${var.name}-uploads-presign"
-  source_dir    = "../../../services/lambdas/uploads-presign"
-  handler       = "lambda_function.handler"
-  runtime       = "python3.12"
-
-  additional_policy_arns = [
-    aws_iam_policy.lambda_dynamodb.arn,
-    aws_iam_policy.lambda_s3_uploads.arn,
-  ]
-
-  environment_variables = {
-    METADATA_TABLE_NAME = module.metadata_table.table_name
-    DATA_LAKE_BUCKET    = module.data_lake_bucket.bucket_name
-    PRESIGN_EXPIRES_SEC = "300"
-  }
-
-  project     = var.name
-  environment = "dev"
-}
-
-module "uploads_complete_fn" {
-  source        = "../../modules/lambda"
-  function_name = "${var.name}-uploads-complete"
-  source_dir    = "../../../services/lambdas/uploads-complete"
-  handler       = "lambda_function.handler"
-  runtime       = "python3.12"
-
-  additional_policy_arns = [
-    aws_iam_policy.lambda_dynamodb.arn,
-    aws_iam_policy.lambda_s3_uploads.arn,
-  ]
-
-  environment_variables = {
-    METADATA_TABLE_NAME = module.metadata_table.table_name
-    DATA_LAKE_BUCKET    = module.data_lake_bucket.bucket_name
-  }
-
-  project     = var.name
-  environment = "dev"
 }
 
 module "create_device_fn" {
@@ -454,9 +408,7 @@ module "api" {
   environment               = "dev"
 
   deploy = true
-  deployment_trigger = sha1(jsonencode([
-    aws_api_gateway_integration.uploads_presign_post.id,
-    aws_api_gateway_integration.uploads_complete_post.id,
+  deployment_trigger = sha1(jsonencode(concat([
     aws_api_gateway_integration.devices_post.id,
     aws_api_gateway_integration.devices_get.id,
     aws_api_gateway_integration.devices_options.id,
@@ -468,93 +420,23 @@ module "api" {
     aws_api_gateway_integration.firmware_complete_options.id,
     aws_api_gateway_gateway_response.default_4xx.id,
     aws_api_gateway_gateway_response.default_5xx.id,
-  ]))
+  ], local.artifact_integration_ids)))
 }
 
 # --- API routes ---
 # Each route maps a path + method to a Lambda function.
 #
 # NOTE: the api_gateway_route module is only correct for top-level paths. For
-# nested paths (e.g. /uploads/presign) the module's source_arn would resolve
-# to /*/POST/presign instead of /*/POST/uploads/presign, causing a 403 on every
-# invocation. Nested routes must be defined inline, as shown below.
-
-# /uploads parent resource
-resource "aws_api_gateway_resource" "uploads" {
-  rest_api_id = module.api.rest_api_id
-  parent_id   = module.api.root_resource_id
-  path_part   = "uploads"
-}
-
-# POST /uploads/presign
-resource "aws_api_gateway_resource" "uploads_presign" {
-  rest_api_id = module.api.rest_api_id
-  parent_id   = aws_api_gateway_resource.uploads.id
-  path_part   = "presign"
-}
-
-resource "aws_api_gateway_method" "uploads_presign_post" {
-  rest_api_id   = module.api.rest_api_id
-  resource_id   = aws_api_gateway_resource.uploads_presign.id
-  http_method   = "POST"
-  authorization = "COGNITO_USER_POOLS"
-  authorizer_id = module.api.cognito_authorizer_id
-}
-
-resource "aws_api_gateway_integration" "uploads_presign_post" {
-  rest_api_id             = module.api.rest_api_id
-  resource_id             = aws_api_gateway_resource.uploads_presign.id
-  http_method             = aws_api_gateway_method.uploads_presign_post.http_method
-  integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = module.uploads_presign_fn.invoke_arn
-}
-
-resource "aws_lambda_permission" "uploads_presign_post" {
-  statement_id  = "AllowAPIGateway-uploads-presign-POST"
-  action        = "lambda:InvokeFunction"
-  function_name = module.uploads_presign_fn.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${module.api.execution_arn}/*/POST/uploads/presign"
-}
-
-# POST /uploads/complete
-resource "aws_api_gateway_resource" "uploads_complete" {
-  rest_api_id = module.api.rest_api_id
-  parent_id   = aws_api_gateway_resource.uploads.id
-  path_part   = "complete"
-}
-
-resource "aws_api_gateway_method" "uploads_complete_post" {
-  rest_api_id   = module.api.rest_api_id
-  resource_id   = aws_api_gateway_resource.uploads_complete.id
-  http_method   = "POST"
-  authorization = "COGNITO_USER_POOLS"
-  authorizer_id = module.api.cognito_authorizer_id
-}
-
-resource "aws_api_gateway_integration" "uploads_complete_post" {
-  rest_api_id             = module.api.rest_api_id
-  resource_id             = aws_api_gateway_resource.uploads_complete.id
-  http_method             = aws_api_gateway_method.uploads_complete_post.http_method
-  integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = module.uploads_complete_fn.invoke_arn
-}
-
-resource "aws_lambda_permission" "uploads_complete_post" {
-  statement_id  = "AllowAPIGateway-uploads-complete-POST"
-  action        = "lambda:InvokeFunction"
-  function_name = module.uploads_complete_fn.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${module.api.execution_arn}/*/POST/uploads/complete"
-}
+# nested paths (e.g. /devices/{deviceId}/firmware) the module's source_arn
+# would resolve to /*/GET/firmware instead of /*/GET/devices/*/firmware,
+# causing a 403 on every invocation. Nested routes are either defined inline,
+# as below, or with the api_lambda_method and api_cors_preflight modules
+# (see artifacts.tf).
 
 # /devices — GET and POST both live on the same top-level resource. NOTE:
 # the generic api_gateway_route module creates its own aws_api_gateway_resource
 # per call, so calling it twice with the same path_part ("devices") would try
-# to create two resources at the same path and conflict. Hand-rolled here for
-# the same reason the /uploads/* routes above are hand-rolled.
+# to create two resources at the same path and conflict, so it's hand-rolled.
 
 resource "aws_api_gateway_resource" "devices" {
   rest_api_id = module.api.rest_api_id
@@ -696,7 +578,7 @@ resource "aws_api_gateway_gateway_response" "default_5xx" {
 # /devices/{deviceId}/firmware/presign    POST -> presign-firmware
 # /devices/{deviceId}/firmware/{version}/complete  POST -> complete-firmware
 #
-# Hand-rolled for the same reason as /uploads/* and /devices above: this
+# Hand-rolled for the same reason as /devices above: this
 # tree is several levels deep, which the generic api_gateway_route module
 # (one level of nesting only) cannot express. {deviceId} and {version} are
 # this API's first path-parameter resources.

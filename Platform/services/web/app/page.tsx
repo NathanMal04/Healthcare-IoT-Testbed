@@ -5,17 +5,13 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { getDevices, createDevice, type Device } from "@/lib/devices";
 import {
-  sha256Hex,
-  presignFirmware,
-  uploadFirmwareToS3,
-  completeFirmware,
-  type CompleteFirmwareResponse,
-} from "@/lib/firmware";
+  MAX_ARTIFACT_SIZE_BYTES,
+  uploadArtifact,
+  type SingleUploadStage,
+} from "@/lib/artifacts";
 import FirmwareListModal from "@/app/components/FirmwareListModal";
 
-const MAX_FIRMWARE_SIZE_BYTES = 26214400; // 25 MiB
-
-type UploadStage = "hashing" | "reserving" | "uploading" | "verifying" | "complete";
+type UploadStage = SingleUploadStage | "complete";
 
 const UPLOAD_STAGE_LABELS: Record<UploadStage, string> = {
   hashing: "Hashing...",
@@ -24,6 +20,12 @@ const UPLOAD_STAGE_LABELS: Record<UploadStage, string> = {
   verifying: "Verifying...",
   complete: "Complete",
 };
+
+function uploadStageLabel(stage: UploadStage, progress: number | null): string {
+  const label = UPLOAD_STAGE_LABELS[stage];
+  if (progress === null || (stage !== "hashing" && stage !== "uploading")) return label;
+  return `${label.replace("...", "")} ${Math.floor(progress * 100)}%`;
+}
 
 export default function DashboardPage() {
   const { user, loading } = useAuth();
@@ -47,8 +49,9 @@ export default function DashboardPage() {
   const [fileInputKey, setFileInputKey] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [uploadStage, setUploadStage] = useState<UploadStage | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadResult, setUploadResult] = useState<CompleteFirmwareResponse | null>(null);
+  const [uploadedVersion, setUploadedVersion] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && !user) router.push("/login");
@@ -131,8 +134,9 @@ export default function DashboardPage() {
     setFile(null);
     setFileInputKey((k) => k + 1);
     setUploadStage(null);
+    setUploadProgress(null);
     setUploadError(null);
-    setUploadResult(null);
+    setUploadedVersion(null);
   }
 
   function closeUploadModal() {
@@ -142,8 +146,9 @@ export default function DashboardPage() {
     setFile(null);
     setFileInputKey((k) => k + 1);
     setUploadStage(null);
+    setUploadProgress(null);
     setUploadError(null);
-    setUploadResult(null);
+    setUploadedVersion(null);
   }
 
   function openViewModal(device: Device) {
@@ -175,45 +180,37 @@ export default function DashboardPage() {
       setUploadError("File is empty");
       return;
     }
-    if (file.size > MAX_FIRMWARE_SIZE_BYTES) {
-      setUploadError("File exceeds the 25 MiB limit");
+    if (file.size > MAX_ARTIFACT_SIZE_BYTES) {
+      setUploadError("File exceeds the 5 GiB limit");
       return;
     }
 
     setUploading(true);
     setUploadError(null);
-    setUploadResult(null);
+    setUploadedVersion(null);
 
     try {
-      setUploadStage("hashing");
-      const sha256 = await sha256Hex(file);
-
-      setUploadStage("reserving");
-      const presign = await presignFirmware(uploadDevice.deviceId, {
-        version: trimmedVersion,
-        originalFilename: file.name,
-        sizeBytes: file.size,
-        sha256,
-      });
-
-      setUploadStage("uploading");
-      await uploadFirmwareToS3(presign.upload, file);
-
-      setUploadStage("verifying");
-      const completed = await completeFirmware(
-        uploadDevice.deviceId,
-        trimmedVersion,
-        presign.attemptId
+      // Firmware is uploaded as an artifact with type=firmware, linked to
+      // this device. The backend keeps versions unique per device.
+      await uploadArtifact(
+        file,
+        { type: "firmware", version: trimmedVersion, deviceIds: [uploadDevice.deviceId] },
+        (stage, progress) => {
+          setUploadStage(stage);
+          setUploadProgress(progress ?? null);
+        }
       );
 
-      setUploadResult(completed);
+      setUploadedVersion(trimmedVersion);
       setUploadStage("complete");
+      setUploadProgress(null);
       setVersion("");
       setFile(null);
       setFileInputKey((k) => k + 1);
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload failed");
       setUploadStage(null);
+      setUploadProgress(null);
     } finally {
       setUploading(false);
     }
@@ -392,10 +389,10 @@ export default function DashboardPage() {
               <p className="text-slate-400 text-sm mt-1">{uploadDevice.name}</p>
             </div>
 
-            {uploadStage === "complete" && uploadResult ? (
+            {uploadStage === "complete" && uploadedVersion ? (
               <div className="space-y-4">
                 <p className="text-xs text-emerald-700 bg-emerald-50 px-3 py-2 rounded-lg">
-                  Firmware {uploadResult.version} is {uploadResult.status}.
+                  Firmware {uploadedVersion} is ready.
                 </p>
                 <button
                   type="button"
@@ -432,12 +429,12 @@ export default function DashboardPage() {
                     disabled={uploading}
                     className="w-full text-sm text-slate-600 disabled:opacity-50"
                   />
-                  <p className="text-xs text-slate-400 mt-1">Maximum size: 25 MiB</p>
+                  <p className="text-xs text-slate-400 mt-1">Maximum size: 5 GiB</p>
                 </div>
 
                 {uploadStage && (
                   <p className="text-xs text-blue-600 bg-blue-50 px-3 py-2 rounded-lg">
-                    {UPLOAD_STAGE_LABELS[uploadStage]}
+                    {uploadStageLabel(uploadStage, uploadProgress)}
                   </p>
                 )}
 
@@ -459,7 +456,7 @@ export default function DashboardPage() {
                     disabled={uploading || !isUploadFormValid}
                     className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
                   >
-                    {uploading ? UPLOAD_STAGE_LABELS[uploadStage ?? "hashing"] : "Upload"}
+                    {uploading ? uploadStageLabel(uploadStage ?? "hashing", uploadProgress) : "Upload"}
                   </button>
                 </div>
               </form>
