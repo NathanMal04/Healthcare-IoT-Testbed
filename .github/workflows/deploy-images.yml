@@ -45,15 +45,28 @@ jobs:
         id: tf
         working-directory: Platform/infra/envs/dev
         run: |
+          set -euo pipefail
           terraform init -input=false
-          echo "repo=$(terraform output -raw platform_base_repository_url)" >> "$GITHUB_OUTPUT"
-          echo "table=$(terraform output -raw metadata_table_name)" >> "$GITHUB_OUTPUT"
-          echo "bucket=$(terraform output -raw data_lake_bucket_name)" >> "$GITHUB_OUTPUT"
+          # The ECR repository comes from the infrastructure deploy. If it
+          # isn't there yet, stop here rather than push to the wrong registry.
+          if ! repo="$(terraform output -raw platform_base_repository_url 2>/dev/null)" || [ -z "$repo" ]; then
+            echo "::error::platform_base_repository_url is not in the Terraform state yet. Run 'Deploy Infrastructure' first, then re-run this workflow."
+            exit 1
+          fi
+          table="$(terraform output -raw metadata_table_name)"
+          bucket="$(terraform output -raw data_lake_bucket_name)"
+          {
+            echo "repo=$repo"
+            echo "registry=${repo%%/*}"
+            echo "table=$table"
+            echo "bucket=$bucket"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Log in to ECR
         run: |
+          set -euo pipefail
           aws ecr get-login-password --region "${{ secrets.AWS_REGION }}" \
-            | docker login --username AWS --password-stdin "$(echo '${{ steps.tf.outputs.repo }}' | cut -d/ -f1)"
+            | docker login --username AWS --password-stdin "${{ steps.tf.outputs.registry }}"
 
       - name: Install boto3
         run: pip install --quiet boto3
