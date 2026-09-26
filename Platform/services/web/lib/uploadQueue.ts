@@ -236,8 +236,11 @@ export class UploadQueue {
       const attemptId = await transferArtifact(
         item.file,
         upload,
-        (sent) => this.update(item, { progress: sent / item.file.size }),
-        signal
+        (sent) => this.update(item, { progress: Math.min(1, sent / item.file.size) }),
+        signal,
+        // Recorded as soon as it changes, so "Retry failed" never sends a
+        // superseded attempt.
+        (newAttemptId) => this.update(item, { attemptId: newAttemptId })
       );
       this.update(item, { attemptId, progress: 1 });
 

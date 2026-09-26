@@ -1,0 +1,23 @@
+# Buildspec for the platform image builds (environments and L1/L2/L3 scripts).
+# builds-api starts each build with environment overrides; build.py does the
+# work. The project's role can only use ECR and write its own logs: sources,
+# this buildkit and the result files all move through presigned S3 URLs.
+version: 0.2
+
+env:
+  exported-variables:
+    - IMAGE_URI
+    - BUILD_ERROR
+
+phases:
+  build:
+    commands:
+      - mkdir -p /tmp/out /tmp/buildkit
+      - curl -fsS --retry 3 "$BUILDKIT_URL" -o /tmp/buildkit.zip
+      - unzip -q -o /tmp/buildkit.zip -d /tmp/buildkit
+      - python3 /tmp/buildkit/build.py
+  post_build:
+    commands:
+      # Runs even when the build phase failed, so builds-events can show why.
+      - export IMAGE_URI="$(cat /tmp/out/image_uri 2>/dev/null || true)"
+      - export BUILD_ERROR="$(head -c 900 /tmp/out/error 2>/dev/null || true)"

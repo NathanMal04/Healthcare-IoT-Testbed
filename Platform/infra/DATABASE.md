@@ -5,7 +5,7 @@ The platform stores its records in two DynamoDB tables. The sample model for bot
 | Table | Keys | Holds |
 |---|---|---|
 | `healthcare-iot-testbed-dev-users` | `userId` | One row per Cognito user: `email`, `fullName`, `role` (`admin` / `user`), `status`, timestamps. Written by the post-confirmation Lambda. |
-| `healthcare-iot-testbed-dev-metadata` | `pk` + `sk` | Everything else, in a single-table design: devices, artifacts, upload batches, modules, environments, runs, sessions, ownership links, budgets and the usage ledger. |
+| `healthcare-iot-testbed-dev-metadata` | `pk` + `sk` | Everything else, in a single-table design: devices, artifacts, upload batches, scripts (modules), environments, runs, sessions, ownership links, budgets and the usage ledger. |
 
 The metadata table is single-table so that one `Query` on a partition returns a record and everything hanging off it: a run with its children, results and outputs, or a user with everything they own. The table has no secondary indexes. Every access pattern below is a `GetItem`, or a `Query` on `pk` with an optional `begins_with` on `sk`.
 
@@ -20,7 +20,7 @@ The metadata table is single-table so that one `Query` on a partition returns a 
 - **`entity`.** Every row has an `entity` attribute naming its kind (`device`, `run-child`, `user-artifact`, …). Use it to tell rows apart when a query returns a mixed partition.
 - **Two-way links.** A relationship is written as two rows, one in each partition, so that it can be queried from either side. Both rows are written in the same `TransactWriteItems` call. The row in the `USER#` / `DEVICE#` / `BATCH#` partition repeats a few **immutable** display fields (`name`, `type`, `createdAt`). Anything that changes, such as `status`, is only stored on the base record: list endpoints query the link rows, then read the base records with `BatchGetItem`, so status is never stale.
 - **Ownership.** Every device, artifact, upload batch, module, environment, run and session has `USER#{uid} / X#{id}` and `X#{id} / USER#{uid}` rows with `role = owner`. Their `entity` values are `user-x` / `x-user` (`user-device` / `device-user`, `user-artifact` / `artifact-user`, and likewise `batch`, `module`, `env`, `run`, `session`). `owner` is currently the only role. The ownership check is a single `GetItem(USER#{uid}, X#{id})`.
-- **Money.** Costs, holds and limits are decimal strings (`"0.0134"`), in USD.
+- **Money.** Costs, holds and limits are DynamoDB numbers (`N`, exact decimals; boto3 `Decimal`) in USD, so they can be added atomically and compared in conditions.
 - **Timestamps.** ISO-8601 UTC strings.
 
 ## Entities
@@ -91,21 +91,19 @@ The files sent together in one upload from the web app. A run can use a batch as
 
 ### Module: `MODULE#{id}` / `METADATA`
 
-A script or tool the user uploads. Modules are classified by two independent tags:
+A script the user uploads. Command-line tools reach a script through its environment (catalog tools) or an L3 Dockerfile; there is no separate "tool" module.
 
-| | `runtime = cloud` | `runtime = local` |
-|---|---|---|
-| **`kind = script`** (user-written code) | Built into an image and run in bulk on AWS Batch | Stored and versioned only; runs on the user's machine |
-| **`kind = tool`** (prebuilt program with a fixed command) | Image plus `command`, run in bulk on AWS Batch | Stored and versioned only; runs on the user's machine |
-
-The cloud never builds or runs local modules, and it doesn't record their executions.
+| | Meaning |
+|---|---|
+| **`runtime = cloud`** | Built into an image and run in bulk on AWS Batch |
+| **`runtime = local`** | Stored and versioned only; runs on the user's machine. The cloud never builds or runs it. |
 
 | Attribute | Type | Meaning |
 |---|---|---|
 | `name`, `description` | S | Display fields |
-| `kind` | S | `script` / `tool` |
 | `runtime` | S | `cloud` / `local` |
-| `latestVersion` | N | Highest version number |
+| `latestVersion` | N | Highest version number handed out |
+| `latestReadyVersion` | N | Highest version that built successfully |
 | `createdBy`, `createdAt`, `updatedAt` | S | Author and timestamps |
 
 ### Module version: `MODULE#{id}` / `VERSION#{n}`
@@ -114,70 +112,80 @@ The cloud never builds or runs local modules, and it doesn't record their execut
 
 | Attribute | Type | Cloud | Local | Meaning |
 |---|---|---|---|---|
-| `level` | S | scripts | – | `L1` (`.py` with PEP 723), `L2` (`.zip` project), `L3` (`.zip` with Dockerfile) |
-| `command` | S | tools | – | Fixed command line run inside the image |
-| `envId`, `envVersion` | S, N | ✓ | – | Environment version the image is built on |
-| `sourceKey` | S | ✓ | ✓ | S3 key of the uploaded source |
-| `sha256` | S | ✓ | ✓ | Source hash |
-| `sizeBytes`, `originalFilename` | N, S | – | ✓ | Upload details for download |
-| `buildId` | S | ✓ | – | CodeBuild build id (links to build logs) |
-| `imageDigest` | S | ✓ | – | ECR image digest the run uses |
+| `level` | S | ✓ | – | `L1` (`.py` with PEP 723), `L2` (`.zip` project), `L3` (`.zip` with Dockerfile) |
+| `envId`, `envVersion`, `baseImage` | S, N, S | L1/L2 | – | Environment version the image is built `FROM` (default `platform-base`) |
+| `command` | L | ✓ | – | What the launcher runs per work unit: the SDK driver for L1/L2, `platform.json`'s `command` for L3 |
+| `sourceKey`, `sha256`, `sizeBytes`, `originalFilename` | S, S, N, S | ✓ | ✓ | The uploaded source (`scripts/{id}/{n}/{attempt}`) |
+| `buildId` | S | ✓ | – | CodeBuild build id (links to the build log) |
+| `imageUri` | S | ✓ | – | The built image, by digest (`repo@sha256:…`) |
+| `jobDefinitionArn`, `heavyJobDefinitionArn` | S | ✓ | – | Batch job definitions for Fargate and, when enabled, EC2 |
 | `freezeKey` | S | ✓ | – | S3 prefix of the `pip freeze` / `dpkg` lists |
 | `status`, `statusReason`, `statusUpdatedAt` | S | ✓ | ✓ | See lifecycle below |
-| `createdAt` | S | ✓ | ✓ | Timestamp |
+| `createdBy`, `createdAt` | S | ✓ | ✓ | Author and timestamp |
 
 Lifecycle:
-- **Cloud:** `pending` → `uploaded` → `building` → `ready`. It can also end in `build_failed`, or in `rejected` (fails validation).
+- **Cloud:** `pending` (upload URL issued) → `building` → `ready`. It can end in `rejected` (fails validation before the build, with the reason) or `build_failed`.
 - **Local:** `pending` → `ready`.
 
 ### Environment: `ENV#{id}` / `METADATA`, and `ENV#{id}` / `VERSION#{n}`
 
-A built container image. Interactive sessions run on it, and cloud modules are built on top of it. The base record (`entity = env`) has `name`, `description`, `latestVersion`, `createdBy` and timestamps. Each version (`entity = env-version`) has:
+A built container image with a set of tools. Scripts are built on top of it, and (step 3) sessions run on it. The base record (`entity = env`) has `name`, `description`, `base`, `latestVersion`, `latestReadyVersion`, `createdBy` and timestamps.
+
+Two **platform environments** (`platform-base` and `platform-ghidra`) are published by the deploy-images workflow (`createdBy = platform`). They are listed under `PLATFORM / ENV#{id}` (`platform-env`), so every user can see them without an ownership row.
+
+Each version (`entity = env-version`):
 
 | Attribute | Type | Meaning |
 |---|---|---|
-| `baseImage` | S | Platform base image it starts from |
-| `catalogItems` | SS | Catalog tools installed (e.g. `tshark`, `ghidra`) |
-| `parentVersion` | N | Version this one was built `FROM`, when a package was added |
+| `baseImage` | S | Image this version is built `FROM` (a platform image or the parent version) |
+| `catalogItems` | L | Catalog tools in the image, including those inherited from the parent |
+| `parentVersion` / `basedOn` | N / S | The version it was built from |
 | `packageMode` | S | `offline` (the only mode in v1) |
-| `buildId`, `imageDigest`, `freezeKey` | S | Same meaning as for module versions |
-| `taskDefArn` | S | ECS task definition used to start sessions |
+| `buildId`, `imageUri`, `freezeKey` | S | Same meaning as for module versions |
+| `taskDefArn` | S | (Step 3) ECS task definition used to start sessions |
 | `status`, `statusReason`, `statusUpdatedAt` | S | Same lifecycle as a cloud module version |
 | `createdAt` | S | Timestamp |
 
 ### Run: `RUN#{id}` / `METADATA`
 
-One cloud execution of a module version over a set of input artifacts, run as an AWS Batch array job.
+One cloud execution of a module version over a fixed set of input artifacts, run as an AWS Batch array job. The inputs are split into **work units**, one or more files each; the script runs once per unit.
 
 | Attribute | Type | Meaning |
 |---|---|---|
 | `name` | S | Display name |
-| `moduleId`, `moduleVersion` | S, N | What is being run |
-| `query` | S | Input selection, resolved to artifacts at start |
-| `mode` | S | `map` (one input per child) / `group` / `all` |
-| `class` | S | `economy` / `standard` / `heavy` (Heavy is gated by the user's budget flag) |
-| `size` | S | Size preset `S` / `M` / `L` / `XL` |
-| `childCount` | N | Number of array children |
-| `estimate`, `maxCost` | S | Expected and maximum cost |
-| `held` | S | Amount currently held against the budget |
-| `costProvisional`, `costActual` | S | From metering events / from the monthly CUR true-up |
-| `tokenHash` | S | Hash of the per-run manifest-service token |
+| `moduleId`, `moduleName`, `moduleVersion` | S, S, N | What is being run |
+| `imageUri`, `jobDefinitionArn` | S | The image and job definition used |
+| `inputs` | M | How the inputs were chosen (`batchId`, `deviceId`, `runId`, `artifactIds` count, or `type`/`tag`) |
+| `mode`, `groupBy`, `chunkSize`, `unitsPerJob` | S, M, N, N | How files became units (`map` / `groupBy` / `chunk` / `all`) and units per job |
+| `class`, `size`, `vcpu`, `memoryMiB`, `timeoutSec` | S, S, N, N, N | Capacity per job |
+| `inputCount`, `unitCount`, `childCount` | N | Files, work units and Batch jobs |
+| `maxCost`, `expectedCost`, `held` | N | Maximum (held against the budget), expected, and still held |
+| `costProvisional`, `costActual` | N | From metering events / from the monthly true-up |
+| `unitsSucceeded`, `unitsFailed`, `outputCount` | N | Progress counters, updated by the manifest service |
+| `tokenHash` | S | SHA-256 of the per-run manifest token |
+| `batchJobId` | S | The Batch (array) job |
+| `cancelRequested`, `stopReason` | BOOL, S | Set by cancel, and by the watchdog when it stops the run |
 | `status`, `statusReason`, `statusUpdatedAt` | S | See lifecycle below |
 | `startedAt`, `endedAt`, `createdBy`, `createdAt`, `updatedAt` | S | Timestamps |
 
-Lifecycle: `pending` → `queued` → `running` → `completed`, `failed` or `cancelled`.
+Lifecycle: `pending` → `queued` → `running` → `completed`, `failed`, `cancelled` (by the user) or `stopped` (by the watchdog: cost cap or budget). `completed` means every job ran; individual units can still have failed (`unitsFailed`).
 
 Rows in the run's partition:
-- `RUN#{id} / CHILD#{i:05}` (`run-child`): `batchJobId`, `attempts`, `inputCount`, `status`, `statusReason`, `statusUpdatedAt`
-- `RUN#{id} / RESULT#{inputSha}` (`run-result`): `inputArtifactId`, `outputArtifactIds`, `status`. The manifest service checks these rows so that a retried child skips inputs it has already done.
-- `RUN#{id} / ARTIFACT#{aid}` (`run-artifact`): `relation` (`input` / `output`), `name`
-- `RUN#{id} / DEVICE#{did}` (`run-device`) and `DEVICE#{did} / RUN#{id}` (`device-run`): optional device links
+- `RUN#{id} / CHILD#{i:05}` (`run-child`): `units` (list of `{unitId, key, artifactIds}`), `status` (`queued` / `running` / `succeeded` / `failed`), `statusRank`, `attempts`, `logStreamName`, `startedAt`, `stoppedAt`, `statusReason`
+- `RUN#{id} / RESULT#{unitId}` (`run-result`): `key`, `status` (`succeeded` / `failed`), `inputArtifactIds`, `outputArtifactIds`, `exitCode`, `error`. `unitId` is the SHA-256 of the unit's sorted input hashes, so identical units are only run once and a retried job skips finished units.
+- `RUN#{id} / OUTCOUNT#{unitId}#{attempt}` (`run-output-count`): `files`, `bytes` registered so far, used to enforce the output caps
+- `RUN#{id} / ARTIFACT#{aid}` (`run-artifact`) and `ARTIFACT#{aid} / RUN#{id}` (`artifact-run`): `relation` (`input` / `output`), so lineage can be followed both ways
+- `RUN#{id} / DEVICE#{did}` (`run-device`) and `DEVICE#{did} / RUN#{id}` (`device-run`): when the inputs were chosen by device
 
-`MODULE#{id} / RUN#{rid}` (`module-run`) stores `moduleVersion`, `status` and `durationSec`. It gives the run history per module, which the expected-cost estimate uses.
+Other run rows:
+- `MODULE#{id} / RUN#{rid}` (`module-run`): `moduleVersion`, `status`, `class`, `size`, `childCount`, `unitCount`, `unitSeconds`. The run history per module; expected costs use seconds per unit from the last 20 runs.
+- `ACTIVE#RUNS / RUN#{rid}` (`active-run`): `userId`. Written at start and deleted when the run settles; the watchdog reads only this partition.
+
+Output artifacts are ordinary artifacts with `origin = run`, `derivedFromRun`, `derivedFromArtifacts` (the unit's inputs) and `runUnitId`, owned by the run's owner.
 
 ### Session: `SESSION#{id}` / `METADATA`
 
-An interactive JupyterLab session on Fargate. **Session** only ever means this; executions are runs.
+(Step 3.) An interactive JupyterLab session on Fargate. **Session** only ever means this; executions are runs.
 
 | Attribute | Type | Meaning |
 |---|---|---|
@@ -185,30 +193,41 @@ An interactive JupyterLab session on Fargate. **Session** only ever means this; 
 | `envId`, `envVersion` | S, N | Environment the session runs on |
 | `packageMode` | S | Per-session override of the environment's mode |
 | `taskArn`, `taskIp` | S | ECS task; the session proxy forwards traffic to `taskIp` |
+| `tokenHash` | S | SHA-256 of the per-session manifest token |
 | `status`, `statusReason`, `statusUpdatedAt` | S | `starting` → `running` → `stopping` → `stopped`, or `failed` |
 | `startedAt`, `lastActivity`, `endedAt` | S | `lastActivity` drives the idle reaper |
-| `cost` | S | Running cost total |
+| `cost` | N | Running cost total |
 | `createdBy`, `createdAt`, `updatedAt` | S | Author and timestamps |
 
 ### Budget: `USER#{uid}` / `BUDGET`
 
+Created with defaults (`DEFAULT_MONTHLY_LIMIT`, $25; Heavy off) the first time it's needed. Admins change it with `Platform/scripts/set_budget.py`.
+
 | Attribute | Type | Meaning |
 |---|---|---|
-| `monthlyLimit` | S | Monthly spend limit |
-| `held` | S | Sum of open run holds |
+| `monthlyLimit` | N | Monthly spending limit (USD) |
+| `period` | S | Month that `spentProvisional` belongs to (`2026-09`) |
+| `spentProvisional` | N | Metered spend in `period` |
+| `held` | N | Sum of the maximum costs of runs still going |
 | `heavyEnabled` | BOOL | Whether the user can use the Heavy (EC2) class |
+| `version` | N | Bumped by every write; holds are only written if it's unchanged since they were read |
 | `updatedAt` | S | Timestamp |
 
-### Usage ledger: `USER#{uid}` / `USAGE#{ts}#{source}#{id}`
+A run starts only if `spentProvisional + held + maxCost <= monthlyLimit` (spend counts as 0 once `period` is a past month). The hold is written with `version = <read version>`, so two runs can't both claim the same remaining budget. Settlement and metering use atomic `ADD` (and bump `version`).
 
-The ledger is append-only. `source` is `batch`, `ecs`, `codebuild` or `cur`, and `id` is the run, session or build.
+### Usage ledger: `USER#{uid}` / `USAGE#{period}#{source}#{resourceId}#{eventId}`
+
+Append-only. `period` is the month the usage happened in, `source` is `batch`, `codebuild`, `ecs` (step 3) or `cur` (true-up), and `eventId` is the Batch job or CodeBuild build id. The key is deterministic and written with `attribute_not_exists(sk)`, so a redelivered event can't bill twice; the budget and run cost updates happen in the same transaction.
 
 | Attribute | Type | Meaning |
 |---|---|---|
-| `kind` | S | `provisional` (from metering events) / `actual` (from the CUR true-up) |
-| `amount` | S | Cost |
+| `kind` | S | `provisional` (from metering events) / `actual` (from the true-up) |
+| `amount` | N | Cost in USD |
+| `period`, `recordedAt` | S | Usage month and when it was recorded |
 | `resource` | S | Human-readable description |
-| `costTags` | M | Cost-allocation tags (`userId`, `resourceId`, …) |
+| `seconds` / `minutes` | N | Billed job seconds (all attempts, at least 60 each) / build minutes |
+| `runId`, `jobId`, `buildId` | S | What was charged |
+| `costTags` | M | Cost-allocation tags (`userId`, `runId`, …) |
 
 ## Relationships
 
@@ -231,9 +250,9 @@ erDiagram
     ENV_VERSION ||--o{ MODULE_VERSION : "built on (cloud only)"
     ENV_VERSION ||--o{ SESSION : "runs"
     MODULE_VERSION ||--o{ RUN : "executed by (cloud only)"
-    RUN ||--|{ RUN_CHILD : has
-    RUN ||--o{ RUN_RESULT : has
-    RUN }o--o{ ARTIFACT : "input / output"
+    RUN ||--|{ RUN_CHILD : "jobs (work units)"
+    RUN ||--o{ RUN_RESULT : "one per work unit"
+    RUN }o--o{ ARTIFACT : "input / output (links both ways)"
 ```
 
 - Every `owns` edge is a pair of ownership-link rows.
@@ -254,25 +273,28 @@ erDiagram
 | Devices an artifact or run is linked to | `Query pk = ARTIFACT#{id}` (or `RUN#{id}`), `sk begins_with DEVICE#` |
 | Artifact details | `GetItem pk = ARTIFACT#{id}, sk = METADATA` (many at once: `BatchGetItem`) |
 | Module and all its versions | `Query pk = MODULE#{id}`. Rows sort as `METADATA`, `RUN#…`, `VERSION#…`, so filter on `entity`, or use two queries (`sk = METADATA`, `sk begins_with VERSION#`) |
-| Latest module version | `Query pk = MODULE#{id}, sk begins_with VERSION#`, `ScanIndexForward = false`, `Limit = 1` |
-| Module run history (for estimates) | `Query pk = MODULE#{id}, sk begins_with RUN#` |
+| Newest ready module version | `Query pk = MODULE#{id}, sk begins_with VERSION#`, `ScanIndexForward = false`, first `status = ready` |
+| Module run history (for estimates) | `Query pk = MODULE#{id}, sk begins_with RUN#`, newest 20 |
 | Environment versions | `Query pk = ENV#{id}, sk begins_with VERSION#` |
+| Platform environments (visible to everyone) | `Query pk = PLATFORM, sk begins_with ENV#` |
 | Everything about a run | `Query pk = RUN#{id}` |
-| A run's children / outputs | `Query pk = RUN#{id}, sk begins_with CHILD#` / `ARTIFACT#` (filter `relation = output`) |
-| Has this input already been processed? | `GetItem pk = RUN#{id}, sk = RESULT#{inputSha}` |
+| A run's jobs / outputs | `Query pk = RUN#{id}, sk begins_with CHILD#` / `ARTIFACT#` (filter `relation = output`) |
+| Which runs used or produced this artifact | `Query pk = ARTIFACT#{aid}, sk begins_with RUN#` |
+| Has this work unit already been done? | `GetItem pk = RUN#{id}, sk = RESULT#{unitId}` (many at once: `BatchGetItem`) |
+| Runs in progress (watchdog) | `Query pk = ACTIVE#RUNS` |
 | Session for the proxy | `GetItem pk = SESSION#{id}, sk = METADATA` |
-| Budget check / hold | `UpdateItem pk = USER#{uid}, sk = BUDGET` with a condition expression |
-| Usage for a month | `Query pk = USER#{uid}, sk between USAGE#2026-09 and USAGE#2026-09~` |
+| Budget check / hold | `GetItem` then `UpdateItem pk = USER#{uid}, sk = BUDGET` conditional on `version` |
+| Usage for a month | `Query pk = USER#{uid}, sk begins_with USAGE#2026-09#` |
 
 ## Status tracking
 
 Each status-bearing row stores its **current** status (`status`, `statusReason`, `statusUpdatedAt`) in DynamoDB. The UI reads status from these rows only, and never calls CodeBuild, Batch or ECS from the browser path.
-- **Writers:** the event Lambdas (`scripts-build-events`, `runs-events`, session Lambdas) triggered by EventBridge state-change events. They use conditional updates, so an out-of-order event can't move a status backwards.
-- **What isn't stored:** build logs, job logs and package lists. These stay in CloudWatch Logs and S3, and the row only points to them (`buildId`, `batchJobId`, `freezeKey`). The UI fetches them when a user opens them.
+- **Writers:** the event Lambdas (`builds-events`, `runs-events`, `usage-meter`, and the session Lambdas in step 3) triggered by EventBridge state-change events, plus `runs-manifest` for work-unit results. They use conditional updates, so an out-of-order or repeated event can't move a status backwards or apply twice.
+- **What isn't stored:** build logs, job logs and package lists. These stay in CloudWatch Logs and S3, and the row only points to them (`buildId`, `logStreamName`, `freezeKey`). The UI fetches them when a user opens them.
 - **No history table:** status history isn't kept. `statusUpdatedAt` is enough to spot stuck work, and the usage ledger records what was billed.
 
 ## Migration and future work
 
 - **Firmware:** the web app now uploads firmware as `ARTIFACT#` records (`type = firmware`) with device links and a `FWVER#` guard. The old firmware Lambdas (`presign-firmware`, `complete-firmware`, `list-firmware`) and their `DEVICE#{did} / FIRMWARE#{version}` rows are still deployed but no longer used by the UI. [`Platform/scripts/migrate_firmware_to_artifacts.py`](../scripts/migrate_firmware_to_artifacts.py) copies the old rows into artifacts (dry run by default, `--apply` to write; safe to re-run). The S3 objects stay where they are. Once it has run, the old Lambdas and routes can be removed. `FIRMWARE#` rows are deliberately left out of the model.
-- **Old model:** `OUTPUT#`, `MODULE# / SCRIPT|TOOL` and the run-style `SESSION#` rows from the April model have been replaced by the entities above.
+- **Old model:** `OUTPUT#`, `MODULE# / SCRIPT|TOOL` and the run-style `SESSION#` rows from the April model have been replaced by the entities above. Modules no longer have a `kind`: tools come from environments or L3 Dockerfiles.
 - **Groups and sharing:** only `role = owner` is used today. A later user-groups system can add a `GROUP#{gid}` principal with the same two-way link shape (`GROUP#/X#` and `X#/GROUP#`) and more roles, without changing existing rows.

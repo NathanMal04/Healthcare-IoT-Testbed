@@ -420,7 +420,18 @@ module "api" {
     aws_api_gateway_integration.firmware_complete_options.id,
     aws_api_gateway_gateway_response.default_4xx.id,
     aws_api_gateway_gateway_response.default_5xx.id,
-  ], local.artifact_integration_ids)))
+  ], local.module_route_integration_ids)))
+}
+
+# Integrations defined with the api_lambda_method / api_cors_preflight
+# modules in artifacts.tf, builds.tf, runs.tf and usage.tf.
+locals {
+  module_route_integration_ids = concat(
+    local.artifact_integration_ids,
+    local.builds_integration_ids,
+    local.runs_integration_ids,
+    local.usage_integration_ids,
+  )
 }
 
 # --- API routes ---

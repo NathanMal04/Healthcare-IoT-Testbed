@@ -39,8 +39,14 @@ function stageLabel(stage: RetryStage, progress: number | null): string {
   return `${label.replace("...", "")} ${Math.floor(progress * 100)}%`;
 }
 
+// Matches VERIFY_STALE_SEC on the backend: a check that hasn't finished in
+// 20 minutes has stalled, and the upload can be retried.
+const VERIFY_STALE_MS = 20 * 60 * 1000;
+
 function isRetryable(firmware: Artifact): boolean {
-  return firmware.status === "pending" || firmware.status === "failed";
+  if (firmware.status === "pending" || firmware.status === "failed") return true;
+  if (firmware.status !== "verifying" || !firmware.statusUpdatedAt) return false;
+  return Date.now() - new Date(firmware.statusUpdatedAt).getTime() > VERIFY_STALE_MS;
 }
 
 function formatDate(value: string | undefined): string {

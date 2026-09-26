@@ -1,0 +1,95 @@
+name: Deploy Platform Images
+
+# Builds the platform images (analysis-base and platform-ghidra, which carry
+# the launcher and SDK), pushes them to ECR, and records them as new ready
+# versions of the platform environments.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "Platform/services/containers/base/**"
+      - "Platform/services/containers/ghidra/**"
+      - "Platform/services/containers/launcher/**"
+      - "Platform/services/containers/sdk/**"
+      - "Platform/scripts/seed_platform_envs.py"
+      - ".github/workflows/deploy-images.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Read Terraform outputs
+        id: tf
+        working-directory: Platform/infra/envs/dev
+        run: |
+          terraform init -input=false
+          echo "repo=$(terraform output -raw platform_base_repository_url)" >> "$GITHUB_OUTPUT"
+          echo "table=$(terraform output -raw metadata_table_name)" >> "$GITHUB_OUTPUT"
+          echo "bucket=$(terraform output -raw data_lake_bucket_name)" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to ECR
+        run: |
+          aws ecr get-login-password --region "${{ secrets.AWS_REGION }}" \
+            | docker login --username AWS --password-stdin "$(echo '${{ steps.tf.outputs.repo }}' | cut -d/ -f1)"
+
+      - name: Install boto3
+        run: pip install --quiet boto3
+
+      - name: Build, push and record analysis-base
+        id: base
+        working-directory: Platform/services/containers
+        env:
+          REPO: ${{ steps.tf.outputs.repo }}
+        run: |
+          tag="$REPO:base-${GITHUB_SHA::12}"
+          docker build -f base/Dockerfile -t "$tag" .
+          docker push "$tag"
+          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$tag")"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          mkdir -p /tmp/packages-base
+          docker run --rm --network none --entrypoint sh "$tag" -c "python3 -m pip freeze --all" > /tmp/packages-base/pip-freeze.txt
+          docker run --rm --network none --entrypoint sh "$tag" -c "dpkg-query -W -f '\${Package} \${Version}\n'" > /tmp/packages-base/dpkg.txt
+          python3 "$GITHUB_WORKSPACE/Platform/scripts/seed_platform_envs.py" \
+            --table "${{ steps.tf.outputs.table }}" --region "${{ secrets.AWS_REGION }}" \
+            --env-id platform-base --image-uri "$digest" \
+            --packages-dir /tmp/packages-base --bucket "${{ steps.tf.outputs.bucket }}"
+
+      - name: Build, push and record platform-ghidra
+        working-directory: Platform/services/containers
+        env:
+          REPO: ${{ steps.tf.outputs.repo }}
+        run: |
+          tag="$REPO:ghidra-${GITHUB_SHA::12}"
+          docker build -f ghidra/Dockerfile --build-arg BASE_IMAGE="${{ steps.base.outputs.digest }}" -t "$tag" .
+          docker push "$tag"
+          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$tag")"
+          mkdir -p /tmp/packages-ghidra
+          docker run --rm --network none --entrypoint sh "$tag" -c "python3 -m pip freeze --all" > /tmp/packages-ghidra/pip-freeze.txt
+          docker run --rm --network none --entrypoint sh "$tag" -c "dpkg-query -W -f '\${Package} \${Version}\n'" > /tmp/packages-ghidra/dpkg.txt
+          python3 "$GITHUB_WORKSPACE/Platform/scripts/seed_platform_envs.py" \
+            --table "${{ steps.tf.outputs.table }}" --region "${{ secrets.AWS_REGION }}" \
+            --env-id platform-ghidra --image-uri "$digest" \
+            --packages-dir /tmp/packages-ghidra --bucket "${{ steps.tf.outputs.bucket }}"

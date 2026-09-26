@@ -17,9 +17,10 @@ UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
 
 
 def handler(event, context):
-    """GET /artifacts and GET /devices/{deviceId}/artifacts.
+    """GET /artifacts, GET /devices/{deviceId}/artifacts and GET /artifacts/batches.
 
-    Query parameters: type, tag, batchId (GET /artifacts only), limit, nextToken.
+    Query parameters: type, tag, batchId or runId (GET /artifacts only), limit, nextToken.
+    With runId, only the run's outputs are listed.
 
     Link rows (USER#/ARTIFACT#, DEVICE#/ARTIFACT#type#, BATCH#/ARTIFACT#)
     choose which artifacts are listed, and their METADATA rows are then read
@@ -32,6 +33,9 @@ def handler(event, context):
     params = event.get("queryStringParameters") or {}
     table = dynamodb.Table(TABLE)
 
+    if event.get("resource") == "/artifacts/batches":
+        return _list_batches(table, user_id)
+
     artifact_type = params.get("type")
     if artifact_type is not None and artifact_type not in ARTIFACT_TYPES:
         return _resp(400, {"error": f"type must be one of: {', '.join(sorted(ARTIFACT_TYPES))}"})
@@ -42,6 +46,7 @@ def handler(event, context):
         return _resp(400, {"error": f"limit must be between 1 and {MAX_LIMIT}"})
 
     extra = {}
+    relation = None
     if event.get("resource") == "/devices/{deviceId}/artifacts":
         device_id = _validate_uuid((event.get("pathParameters") or {}).get("deviceId"))
         if device_id is None:
@@ -67,6 +72,15 @@ def handler(event, context):
         }
         pk = f"BATCH#{batch_id}"
         prefix = "ARTIFACT#"
+    elif params.get("runId"):
+        run_id = _validate_uuid(params["runId"])
+        if run_id is None:
+            return _resp(400, {"error": "runId is invalid"})
+        if table.get_item(Key={"pk": f"USER#{user_id}", "sk": f"RUN#{run_id}"}).get("Item") is None:
+            return _resp(404, {"error": "Run not found"})
+        pk = f"RUN#{run_id}"
+        prefix = "ARTIFACT#"
+        relation = "output"
     else:
         pk = f"USER#{user_id}"
         prefix = "ARTIFACT#"
@@ -86,7 +100,8 @@ def handler(event, context):
         query["ExclusiveStartKey"] = start_key
     page = table.query(**query)
 
-    artifact_ids = [row["sk"].rsplit("#", 1)[-1] for row in page.get("Items", [])]
+    artifact_ids = [row["sk"].rsplit("#", 1)[-1] for row in page.get("Items", [])
+                    if relation is None or row.get("relation") == relation]
     items = _batch_get_metadata(artifact_ids)
 
     artifacts = []
@@ -101,6 +116,27 @@ def handler(event, context):
     if page.get("LastEvaluatedKey"):
         body["nextToken"] = _encode_token(page["LastEvaluatedKey"])
     return _resp(200, body)
+
+
+def _list_batches(table, user_id):
+    """The caller's 50 most recent upload batches, for the run input picker."""
+    rows = table.query(
+        KeyConditionExpression=Key("pk").eq(f"USER#{user_id}") & Key("sk").begins_with("BATCH#"),
+        ScanIndexForward=False, Limit=50,
+    ).get("Items", [])
+    keys = [{"pk": row["sk"], "sk": "METADATA"} for row in rows]
+    items = []
+    if keys:
+        request = {TABLE: {"Keys": keys}}
+        while request:
+            result = dynamodb.batch_get_item(RequestItems=request)
+            items += result.get("Responses", {}).get(TABLE, [])
+            request = result.get("UnprocessedKeys") or None
+    batches = [{
+        "uploadBatchId": i["uploadBatchId"], "fileCount": int(i.get("fileCount", 0)),
+        "totalBytes": int(i.get("totalBytes", 0)), "createdAt": i.get("createdAt"),
+    } for i in items]
+    return _resp(200, {"batches": sorted(batches, key=lambda b: b["uploadBatchId"], reverse=True)})
 
 
 def _batch_get_metadata(artifact_ids):

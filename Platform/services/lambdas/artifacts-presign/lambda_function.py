@@ -6,7 +6,7 @@ import secrets
 import time
 import uuid
 import boto3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from boto3.dynamodb.types import TypeSerializer
 from botocore.config import Config
 from botocore.exceptions import ClientError
@@ -39,6 +39,9 @@ PRESIGN_EXPIRES_SEC = int(os.environ.get("PRESIGN_EXPIRES_SEC", "3600"))
 PART_URL_EXPIRES_SEC = int(os.environ.get("PART_URL_EXPIRES_SEC", "900"))
 MAX_ARTIFACT_SIZE_BYTES = int(os.environ.get("MAX_ARTIFACT_SIZE_BYTES", str(5 * 1024 ** 3)))
 SINGLE_UPLOAD_MAX_BYTES = int(os.environ.get("SINGLE_UPLOAD_MAX_BYTES", str(25 * 1024 ** 2)))
+# Matches artifacts-complete: an upload stuck in "verifying" this long has
+# lost its verification run, and may be retried like a failed one.
+VERIFY_STALE_SEC = int(os.environ.get("VERIFY_STALE_SEC", "1200"))
 
 MAX_FILES_PER_REQUEST = 100
 MAX_PARTS_PER_REQUEST = 100
@@ -322,7 +325,8 @@ def _handle_retry(table, user_id, artifact_id, body):
     attempt_id = body.get("attemptId")
     if not isinstance(attempt_id, str) or not attempt_id:
         return _resp(400, {"error": "attemptId is required"})
-    if item["status"] not in ("pending", "failed"):
+    retryable = item["status"] in ("pending", "failed") or (item["status"] == "verifying" and _is_stale(item))
+    if not retryable:
         return _resp(409, {"error": f"Upload cannot be retried from status {item['status']}"})
     if item["attemptId"] != attempt_id:
         return _resp(409, {"error": "Upload attempt is no longer current"})
@@ -343,6 +347,8 @@ def _handle_retry(table, user_id, artifact_id, body):
         ":new_key": new_key,
         ":pending": "pending",
         ":failed": "failed",
+        ":verifying": "verifying",
+        ":stale_before": (datetime.now(timezone.utc) - timedelta(seconds=VERIFY_STALE_SEC)).isoformat(),
         ":expected": attempt_id,
         ":now": now,
     }
@@ -357,7 +363,10 @@ def _handle_retry(table, user_id, artifact_id, body):
         updated = table.update_item(
             Key={"pk": f"ARTIFACT#{artifact_id}", "sk": "METADATA"},
             UpdateExpression=f"SET {', '.join(assignments)} REMOVE statusReason",
-            ConditionExpression="attemptId = :expected AND #st IN (:pending, :failed)",
+            ConditionExpression=(
+                "attemptId = :expected AND (#st IN (:pending, :failed) "
+                "OR (#st = :verifying AND statusUpdatedAt < :stale_before))"
+            ),
             ExpressionAttributeNames={"#st": "status"},
             ExpressionAttributeValues=values,
             ReturnValues="ALL_NEW",
@@ -573,6 +582,17 @@ def _get_owned_artifact(table, user_id, artifact_id):
     if item is None:
         raise RequestError(404, "Artifact not found")
     return item
+
+
+def _is_stale(item):
+    updated = item.get("statusUpdatedAt")
+    if not updated:
+        return True
+    try:
+        updated_at = datetime.fromisoformat(updated)
+    except ValueError:
+        return True
+    return datetime.now(timezone.utc) - updated_at > timedelta(seconds=VERIFY_STALE_SEC)
 
 
 def _client_ref(raw, index):

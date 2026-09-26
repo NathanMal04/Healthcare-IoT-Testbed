@@ -1,0 +1,91 @@
+{
+  "items": [
+    {
+      "id": "binutils",
+      "name": "binutils",
+      "description": "objdump, readelf, strings, nm and friends",
+      "apt": ["binutils"]
+    },
+    {
+      "id": "gdb",
+      "name": "GDB",
+      "description": "GNU debugger (batch mode, e.g. gdb -batch -ex ...)",
+      "apt": ["gdb"]
+    },
+    {
+      "id": "radare2",
+      "name": "radare2",
+      "description": "Reverse engineering framework (r2 -q -c ...)",
+      "apt": ["radare2"]
+    },
+    {
+      "id": "ghidra",
+      "name": "Ghidra (headless)",
+      "description": "Ghidra 11.1.2 with analyzeHeadless on PATH. The platform-ghidra base already includes it.",
+      "apt": ["openjdk-17-jre-headless", "wget", "unzip"],
+      "run": [
+        "wget -q https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.1.2_build/ghidra_11.1.2_PUBLIC_20240709.zip -O /tmp/ghidra.zip && unzip -q /tmp/ghidra.zip -d /opt && mv /opt/ghidra_* /opt/ghidra && rm /tmp/ghidra.zip && ln -s /opt/ghidra/support/analyzeHeadless /usr/local/bin/analyzeHeadless"
+      ]
+    },
+    {
+      "id": "squashfs-tools",
+      "name": "squashfs-tools",
+      "description": "unsquashfs for SquashFS firmware images",
+      "apt": ["squashfs-tools"]
+    },
+    {
+      "id": "qemu-user-static",
+      "name": "QEMU user mode",
+      "description": "Run ARM/MIPS/other Linux binaries from firmware on x86 (qemu-arm-static, ...)",
+      "apt": ["qemu-user-static"]
+    },
+    {
+      "id": "yara",
+      "name": "YARA (CLI)",
+      "description": "yara command line scanner (yara-python is already in the base)",
+      "apt": ["yara"]
+    },
+    {
+      "id": "sleuthkit",
+      "name": "The Sleuth Kit",
+      "description": "fls, icat, mmls and other filesystem forensics tools",
+      "apt": ["sleuthkit"]
+    },
+    {
+      "id": "foremost",
+      "name": "foremost",
+      "description": "File carving",
+      "apt": ["foremost"]
+    },
+    {
+      "id": "tcpdump",
+      "name": "tcpdump",
+      "description": "Read and filter capture files (tcpdump -r)",
+      "apt": ["tcpdump"]
+    },
+    {
+      "id": "pwntools",
+      "name": "pwntools",
+      "description": "Binary exploitation helpers (ELF parsing, packing, ROP)",
+      "pip": ["pwntools"]
+    },
+    {
+      "id": "angr",
+      "name": "angr",
+      "description": "Binary analysis and symbolic execution (large)",
+      "pip": ["angr"]
+    },
+    {
+      "id": "jefferson",
+      "name": "jefferson",
+      "description": "JFFS2 filesystem extraction",
+      "pip": ["jefferson"]
+    },
+    {
+      "id": "ubi-reader",
+      "name": "ubi_reader",
+      "description": "UBI/UBIFS image extraction",
+      "pip": ["ubi_reader"]
+    }
+  ]
+}
