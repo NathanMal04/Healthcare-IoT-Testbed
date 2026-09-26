@@ -6,7 +6,8 @@
 #   POST /artifacts/{artifactId}/parts       -> artifacts-presign  (multipart part URLs)
 #   POST /artifacts/{artifactId}/retry       -> artifacts-presign  (new upload attempt)
 #   POST /artifacts/complete                 -> artifacts-complete (batch of up to 100)
-#   GET  /artifacts                          -> artifacts-list     (?type, tag, batchId, limit, nextToken)
+#   GET  /artifacts                          -> artifacts-list     (?type, tag, batchId, runId, limit, nextToken)
+#   GET  /artifacts/batches                  -> artifacts-list     (recent upload batches)
 #   GET  /devices/{deviceId}/artifacts       -> artifacts-list     (?type, tag, limit, nextToken)
 #   GET  /artifacts/{artifactId}             -> artifacts-get
 #   GET  /artifacts/{artifactId}/download    -> artifacts-get
@@ -35,6 +36,7 @@ module "artifacts_presign_fn" {
     PART_URL_EXPIRES_SEC    = "900"
     MAX_ARTIFACT_SIZE_BYTES = "5368709120"
     SINGLE_UPLOAD_MAX_BYTES = "26214400"
+    VERIFY_STALE_SEC        = "1200"
   }
 
   project     = var.name
@@ -164,6 +166,13 @@ resource "aws_iam_policy" "artifacts_complete" {
         Resource = local.artifact_objects_arn
       },
       {
+        # Migrated firmware that was still pending keeps its original
+        # devices/.../firmware key, and completing it reads and tags that object.
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObjectTagging"]
+        Resource = "${module.data_lake_bucket.bucket_arn}/devices/*/firmware/*"
+      },
+      {
         Effect   = "Allow"
         Action   = "lambda:InvokeFunction"
         Resource = module.artifacts_verify_fn.function_arn
@@ -268,6 +277,12 @@ resource "aws_api_gateway_resource" "artifacts_presign" {
   path_part   = "presign"
 }
 
+resource "aws_api_gateway_resource" "artifacts_batches" {
+  rest_api_id = module.api.rest_api_id
+  parent_id   = aws_api_gateway_resource.artifacts.id
+  path_part   = "batches"
+}
+
 resource "aws_api_gateway_resource" "artifacts_complete" {
   rest_api_id = module.api.rest_api_id
   parent_id   = aws_api_gateway_resource.artifacts.id
@@ -319,6 +334,12 @@ locals {
       method      = "POST"
       path        = "artifacts/presign"
       fn          = module.artifacts_presign_fn
+    }
+    "artifacts-batches-GET" = {
+      resource_id = aws_api_gateway_resource.artifacts_batches.id
+      method      = "GET"
+      path        = "artifacts/batches"
+      fn          = module.artifacts_list_fn
     }
     "artifacts-complete-POST" = {
       resource_id = aws_api_gateway_resource.artifacts_complete.id

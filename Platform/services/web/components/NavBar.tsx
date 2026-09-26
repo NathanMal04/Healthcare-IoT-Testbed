@@ -7,6 +7,10 @@ import { usePathname, useRouter } from "next/navigation";
 const LINKS = [
   { href: "/", label: "Dashboard" },
   { href: "/artifacts", label: "Artifacts" },
+  { href: "/scripts", label: "Scripts" },
+  { href: "/environments", label: "Environments" },
+  { href: "/runs", label: "Runs" },
+  { href: "/usage", label: "Usage" },
 ];
 
 export default function NavBar() {

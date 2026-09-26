@@ -4,8 +4,8 @@
     "Author": "",
     "DateCreated": "2026-04-08T00:00:00Z",
     "DateLastModified": "2026-09-26T00:00:00Z",
-    "Description": "Healthcare IoT Testbed - Users table and single-table Metadata table. Entities: DEVICE, ARTIFACT (all uploaded and produced files, incl. firmware; firmware versions unique per device via DEVICE#/FWVER# guard rows), BATCH (upload batches), MODULE (kind script|tool, runtime cloud|local) with VERSION#n, ENV (interactive/run images) with VERSION#n, RUN (cloud Batch executions) with CHILD#/RESULT#, SESSION (interactive JupyterLab only), per-user BUDGET and USAGE# ledger. Ownership is stored as two-way USER#/X# + X#/USER# links with role=owner only (a GROUP# principal can reuse the same shape later). Device links are optional. Deployed firmware Lambdas still write DEVICE#/FIRMWARE# rows until the ARTIFACT# migration runs. See Platform/infra/DATABASE.md.",
-    "Version": "2.1"
+    "Description": "Healthcare IoT Testbed - Users table and single-table Metadata table. Entities: DEVICE, ARTIFACT (all uploaded and produced files, incl. firmware; firmware versions unique per device via DEVICE#/FWVER# guard rows), BATCH (upload batches), MODULE (scripts; runtime cloud|local) with VERSION#n, ENV (tool environments; platform ones listed under PLATFORM) with VERSION#n, RUN (cloud Batch executions) with CHILD# (jobs and their work units), RESULT#{unitId} and ARTIFACT# links both ways, ACTIVE#RUNS for the watchdog, SESSION (interactive JupyterLab only), per-user BUDGET (numeric, versioned) and USAGE#{period}# ledger. Ownership is stored as two-way USER#/X# + X#/USER# links with role=owner only. Device links are optional. See Platform/infra/DATABASE.md.",
+    "Version": "2.2"
   },
   "DataModel": [
     {
@@ -152,16 +152,24 @@
           "AttributeType": "S"
         },
         {
+          "AttributeName": "envId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "base",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "latestReadyVersion",
+          "AttributeType": "N"
+        },
+        {
           "AttributeName": "baseImage",
           "AttributeType": "S"
         },
         {
           "AttributeName": "catalogItems",
-          "AttributeType": "SS"
-        },
-        {
-          "AttributeName": "statusReason",
-          "AttributeType": "S"
+          "AttributeType": "L"
         },
         {
           "AttributeName": "statusUpdatedAt",
@@ -169,10 +177,6 @@
         },
         {
           "AttributeName": "buildId",
-          "AttributeType": "S"
-        },
-        {
-          "AttributeName": "imageDigest",
           "AttributeType": "S"
         },
         {
@@ -188,23 +192,31 @@
           "AttributeType": "S"
         },
         {
-          "AttributeName": "parentVersion",
+          "AttributeName": "version",
           "AttributeType": "N"
         },
         {
-          "AttributeName": "kind",
+          "AttributeName": "imageUri",
           "AttributeType": "S"
+        },
+        {
+          "AttributeName": "basedOn",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "parentVersion",
+          "AttributeType": "N"
         },
         {
           "AttributeName": "runtime",
           "AttributeType": "S"
         },
         {
-          "AttributeName": "level",
+          "AttributeName": "moduleId",
           "AttributeType": "S"
         },
         {
-          "AttributeName": "envId",
+          "AttributeName": "level",
           "AttributeType": "S"
         },
         {
@@ -220,15 +232,19 @@
           "AttributeType": "S"
         },
         {
-          "AttributeName": "command",
+          "AttributeName": "originalFilename",
           "AttributeType": "S"
+        },
+        {
+          "AttributeName": "command",
+          "AttributeType": "L"
         },
         {
           "AttributeName": "sizeBytes",
           "AttributeType": "N"
         },
         {
-          "AttributeName": "originalFilename",
+          "AttributeName": "jobDefinitionArn",
           "AttributeType": "S"
         },
         {
@@ -244,12 +260,40 @@
           "AttributeType": "S"
         },
         {
-          "AttributeName": "version",
+          "AttributeName": "origin",
           "AttributeType": "S"
+        },
+        {
+          "AttributeName": "uploadMode",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "uploadBatchId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "uploadedAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "deviceIds",
+          "AttributeType": "SS"
         },
         {
           "AttributeName": "tags",
           "AttributeType": "SS"
+        },
+        {
+          "AttributeName": "uploadId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "partSize",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "partCount",
+          "AttributeType": "N"
         },
         {
           "AttributeName": "derivedFromRun",
@@ -260,16 +304,8 @@
           "AttributeType": "SS"
         },
         {
-          "AttributeName": "moduleId",
-          "AttributeType": "S"
-        },
-        {
           "AttributeName": "moduleVersion",
           "AttributeType": "N"
-        },
-        {
-          "AttributeName": "query",
-          "AttributeType": "S"
         },
         {
           "AttributeName": "mode",
@@ -288,27 +324,27 @@
           "AttributeType": "N"
         },
         {
-          "AttributeName": "estimate",
-          "AttributeType": "S"
-        },
-        {
           "AttributeName": "maxCost",
-          "AttributeType": "S"
+          "AttributeType": "N"
         },
         {
           "AttributeName": "held",
-          "AttributeType": "S"
+          "AttributeType": "N"
         },
         {
           "AttributeName": "costProvisional",
-          "AttributeType": "S"
+          "AttributeType": "N"
         },
         {
           "AttributeName": "costActual",
-          "AttributeType": "S"
+          "AttributeType": "N"
         },
         {
           "AttributeName": "tokenHash",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "statusReason",
           "AttributeType": "S"
         },
         {
@@ -320,6 +356,58 @@
           "AttributeType": "S"
         },
         {
+          "AttributeName": "runId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "inputs",
+          "AttributeType": "M"
+        },
+        {
+          "AttributeName": "inputCount",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "unitCount",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "unitsPerJob",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "unitsSucceeded",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "unitsFailed",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "outputCount",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "vcpu",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "memoryMiB",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "timeoutSec",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "expectedCost",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "moduleName",
+          "AttributeType": "S"
+        },
+        {
           "AttributeName": "batchJobId",
           "AttributeType": "S"
         },
@@ -328,23 +416,31 @@
           "AttributeType": "N"
         },
         {
-          "AttributeName": "inputCount",
+          "AttributeName": "index",
           "AttributeType": "N"
         },
         {
-          "AttributeName": "inputArtifactId",
+          "AttributeName": "units",
+          "AttributeType": "L"
+        },
+        {
+          "AttributeName": "statusRank",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "logStreamName",
           "AttributeType": "S"
         },
         {
-          "AttributeName": "outputArtifactIds",
-          "AttributeType": "SS"
+          "AttributeName": "stoppedAt",
+          "AttributeType": "S"
         },
         {
           "AttributeName": "relation",
           "AttributeType": "S"
         },
         {
-          "AttributeName": "durationSec",
+          "AttributeName": "unitSeconds",
           "AttributeType": "N"
         },
         {
@@ -361,58 +457,26 @@
         },
         {
           "AttributeName": "cost",
-          "AttributeType": "S"
+          "AttributeType": "N"
         },
         {
           "AttributeName": "monthlyLimit",
-          "AttributeType": "S"
+          "AttributeType": "N"
         },
         {
           "AttributeName": "heavyEnabled",
           "AttributeType": "BOOL"
         },
         {
-          "AttributeName": "amount",
+          "AttributeName": "period",
           "AttributeType": "S"
         },
         {
-          "AttributeName": "resource",
-          "AttributeType": "S"
-        },
-        {
-          "AttributeName": "costTags",
-          "AttributeType": "M"
-        },
-        {
-          "AttributeName": "origin",
-          "AttributeType": "S"
-        },
-        {
-          "AttributeName": "uploadMode",
-          "AttributeType": "S"
-        },
-        {
-          "AttributeName": "uploadId",
-          "AttributeType": "S"
-        },
-        {
-          "AttributeName": "partSize",
+          "AttributeName": "spentProvisional",
           "AttributeType": "N"
         },
         {
-          "AttributeName": "partCount",
-          "AttributeType": "N"
-        },
-        {
-          "AttributeName": "uploadBatchId",
-          "AttributeType": "S"
-        },
-        {
-          "AttributeName": "deviceIds",
-          "AttributeType": "SS"
-        },
-        {
-          "AttributeName": "uploadedAt",
+          "AttributeName": "artifactId",
           "AttributeType": "S"
         },
         {
@@ -424,11 +488,59 @@
           "AttributeType": "N"
         },
         {
-          "AttributeName": "migratedFromFirmwareId",
+          "AttributeName": "key",
           "AttributeType": "S"
         },
         {
-          "AttributeName": "artifactId",
+          "AttributeName": "inputArtifactIds",
+          "AttributeType": "L"
+        },
+        {
+          "AttributeName": "outputArtifactIds",
+          "AttributeType": "L"
+        },
+        {
+          "AttributeName": "exitCode",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "childIndex",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "recordedAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "kind",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "amount",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "resource",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "costTags",
+          "AttributeType": "M"
+        },
+        {
+          "AttributeName": "minutes",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "jobId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "seconds",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "userId",
           "AttributeType": "S"
         }
       ],
@@ -1051,17 +1163,17 @@
             "createdAt",
             "updatedAt",
             "version",
-            "tags",
-            "derivedFromRun",
-            "derivedFromArtifacts",
             "origin",
             "uploadMode",
             "uploadBatchId",
             "uploadedAt",
             "deviceIds",
+            "tags",
             "uploadId",
             "partSize",
-            "partCount"
+            "partCount",
+            "derivedFromRun",
+            "derivedFromArtifacts"
           ],
           "DataAccess": {
             "MySql": {}
@@ -1424,9 +1536,6 @@
               "name": {
                 "S": "BP firmware parser"
               },
-              "kind": {
-                "S": "script"
-              },
               "runtime": {
                 "S": "cloud"
               },
@@ -1444,6 +1553,12 @@
               },
               "updatedAt": {
                 "S": "2026-09-06T09:00:00Z"
+              },
+              "moduleId": {
+                "S": "mod-001"
+              },
+              "latestReadyVersion": {
+                "N": "2"
               }
             },
             {
@@ -1459,14 +1574,11 @@
               "name": {
                 "S": "binwalk extract"
               },
-              "kind": {
-                "S": "tool"
-              },
               "runtime": {
                 "S": "cloud"
               },
               "description": {
-                "S": "Runs binwalk extraction on each input file"
+                "S": "Runs binwalk extraction on each input file (calls binwalk from Python)"
               },
               "latestVersion": {
                 "N": "1"
@@ -1479,6 +1591,12 @@
               },
               "updatedAt": {
                 "S": "2026-09-06T10:00:00Z"
+              },
+              "moduleId": {
+                "S": "mod-002"
+              },
+              "latestReadyVersion": {
+                "N": "1"
               }
             },
             {
@@ -1493,9 +1611,6 @@
               },
               "name": {
                 "S": "BLE sniffer capture"
-              },
-              "kind": {
-                "S": "script"
               },
               "runtime": {
                 "S": "local"
@@ -1514,6 +1629,12 @@
               },
               "updatedAt": {
                 "S": "2026-09-07T12:00:00Z"
+              },
+              "moduleId": {
+                "S": "mod-003"
+              },
+              "latestReadyVersion": {
+                "N": "1"
               }
             },
             {
@@ -1529,14 +1650,11 @@
               "name": {
                 "S": "nRF flasher"
               },
-              "kind": {
-                "S": "tool"
-              },
               "runtime": {
                 "S": "local"
               },
               "description": {
-                "S": "Flashes nRF52 boards over SWD from the user's machine"
+                "S": "Flashes nRF52 boards over SWD from the user's machine (local script)"
               },
               "latestVersion": {
                 "N": "1"
@@ -1549,19 +1667,23 @@
               },
               "updatedAt": {
                 "S": "2026-09-08T15:00:00Z"
+              },
+              "moduleId": {
+                "S": "mod-004"
               }
             }
           ],
           "NonKeyAttributes": [
             "entity",
             "name",
-            "kind",
             "runtime",
             "description",
             "latestVersion",
             "createdBy",
             "createdAt",
-            "updatedAt"
+            "updatedAt",
+            "moduleId",
+            "latestReadyVersion"
           ],
           "DataAccess": {
             "MySql": {}
@@ -1594,7 +1716,7 @@
                 "N": "1"
               },
               "sourceKey": {
-                "S": "modules/mod-001/0001/parse_bp.py"
+                "S": "scripts/mod-001/1/f87f5742"
               },
               "sha256": {
                 "S": "9f2c1e7a"
@@ -1602,23 +1724,60 @@
               "status": {
                 "S": "ready"
               },
-              "statusReason": {
-                "S": "build succeeded"
-              },
               "statusUpdatedAt": {
                 "S": "2026-09-06T09:06:00Z"
               },
               "buildId": {
-                "S": "script-build:a41f09c2"
-              },
-              "imageDigest": {
-                "S": "sha256:3c4d5e6f7a8b"
+                "S": "healthcare-iot-testbed-dev-image-build:a41f09c2"
               },
               "freezeKey": {
-                "S": "modules/mod-001/0001/freeze/"
+                "S": "builds/modules/mod-001/1/"
               },
               "createdAt": {
                 "S": "2026-09-06T09:00:00Z"
+              },
+              "moduleId": {
+                "S": "mod-001"
+              },
+              "version": {
+                "N": "1"
+              },
+              "runtime": {
+                "S": "cloud"
+              },
+              "originalFilename": {
+                "S": "parse_bp.py"
+              },
+              "command": {
+                "L": [
+                  {
+                    "S": "python3"
+                  },
+                  {
+                    "S": "-m"
+                  },
+                  {
+                    "S": "platform_sdk.driver"
+                  },
+                  {
+                    "S": "/app/script.py"
+                  }
+                ]
+              },
+              "sizeBytes": {
+                "N": "2048"
+              },
+              "imageUri": {
+                "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:3c4d5e6f7a8b"
+              },
+              "baseImage": {
+                "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:1a2b3c4d5e6f"
+              },
+              "jobDefinitionArn": {
+                "S": "arn:aws:batch:us-east-2:123456789012:job-definition/healthcare-iot-testbed-dev-mod-mod-001-1:1"
+              },
+              "createdBy": {
+                "S": "user-001"
               }
             },
             {
@@ -1641,7 +1800,7 @@
                 "N": "2"
               },
               "sourceKey": {
-                "S": "modules/mod-001/0002/parse_bp.py"
+                "S": "scripts/mod-001/2/c415dc02"
               },
               "sha256": {
                 "S": "b81d4f03"
@@ -1649,23 +1808,60 @@
               "status": {
                 "S": "ready"
               },
-              "statusReason": {
-                "S": "build succeeded"
-              },
               "statusUpdatedAt": {
                 "S": "2026-09-13T11:05:00Z"
               },
               "buildId": {
-                "S": "script-build:c7720e5d"
-              },
-              "imageDigest": {
-                "S": "sha256:5e6f7a8b9c0d"
+                "S": "healthcare-iot-testbed-dev-image-build:c7720e5d"
               },
               "freezeKey": {
-                "S": "modules/mod-001/0002/freeze/"
+                "S": "builds/modules/mod-001/2/"
               },
               "createdAt": {
                 "S": "2026-09-13T11:00:00Z"
+              },
+              "moduleId": {
+                "S": "mod-001"
+              },
+              "version": {
+                "N": "2"
+              },
+              "runtime": {
+                "S": "cloud"
+              },
+              "originalFilename": {
+                "S": "parse_bp.py"
+              },
+              "command": {
+                "L": [
+                  {
+                    "S": "python3"
+                  },
+                  {
+                    "S": "-m"
+                  },
+                  {
+                    "S": "platform_sdk.driver"
+                  },
+                  {
+                    "S": "/app/script.py"
+                  }
+                ]
+              },
+              "sizeBytes": {
+                "N": "2048"
+              },
+              "imageUri": {
+                "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:5e6f7a8b9c0d"
+              },
+              "baseImage": {
+                "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:7a8b9c0d1e2f"
+              },
+              "jobDefinitionArn": {
+                "S": "arn:aws:batch:us-east-2:123456789012:job-definition/healthcare-iot-testbed-dev-mod-mod-001-2:1"
+              },
+              "createdBy": {
+                "S": "user-001"
               }
             },
             {
@@ -1679,7 +1875,20 @@
                 "S": "module-version"
               },
               "command": {
-                "S": "binwalk -e -C /outputs /inputs/*"
+                "L": [
+                  {
+                    "S": "python3"
+                  },
+                  {
+                    "S": "-m"
+                  },
+                  {
+                    "S": "platform_sdk.driver"
+                  },
+                  {
+                    "S": "/app/script.py"
+                  }
+                ]
               },
               "envId": {
                 "S": "env-001"
@@ -1690,23 +1899,53 @@
               "status": {
                 "S": "ready"
               },
-              "statusReason": {
-                "S": "build succeeded"
-              },
               "statusUpdatedAt": {
                 "S": "2026-09-12T10:04:00Z"
               },
               "buildId": {
-                "S": "script-build:e19b33f8"
-              },
-              "imageDigest": {
-                "S": "sha256:0d1e2f3a4b5c"
+                "S": "healthcare-iot-testbed-dev-image-build:e19b33f8"
               },
               "freezeKey": {
-                "S": "modules/mod-002/0001/freeze/"
+                "S": "builds/modules/mod-002/1/"
               },
               "createdAt": {
                 "S": "2026-09-12T10:00:00Z"
+              },
+              "moduleId": {
+                "S": "mod-002"
+              },
+              "version": {
+                "N": "1"
+              },
+              "runtime": {
+                "S": "cloud"
+              },
+              "originalFilename": {
+                "S": "binwalk_extract.py"
+              },
+              "sourceKey": {
+                "S": "scripts/mod-002/1/29bf6f84"
+              },
+              "level": {
+                "S": "L1"
+              },
+              "sha256": {
+                "S": "7c1e04ab"
+              },
+              "sizeBytes": {
+                "N": "2048"
+              },
+              "imageUri": {
+                "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:0d1e2f3a4b5c"
+              },
+              "baseImage": {
+                "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:7a8b9c0d1e2f"
+              },
+              "jobDefinitionArn": {
+                "S": "arn:aws:batch:us-east-2:123456789012:job-definition/healthcare-iot-testbed-dev-mod-mod-002-1:1"
+              },
+              "createdBy": {
+                "S": "user-001"
               }
             },
             {
@@ -1720,7 +1959,7 @@
                 "S": "module-version"
               },
               "sourceKey": {
-                "S": "modules/mod-003/0001/ble_capture.py"
+                "S": "scripts/mod-003/1/eccb1101"
               },
               "sha256": {
                 "S": "4e6a0b91"
@@ -1734,14 +1973,23 @@
               "status": {
                 "S": "ready"
               },
-              "statusReason": {
-                "S": "upload verified"
-              },
               "statusUpdatedAt": {
                 "S": "2026-09-07T12:01:00Z"
               },
               "createdAt": {
                 "S": "2026-09-07T12:00:00Z"
+              },
+              "moduleId": {
+                "S": "mod-003"
+              },
+              "version": {
+                "N": "1"
+              },
+              "runtime": {
+                "S": "local"
+              },
+              "createdBy": {
+                "S": "user-001"
               }
             },
             {
@@ -1755,7 +2003,7 @@
                 "S": "module-version"
               },
               "sourceKey": {
-                "S": "modules/mod-004/0001/nrf_flasher.zip"
+                "S": "scripts/mod-004/1/97dcf4da"
               },
               "sha256": {
                 "S": "d05c77e2"
@@ -1769,14 +2017,23 @@
               "status": {
                 "S": "pending"
               },
-              "statusReason": {
-                "S": "awaiting upload"
-              },
               "statusUpdatedAt": {
                 "S": "2026-09-08T15:00:00Z"
               },
               "createdAt": {
                 "S": "2026-09-08T15:00:00Z"
+              },
+              "moduleId": {
+                "S": "mod-004"
+              },
+              "version": {
+                "N": "1"
+              },
+              "runtime": {
+                "S": "local"
+              },
+              "createdBy": {
+                "S": "user-002"
               }
             }
           ],
@@ -1788,15 +2045,20 @@
             "sourceKey",
             "sha256",
             "status",
-            "statusReason",
             "statusUpdatedAt",
             "buildId",
-            "imageDigest",
             "freezeKey",
             "createdAt",
+            "moduleId",
+            "version",
+            "runtime",
+            "originalFilename",
             "command",
             "sizeBytes",
-            "originalFilename"
+            "imageUri",
+            "baseImage",
+            "jobDefinitionArn",
+            "createdBy"
           ],
           "DataAccess": {
             "MySql": {}
@@ -1820,10 +2082,10 @@
                 "S": "env"
               },
               "name": {
-                "S": "analysis-base"
+                "S": "RE tools"
               },
               "description": {
-                "S": "Python 3.12 with scapy, pyshark/tshark, lief, capstone, binwalk"
+                "S": "Analysis base plus radare2, GDB and Ghidra"
               },
               "latestVersion": {
                 "N": "2"
@@ -1836,6 +2098,50 @@
               },
               "updatedAt": {
                 "S": "2026-09-12T08:20:00Z"
+              },
+              "envId": {
+                "S": "env-001"
+              },
+              "base": {
+                "S": "platform-base"
+              },
+              "latestReadyVersion": {
+                "N": "2"
+              }
+            },
+            {
+              "pk": {
+                "S": "ENV#platform-base"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "env"
+              },
+              "envId": {
+                "S": "platform-base"
+              },
+              "name": {
+                "S": "Analysis base"
+              },
+              "description": {
+                "S": "Python 3.12 with tshark, binwalk, scapy, dpkt, pyshark, lief, pyelftools, capstone, yara-python, pandas and unblob"
+              },
+              "latestVersion": {
+                "N": "1"
+              },
+              "latestReadyVersion": {
+                "N": "1"
+              },
+              "createdBy": {
+                "S": "platform"
+              },
+              "createdAt": {
+                "S": "2026-09-01T00:00:00Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-01T00:00:00Z"
               }
             }
           ],
@@ -1846,7 +2152,10 @@
             "latestVersion",
             "createdBy",
             "createdAt",
-            "updatedAt"
+            "updatedAt",
+            "envId",
+            "base",
+            "latestReadyVersion"
           ],
           "DataAccess": {
             "MySql": {}
@@ -1870,31 +2179,29 @@
                 "S": "env-version"
               },
               "baseImage": {
-                "S": "platform-base:analysis-base"
+                "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-platform-base@sha256:b45e0a17"
               },
               "catalogItems": {
-                "SS": [
-                  "tshark",
-                  "binwalk"
+                "L": [
+                  {
+                    "S": "gdb"
+                  },
+                  {
+                    "S": "radare2"
+                  }
                 ]
               },
               "status": {
                 "S": "ready"
               },
-              "statusReason": {
-                "S": "build succeeded"
-              },
               "statusUpdatedAt": {
                 "S": "2026-09-05T08:14:00Z"
               },
               "buildId": {
-                "S": "script-build:0f1c2a9e"
-              },
-              "imageDigest": {
-                "S": "sha256:1a2b3c4d5e6f"
+                "S": "healthcare-iot-testbed-dev-image-build:0f1c2a9e"
               },
               "freezeKey": {
-                "S": "envs/env-001/0001/freeze/"
+                "S": "builds/envs/env-001/1/"
               },
               "taskDefArn": {
                 "S": "arn:aws:ecs:us-east-1:123456789012:task-definition/session-env-001-0001:1"
@@ -1904,6 +2211,18 @@
               },
               "createdAt": {
                 "S": "2026-09-05T08:00:00Z"
+              },
+              "envId": {
+                "S": "env-001"
+              },
+              "version": {
+                "N": "1"
+              },
+              "imageUri": {
+                "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:1a2b3c4d5e6f"
+              },
+              "basedOn": {
+                "S": "platform-base v1"
               }
             },
             {
@@ -1917,13 +2236,19 @@
                 "S": "env-version"
               },
               "baseImage": {
-                "S": "platform-base:analysis-base"
+                "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:1a2b3c4d5e6f"
               },
               "catalogItems": {
-                "SS": [
-                  "tshark",
-                  "binwalk",
-                  "ghidra"
+                "L": [
+                  {
+                    "S": "gdb"
+                  },
+                  {
+                    "S": "ghidra"
+                  },
+                  {
+                    "S": "radare2"
+                  }
                 ]
               },
               "parentVersion": {
@@ -1932,20 +2257,14 @@
               "status": {
                 "S": "ready"
               },
-              "statusReason": {
-                "S": "build succeeded"
-              },
               "statusUpdatedAt": {
                 "S": "2026-09-12T08:20:00Z"
               },
               "buildId": {
-                "S": "script-build:7d3e41b0"
-              },
-              "imageDigest": {
-                "S": "sha256:7a8b9c0d1e2f"
+                "S": "healthcare-iot-testbed-dev-image-build:7d3e41b0"
               },
               "freezeKey": {
-                "S": "envs/env-001/0002/freeze/"
+                "S": "builds/envs/env-001/2/"
               },
               "taskDefArn": {
                 "S": "arn:aws:ecs:us-east-1:123456789012:task-definition/session-env-001-0002:1"
@@ -1955,6 +2274,56 @@
               },
               "createdAt": {
                 "S": "2026-09-12T08:00:00Z"
+              },
+              "envId": {
+                "S": "env-001"
+              },
+              "version": {
+                "N": "2"
+              },
+              "imageUri": {
+                "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:7a8b9c0d1e2f"
+              }
+            },
+            {
+              "pk": {
+                "S": "ENV#platform-base"
+              },
+              "sk": {
+                "S": "VERSION#0001"
+              },
+              "entity": {
+                "S": "env-version"
+              },
+              "envId": {
+                "S": "platform-base"
+              },
+              "version": {
+                "N": "1"
+              },
+              "imageUri": {
+                "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-platform-base@sha256:b45e0a17"
+              },
+              "catalogItems": {
+                "L": []
+              },
+              "packageMode": {
+                "S": "offline"
+              },
+              "status": {
+                "S": "ready"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-01T00:00:00Z"
+              },
+              "freezeKey": {
+                "S": "builds/envs/platform-base/1/"
+              },
+              "createdBy": {
+                "S": "platform"
+              },
+              "createdAt": {
+                "S": "2026-09-01T00:00:00Z"
               }
             }
           ],
@@ -1963,15 +2332,44 @@
             "baseImage",
             "catalogItems",
             "status",
-            "statusReason",
             "statusUpdatedAt",
             "buildId",
-            "imageDigest",
             "freezeKey",
             "taskDefArn",
             "packageMode",
             "createdAt",
-            "parentVersion"
+            "envId",
+            "version",
+            "imageUri",
+            "basedOn",
+            "parentVersion",
+            "createdBy"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "PlatformEnvironment",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "Platform",
+            "SortKeyAlias": "EnvId"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "PLATFORM"
+              },
+              "sk": {
+                "S": "ENV#platform-base"
+              },
+              "entity": {
+                "S": "platform-env"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity"
           ],
           "DataAccess": {
             "MySql": {}
@@ -2003,9 +2401,6 @@
               "moduleVersion": {
                 "N": "2"
               },
-              "query": {
-                "S": "device=dev-001 type=firmware"
-              },
               "mode": {
                 "S": "map"
               },
@@ -2018,23 +2413,20 @@
               "childCount": {
                 "N": "2"
               },
-              "estimate": {
-                "S": "0.02"
-              },
               "maxCost": {
-                "S": "0.10"
+                "N": "0.10"
               },
               "held": {
-                "S": "0"
+                "N": "0"
               },
               "costProvisional": {
-                "S": "0.0134"
+                "N": "0.0134"
               },
               "costActual": {
-                "S": "0.0121"
+                "N": "0.0121"
               },
               "tokenHash": {
-                "S": "sha256:f0e1d2c3"
+                "S": "4438d901484bedfef796bf921de240bc8f7ee9f3dc85f5606edb76db9ff606a2"
               },
               "status": {
                 "S": "completed"
@@ -2059,6 +2451,61 @@
               },
               "updatedAt": {
                 "S": "2026-10-03T02:00:00Z"
+              },
+              "runId": {
+                "S": "run-001"
+              },
+              "inputs": {
+                "M": {
+                  "deviceId": {
+                    "S": "dev-001"
+                  },
+                  "type": {
+                    "S": "firmware"
+                  }
+                }
+              },
+              "inputCount": {
+                "N": "2"
+              },
+              "unitCount": {
+                "N": "2"
+              },
+              "unitsPerJob": {
+                "N": "1"
+              },
+              "unitsSucceeded": {
+                "N": "2"
+              },
+              "unitsFailed": {
+                "N": "0"
+              },
+              "outputCount": {
+                "N": "2"
+              },
+              "vcpu": {
+                "N": "1"
+              },
+              "memoryMiB": {
+                "N": "2048"
+              },
+              "timeoutSec": {
+                "N": "1800"
+              },
+              "expectedCost": {
+                "N": "0.02"
+              },
+              "moduleName": {
+                "S": "BP firmware parser"
+              },
+              "imageUri": {
+                "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:5e6f7a8b9c0d"
+              },
+              "jobDefinitionArn": {
+                "S": "arn:aws:batch:us-east-2:123456789012:job-definition/healthcare-iot-testbed-dev-mod-mod-001-2:1"
+              },
+              "batchJobId": {
+                "S": "4b1e7c20-aa11-4d2e-9f00-000000000000"
               }
             },
             {
@@ -2080,9 +2527,6 @@
               "moduleVersion": {
                 "N": "1"
               },
-              "query": {
-                "S": "artifact=art-004"
-              },
               "mode": {
                 "S": "all"
               },
@@ -2095,20 +2539,17 @@
               "childCount": {
                 "N": "1"
               },
-              "estimate": {
-                "S": "0.05"
-              },
               "maxCost": {
-                "S": "0.40"
+                "N": "0.40"
               },
               "held": {
-                "S": "0.40"
+                "N": "0.40"
               },
               "costProvisional": {
-                "S": "0.0210"
+                "N": "0.0210"
               },
               "tokenHash": {
-                "S": "sha256:a9b8c7d6"
+                "S": "aef504f2def2b929a20ef3952d145a1c21eca1776256122957ee0759117bf1b5"
               },
               "status": {
                 "S": "running"
@@ -2130,6 +2571,58 @@
               },
               "updatedAt": {
                 "S": "2026-09-26T13:02:00Z"
+              },
+              "runId": {
+                "S": "run-002"
+              },
+              "inputs": {
+                "M": {
+                  "artifactIds": {
+                    "N": "1"
+                  }
+                }
+              },
+              "inputCount": {
+                "N": "1"
+              },
+              "unitCount": {
+                "N": "1"
+              },
+              "unitsPerJob": {
+                "N": "1"
+              },
+              "unitsSucceeded": {
+                "N": "0"
+              },
+              "unitsFailed": {
+                "N": "0"
+              },
+              "outputCount": {
+                "N": "0"
+              },
+              "vcpu": {
+                "N": "2"
+              },
+              "memoryMiB": {
+                "N": "8192"
+              },
+              "timeoutSec": {
+                "N": "3600"
+              },
+              "expectedCost": {
+                "N": "0.05"
+              },
+              "moduleName": {
+                "S": "binwalk extract"
+              },
+              "imageUri": {
+                "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:0d1e2f3a4b5c"
+              },
+              "jobDefinitionArn": {
+                "S": "arn:aws:batch:us-east-2:123456789012:job-definition/healthcare-iot-testbed-dev-mod-mod-002-1:1"
+              },
+              "batchJobId": {
+                "S": "9c2d11f4-bb22-4e3f-8a11-000000000000"
               }
             }
           ],
@@ -2138,12 +2631,10 @@
             "name",
             "moduleId",
             "moduleVersion",
-            "query",
             "mode",
             "class",
             "size",
             "childCount",
-            "estimate",
             "maxCost",
             "held",
             "costProvisional",
@@ -2156,7 +2647,23 @@
             "endedAt",
             "createdBy",
             "createdAt",
-            "updatedAt"
+            "updatedAt",
+            "runId",
+            "inputs",
+            "inputCount",
+            "unitCount",
+            "unitsPerJob",
+            "unitsSucceeded",
+            "unitsFailed",
+            "outputCount",
+            "vcpu",
+            "memoryMiB",
+            "timeoutSec",
+            "expectedCost",
+            "moduleName",
+            "imageUri",
+            "jobDefinitionArn",
+            "batchJobId"
           ],
           "DataAccess": {
             "MySql": {}
@@ -2179,22 +2686,52 @@
               "entity": {
                 "S": "run-child"
               },
-              "batchJobId": {
-                "S": "4b1e7c20-aa11-4d2e-9f00-000000000000:0"
-              },
               "attempts": {
-                "N": "1"
-              },
-              "inputCount": {
                 "N": "1"
               },
               "status": {
                 "S": "succeeded"
               },
               "statusReason": {
-                "S": "exit 0"
+                "S": "Essential container in task exited"
               },
               "statusUpdatedAt": {
+                "S": "2026-09-14T09:03:10Z"
+              },
+              "index": {
+                "N": "0"
+              },
+              "units": {
+                "L": [
+                  {
+                    "M": {
+                      "unitId": {
+                        "S": "ead31da8c0f65f1125e9d0fa33944733f8af1ba43462d3830e73db85fb49e5c7"
+                      },
+                      "key": {
+                        "S": "bp_a_v1.0.0.bin"
+                      },
+                      "artifactIds": {
+                        "L": [
+                          {
+                            "S": "art-001"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              "statusRank": {
+                "N": "3"
+              },
+              "logStreamName": {
+                "S": "run/default/4cc7b6145abc3e4aa4fb6c973ce9286f"
+              },
+              "startedAt": {
+                "S": "2026-09-14T09:01:00Z"
+              },
+              "stoppedAt": {
                 "S": "2026-09-14T09:03:10Z"
               }
             },
@@ -2208,22 +2745,52 @@
               "entity": {
                 "S": "run-child"
               },
-              "batchJobId": {
-                "S": "4b1e7c20-aa11-4d2e-9f00-000000000001:1"
-              },
               "attempts": {
                 "N": "2"
-              },
-              "inputCount": {
-                "N": "1"
               },
               "status": {
                 "S": "succeeded"
               },
               "statusReason": {
-                "S": "exit 0 after Spot interruption retry"
+                "S": "Essential container in task exited"
               },
               "statusUpdatedAt": {
+                "S": "2026-09-14T09:03:40Z"
+              },
+              "index": {
+                "N": "1"
+              },
+              "units": {
+                "L": [
+                  {
+                    "M": {
+                      "unitId": {
+                        "S": "1064473bd4daed5e72d0f78d86a97f8abf6a6c6ac6d7dff03a04025e50f28a14"
+                      },
+                      "key": {
+                        "S": "bp_a_v2.1.0.bin"
+                      },
+                      "artifactIds": {
+                        "L": [
+                          {
+                            "S": "art-002"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              "statusRank": {
+                "N": "3"
+              },
+              "logStreamName": {
+                "S": "run/default/45789703bfb9435ac7c2884abc4d2e9e"
+              },
+              "startedAt": {
+                "S": "2026-09-14T09:02:00Z"
+              },
+              "stoppedAt": {
                 "S": "2026-09-14T09:03:40Z"
               }
             },
@@ -2237,13 +2804,7 @@
               "entity": {
                 "S": "run-child"
               },
-              "batchJobId": {
-                "S": "9c2d11f4-bb22-4e3f-8a11-000000000000:0"
-              },
               "attempts": {
-                "N": "1"
-              },
-              "inputCount": {
                 "N": "1"
               },
               "status": {
@@ -2254,17 +2815,54 @@
               },
               "statusUpdatedAt": {
                 "S": "2026-09-26T13:02:00Z"
+              },
+              "index": {
+                "N": "0"
+              },
+              "units": {
+                "L": [
+                  {
+                    "M": {
+                      "unitId": {
+                        "S": "171c8ab2e7b09e1a9641f88fe6cdfd5c7af3d793568af289140992c6ba0e9c7a"
+                      },
+                      "key": {
+                        "S": "all"
+                      },
+                      "artifactIds": {
+                        "L": [
+                          {
+                            "S": "art-004"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              "statusRank": {
+                "N": "2"
+              },
+              "logStreamName": {
+                "S": "run/default/a9ce74c24ef1d3840b02548dad98b0f6"
+              },
+              "startedAt": {
+                "S": "2026-09-26T13:02:00Z"
               }
             }
           ],
           "NonKeyAttributes": [
             "entity",
-            "batchJobId",
             "attempts",
-            "inputCount",
             "status",
             "statusReason",
-            "statusUpdatedAt"
+            "statusUpdatedAt",
+            "index",
+            "units",
+            "statusRank",
+            "logStreamName",
+            "startedAt",
+            "stoppedAt"
           ],
           "DataAccess": {
             "MySql": {}
@@ -2282,21 +2880,39 @@
                 "S": "RUN#run-001"
               },
               "sk": {
-                "S": "RESULT#e3b0c442"
+                "S": "RESULT#ead31da8c0f65f1125e9d0fa33944733f8af1ba43462d3830e73db85fb49e5c7"
               },
               "entity": {
                 "S": "run-result"
               },
-              "inputArtifactId": {
-                "S": "art-001"
-              },
-              "outputArtifactIds": {
-                "SS": [
-                  "art-005"
-                ]
+              "key": {
+                "S": "bp_a_v1.0.0.bin"
               },
               "status": {
-                "S": "done"
+                "S": "succeeded"
+              },
+              "inputArtifactIds": {
+                "L": [
+                  {
+                    "S": "art-001"
+                  }
+                ]
+              },
+              "outputArtifactIds": {
+                "L": [
+                  {
+                    "S": "art-005"
+                  }
+                ]
+              },
+              "exitCode": {
+                "N": "0"
+              },
+              "childIndex": {
+                "N": "0"
+              },
+              "recordedAt": {
+                "S": "2026-09-14T09:03:10Z"
               }
             },
             {
@@ -2304,29 +2920,51 @@
                 "S": "RUN#run-001"
               },
               "sk": {
-                "S": "RESULT#8f14e45f"
+                "S": "RESULT#1064473bd4daed5e72d0f78d86a97f8abf6a6c6ac6d7dff03a04025e50f28a14"
               },
               "entity": {
                 "S": "run-result"
               },
-              "inputArtifactId": {
-                "S": "art-002"
-              },
-              "outputArtifactIds": {
-                "SS": [
-                  "art-006"
-                ]
+              "key": {
+                "S": "bp_a_v2.1.0.bin"
               },
               "status": {
-                "S": "done"
+                "S": "succeeded"
+              },
+              "inputArtifactIds": {
+                "L": [
+                  {
+                    "S": "art-002"
+                  }
+                ]
+              },
+              "outputArtifactIds": {
+                "L": [
+                  {
+                    "S": "art-006"
+                  }
+                ]
+              },
+              "exitCode": {
+                "N": "0"
+              },
+              "childIndex": {
+                "N": "1"
+              },
+              "recordedAt": {
+                "S": "2026-09-14T09:03:40Z"
               }
             }
           ],
           "NonKeyAttributes": [
             "entity",
-            "inputArtifactId",
+            "key",
+            "status",
+            "inputArtifactIds",
             "outputArtifactIds",
-            "status"
+            "exitCode",
+            "childIndex",
+            "recordedAt"
           ],
           "DataAccess": {
             "MySql": {}
@@ -2435,6 +3073,108 @@
           }
         },
         {
+          "FacetName": "ArtifactRunLink",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "ArtifactId",
+            "SortKeyAlias": "RunId"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "ARTIFACT#art-001"
+              },
+              "sk": {
+                "S": "RUN#run-001"
+              },
+              "entity": {
+                "S": "artifact-run"
+              },
+              "relation": {
+                "S": "input"
+              },
+              "name": {
+                "S": "BP firmware parse - all dev-001 firmware"
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-005"
+              },
+              "sk": {
+                "S": "RUN#run-001"
+              },
+              "entity": {
+                "S": "artifact-run"
+              },
+              "relation": {
+                "S": "output"
+              },
+              "name": {
+                "S": "BP firmware parse - all dev-001 firmware"
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-002"
+              },
+              "sk": {
+                "S": "RUN#run-001"
+              },
+              "entity": {
+                "S": "artifact-run"
+              },
+              "relation": {
+                "S": "input"
+              },
+              "name": {
+                "S": "BP firmware parse - all dev-001 firmware"
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-006"
+              },
+              "sk": {
+                "S": "RUN#run-001"
+              },
+              "entity": {
+                "S": "artifact-run"
+              },
+              "relation": {
+                "S": "output"
+              },
+              "name": {
+                "S": "BP firmware parse - all dev-001 firmware"
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-004"
+              },
+              "sk": {
+                "S": "RUN#run-002"
+              },
+              "entity": {
+                "S": "artifact-run"
+              },
+              "relation": {
+                "S": "input"
+              },
+              "name": {
+                "S": "binwalk - lab capture"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "relation",
+            "name"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
           "FacetName": "ModuleRunHistory",
           "KeyAttributeAlias": {
             "PartitionKeyAlias": "ModuleId",
@@ -2457,25 +3197,26 @@
               "status": {
                 "S": "completed"
               },
-              "durationSec": {
-                "N": "240"
-              }
-            },
-            {
-              "pk": {
-                "S": "MODULE#mod-002"
+              "class": {
+                "S": "economy"
               },
-              "sk": {
-                "S": "RUN#run-002"
+              "size": {
+                "S": "S"
               },
-              "entity": {
-                "S": "module-run"
+              "childCount": {
+                "N": "2"
               },
-              "moduleVersion": {
-                "N": "1"
+              "unitCount": {
+                "N": "2"
               },
-              "status": {
-                "S": "running"
+              "unitSeconds": {
+                "N": "215.4"
+              },
+              "createdAt": {
+                "S": "2026-09-14T09:00:00Z"
+              },
+              "endedAt": {
+                "S": "2026-09-14T09:04:00Z"
               }
             }
           ],
@@ -2483,7 +3224,47 @@
             "entity",
             "moduleVersion",
             "status",
-            "durationSec"
+            "class",
+            "size",
+            "childCount",
+            "unitCount",
+            "unitSeconds",
+            "createdAt",
+            "endedAt"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "ActiveRun",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "ActiveRuns",
+            "SortKeyAlias": "RunId"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "ACTIVE#RUNS"
+              },
+              "sk": {
+                "S": "RUN#run-002"
+              },
+              "entity": {
+                "S": "active-run"
+              },
+              "userId": {
+                "S": "user-001"
+              },
+              "createdAt": {
+                "S": "2026-09-26T13:00:00Z"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "userId",
+            "createdAt"
           ],
           "DataAccess": {
             "MySql": {}
@@ -2540,7 +3321,7 @@
                 "S": "2026-09-26T13:10:00Z"
               },
               "cost": {
-                "S": "0.0420"
+                "N": "0.0420"
               },
               "createdBy": {
                 "S": "user-001"
@@ -2550,6 +3331,9 @@
               },
               "updatedAt": {
                 "S": "2026-09-26T13:10:00Z"
+              },
+              "tokenHash": {
+                "S": "687a53027806debd6312a5eec12e065bad5834c3d77b66b6e15bb1ddff698750"
               }
             }
           ],
@@ -2569,7 +3353,8 @@
             "cost",
             "createdBy",
             "createdAt",
-            "updatedAt"
+            "updatedAt",
+            "tokenHash"
           ],
           "DataAccess": {
             "MySql": {}
@@ -3012,9 +3797,9 @@
             "entity",
             "role",
             "name",
-            "status",
             "type",
-            "createdAt"
+            "createdAt",
+            "status"
           ],
           "DataAccess": {
             "MySql": {}
@@ -3613,16 +4398,25 @@
                 "S": "budget"
               },
               "monthlyLimit": {
-                "S": "50.00"
+                "N": "50.00"
               },
               "held": {
-                "S": "0.40"
+                "N": "0.40"
               },
               "heavyEnabled": {
                 "BOOL": true
               },
               "updatedAt": {
                 "S": "2026-09-26T13:00:00Z"
+              },
+              "period": {
+                "S": "2026-09"
+              },
+              "version": {
+                "N": "7"
+              },
+              "spentProvisional": {
+                "N": "0.0604"
               }
             },
             {
@@ -3636,16 +4430,25 @@
                 "S": "budget"
               },
               "monthlyLimit": {
-                "S": "10.00"
+                "N": "10.00"
               },
               "held": {
-                "S": "0"
+                "N": "0"
               },
               "heavyEnabled": {
                 "BOOL": false
               },
               "updatedAt": {
                 "S": "2026-09-03T09:30:00Z"
+              },
+              "period": {
+                "S": "2026-09"
+              },
+              "version": {
+                "N": "0"
+              },
+              "spentProvisional": {
+                "N": "0"
               }
             }
           ],
@@ -3654,7 +4457,10 @@
             "monthlyLimit",
             "held",
             "heavyEnabled",
-            "updatedAt"
+            "updatedAt",
+            "period",
+            "version",
+            "spentProvisional"
           ],
           "DataAccess": {
             "MySql": {}
@@ -3672,7 +4478,7 @@
                 "S": "USER#user-001"
               },
               "sk": {
-                "S": "USAGE#2026-09-13T11:05:00Z#codebuild#mod-001-0002"
+                "S": "USAGE#2026-09#codebuild#MODULE#mod-001:VERSION#0002#healthcare-iot-testbed-dev-image-build:c7720e5d"
               },
               "entity": {
                 "S": "usage"
@@ -3680,8 +4486,14 @@
               "kind": {
                 "S": "provisional"
               },
+              "period": {
+                "S": "2026-09"
+              },
               "amount": {
-                "S": "0.0050"
+                "N": "0.0050"
+              },
+              "recordedAt": {
+                "S": "2026-09-13T11:05:00Z"
               },
               "resource": {
                 "S": "build mod-001 v2"
@@ -3695,6 +4507,12 @@
                     "S": "mod-001-0002"
                   }
                 }
+              },
+              "buildId": {
+                "S": "healthcare-iot-testbed-dev-image-build:c7720e5d"
+              },
+              "minutes": {
+                "N": "1"
               }
             },
             {
@@ -3702,7 +4520,7 @@
                 "S": "USER#user-001"
               },
               "sk": {
-                "S": "USAGE#2026-09-14T09:04:00Z#batch#run-001"
+                "S": "USAGE#2026-09#batch#run-001#4b1e7c20-aa11-4d2e-9f00-000000000000:0"
               },
               "entity": {
                 "S": "usage"
@@ -3710,8 +4528,14 @@
               "kind": {
                 "S": "provisional"
               },
+              "period": {
+                "S": "2026-09"
+              },
               "amount": {
-                "S": "0.0134"
+                "N": "0.0134"
+              },
+              "recordedAt": {
+                "S": "2026-09-14T09:04:00Z"
               },
               "resource": {
                 "S": "run run-001"
@@ -3725,6 +4549,15 @@
                     "S": "run-001"
                   }
                 }
+              },
+              "runId": {
+                "S": "run-001"
+              },
+              "jobId": {
+                "S": "4b1e7c20-aa11-4d2e-9f00-000000000000:0"
+              },
+              "seconds": {
+                "N": "120"
               }
             },
             {
@@ -3732,7 +4565,7 @@
                 "S": "USER#user-001"
               },
               "sk": {
-                "S": "USAGE#2026-09-26T13:10:00Z#ecs#sess-001"
+                "S": "USAGE#2026-09#ecs#sess-001#5f0c3e1d"
               },
               "entity": {
                 "S": "usage"
@@ -3740,8 +4573,14 @@
               "kind": {
                 "S": "provisional"
               },
+              "period": {
+                "S": "2026-09"
+              },
               "amount": {
-                "S": "0.0420"
+                "N": "0.0420"
+              },
+              "recordedAt": {
+                "S": "2026-09-26T13:10:00Z"
               },
               "resource": {
                 "S": "session sess-001"
@@ -3762,7 +4601,7 @@
                 "S": "USER#user-001"
               },
               "sk": {
-                "S": "USAGE#2026-10-03T02:00:00Z#cur#run-001"
+                "S": "USAGE#2026-09#cur#run-001#2026-09"
               },
               "entity": {
                 "S": "usage"
@@ -3770,8 +4609,14 @@
               "kind": {
                 "S": "actual"
               },
+              "period": {
+                "S": "2026-09"
+              },
               "amount": {
-                "S": "0.0121"
+                "N": "0.0121"
+              },
+              "recordedAt": {
+                "S": "2026-10-03T02:00:00Z"
               },
               "resource": {
                 "S": "run run-001"
@@ -3791,9 +4636,16 @@
           "NonKeyAttributes": [
             "entity",
             "kind",
+            "period",
             "amount",
+            "recordedAt",
             "resource",
-            "costTags"
+            "costTags",
+            "buildId",
+            "minutes",
+            "runId",
+            "jobId",
+            "seconds"
           ],
           "DataAccess": {
             "MySql": {}
@@ -3992,10 +4844,10 @@
             "S": "env"
           },
           "name": {
-            "S": "analysis-base"
+            "S": "RE tools"
           },
           "description": {
-            "S": "Python 3.12 with scapy, pyshark/tshark, lief, capstone, binwalk"
+            "S": "Analysis base plus radare2, GDB and Ghidra"
           },
           "latestVersion": {
             "N": "2"
@@ -4008,6 +4860,15 @@
           },
           "updatedAt": {
             "S": "2026-09-12T08:20:00Z"
+          },
+          "envId": {
+            "S": "env-001"
+          },
+          "base": {
+            "S": "platform-base"
+          },
+          "latestReadyVersion": {
+            "N": "2"
           }
         },
         {
@@ -4021,31 +4882,29 @@
             "S": "env-version"
           },
           "baseImage": {
-            "S": "platform-base:analysis-base"
+            "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-platform-base@sha256:b45e0a17"
           },
           "catalogItems": {
-            "SS": [
-              "tshark",
-              "binwalk"
+            "L": [
+              {
+                "S": "gdb"
+              },
+              {
+                "S": "radare2"
+              }
             ]
           },
           "status": {
             "S": "ready"
           },
-          "statusReason": {
-            "S": "build succeeded"
-          },
           "statusUpdatedAt": {
             "S": "2026-09-05T08:14:00Z"
           },
           "buildId": {
-            "S": "script-build:0f1c2a9e"
-          },
-          "imageDigest": {
-            "S": "sha256:1a2b3c4d5e6f"
+            "S": "healthcare-iot-testbed-dev-image-build:0f1c2a9e"
           },
           "freezeKey": {
-            "S": "envs/env-001/0001/freeze/"
+            "S": "builds/envs/env-001/1/"
           },
           "taskDefArn": {
             "S": "arn:aws:ecs:us-east-1:123456789012:task-definition/session-env-001-0001:1"
@@ -4055,6 +4914,18 @@
           },
           "createdAt": {
             "S": "2026-09-05T08:00:00Z"
+          },
+          "envId": {
+            "S": "env-001"
+          },
+          "version": {
+            "N": "1"
+          },
+          "imageUri": {
+            "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:1a2b3c4d5e6f"
+          },
+          "basedOn": {
+            "S": "platform-base v1"
           }
         },
         {
@@ -4068,13 +4939,19 @@
             "S": "env-version"
           },
           "baseImage": {
-            "S": "platform-base:analysis-base"
+            "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:1a2b3c4d5e6f"
           },
           "catalogItems": {
-            "SS": [
-              "tshark",
-              "binwalk",
-              "ghidra"
+            "L": [
+              {
+                "S": "gdb"
+              },
+              {
+                "S": "ghidra"
+              },
+              {
+                "S": "radare2"
+              }
             ]
           },
           "parentVersion": {
@@ -4083,20 +4960,14 @@
           "status": {
             "S": "ready"
           },
-          "statusReason": {
-            "S": "build succeeded"
-          },
           "statusUpdatedAt": {
             "S": "2026-09-12T08:20:00Z"
           },
           "buildId": {
-            "S": "script-build:7d3e41b0"
-          },
-          "imageDigest": {
-            "S": "sha256:7a8b9c0d1e2f"
+            "S": "healthcare-iot-testbed-dev-image-build:7d3e41b0"
           },
           "freezeKey": {
-            "S": "envs/env-001/0002/freeze/"
+            "S": "builds/envs/env-001/2/"
           },
           "taskDefArn": {
             "S": "arn:aws:ecs:us-east-1:123456789012:task-definition/session-env-001-0002:1"
@@ -4106,6 +4977,15 @@
           },
           "createdAt": {
             "S": "2026-09-12T08:00:00Z"
+          },
+          "envId": {
+            "S": "env-001"
+          },
+          "version": {
+            "N": "2"
+          },
+          "imageUri": {
+            "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:7a8b9c0d1e2f"
           }
         },
         {
@@ -4152,9 +5032,6 @@
           "name": {
             "S": "BP firmware parser"
           },
-          "kind": {
-            "S": "script"
-          },
           "runtime": {
             "S": "cloud"
           },
@@ -4172,6 +5049,12 @@
           },
           "updatedAt": {
             "S": "2026-09-06T09:00:00Z"
+          },
+          "moduleId": {
+            "S": "mod-001"
+          },
+          "latestReadyVersion": {
+            "N": "2"
           }
         },
         {
@@ -4218,14 +5101,11 @@
           "name": {
             "S": "binwalk extract"
           },
-          "kind": {
-            "S": "tool"
-          },
           "runtime": {
             "S": "cloud"
           },
           "description": {
-            "S": "Runs binwalk extraction on each input file"
+            "S": "Runs binwalk extraction on each input file (calls binwalk from Python)"
           },
           "latestVersion": {
             "N": "1"
@@ -4238,6 +5118,12 @@
           },
           "updatedAt": {
             "S": "2026-09-06T10:00:00Z"
+          },
+          "moduleId": {
+            "S": "mod-002"
+          },
+          "latestReadyVersion": {
+            "N": "1"
           }
         },
         {
@@ -4284,9 +5170,6 @@
           "name": {
             "S": "BLE sniffer capture"
           },
-          "kind": {
-            "S": "script"
-          },
           "runtime": {
             "S": "local"
           },
@@ -4304,6 +5187,12 @@
           },
           "updatedAt": {
             "S": "2026-09-07T12:00:00Z"
+          },
+          "moduleId": {
+            "S": "mod-003"
+          },
+          "latestReadyVersion": {
+            "N": "1"
           }
         },
         {
@@ -4350,14 +5239,11 @@
           "name": {
             "S": "nRF flasher"
           },
-          "kind": {
-            "S": "tool"
-          },
           "runtime": {
             "S": "local"
           },
           "description": {
-            "S": "Flashes nRF52 boards over SWD from the user's machine"
+            "S": "Flashes nRF52 boards over SWD from the user's machine (local script)"
           },
           "latestVersion": {
             "N": "1"
@@ -4370,6 +5256,9 @@
           },
           "updatedAt": {
             "S": "2026-09-08T15:00:00Z"
+          },
+          "moduleId": {
+            "S": "mod-004"
           }
         },
         {
@@ -4423,7 +5312,7 @@
             "N": "1"
           },
           "sourceKey": {
-            "S": "modules/mod-001/0001/parse_bp.py"
+            "S": "scripts/mod-001/1/f87f5742"
           },
           "sha256": {
             "S": "9f2c1e7a"
@@ -4431,23 +5320,60 @@
           "status": {
             "S": "ready"
           },
-          "statusReason": {
-            "S": "build succeeded"
-          },
           "statusUpdatedAt": {
             "S": "2026-09-06T09:06:00Z"
           },
           "buildId": {
-            "S": "script-build:a41f09c2"
-          },
-          "imageDigest": {
-            "S": "sha256:3c4d5e6f7a8b"
+            "S": "healthcare-iot-testbed-dev-image-build:a41f09c2"
           },
           "freezeKey": {
-            "S": "modules/mod-001/0001/freeze/"
+            "S": "builds/modules/mod-001/1/"
           },
           "createdAt": {
             "S": "2026-09-06T09:00:00Z"
+          },
+          "moduleId": {
+            "S": "mod-001"
+          },
+          "version": {
+            "N": "1"
+          },
+          "runtime": {
+            "S": "cloud"
+          },
+          "originalFilename": {
+            "S": "parse_bp.py"
+          },
+          "command": {
+            "L": [
+              {
+                "S": "python3"
+              },
+              {
+                "S": "-m"
+              },
+              {
+                "S": "platform_sdk.driver"
+              },
+              {
+                "S": "/app/script.py"
+              }
+            ]
+          },
+          "sizeBytes": {
+            "N": "2048"
+          },
+          "imageUri": {
+            "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:3c4d5e6f7a8b"
+          },
+          "baseImage": {
+            "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:1a2b3c4d5e6f"
+          },
+          "jobDefinitionArn": {
+            "S": "arn:aws:batch:us-east-2:123456789012:job-definition/healthcare-iot-testbed-dev-mod-mod-001-1:1"
+          },
+          "createdBy": {
+            "S": "user-001"
           }
         },
         {
@@ -4470,7 +5396,7 @@
             "N": "2"
           },
           "sourceKey": {
-            "S": "modules/mod-001/0002/parse_bp.py"
+            "S": "scripts/mod-001/2/c415dc02"
           },
           "sha256": {
             "S": "b81d4f03"
@@ -4478,23 +5404,60 @@
           "status": {
             "S": "ready"
           },
-          "statusReason": {
-            "S": "build succeeded"
-          },
           "statusUpdatedAt": {
             "S": "2026-09-13T11:05:00Z"
           },
           "buildId": {
-            "S": "script-build:c7720e5d"
-          },
-          "imageDigest": {
-            "S": "sha256:5e6f7a8b9c0d"
+            "S": "healthcare-iot-testbed-dev-image-build:c7720e5d"
           },
           "freezeKey": {
-            "S": "modules/mod-001/0002/freeze/"
+            "S": "builds/modules/mod-001/2/"
           },
           "createdAt": {
             "S": "2026-09-13T11:00:00Z"
+          },
+          "moduleId": {
+            "S": "mod-001"
+          },
+          "version": {
+            "N": "2"
+          },
+          "runtime": {
+            "S": "cloud"
+          },
+          "originalFilename": {
+            "S": "parse_bp.py"
+          },
+          "command": {
+            "L": [
+              {
+                "S": "python3"
+              },
+              {
+                "S": "-m"
+              },
+              {
+                "S": "platform_sdk.driver"
+              },
+              {
+                "S": "/app/script.py"
+              }
+            ]
+          },
+          "sizeBytes": {
+            "N": "2048"
+          },
+          "imageUri": {
+            "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:5e6f7a8b9c0d"
+          },
+          "baseImage": {
+            "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:7a8b9c0d1e2f"
+          },
+          "jobDefinitionArn": {
+            "S": "arn:aws:batch:us-east-2:123456789012:job-definition/healthcare-iot-testbed-dev-mod-mod-001-2:1"
+          },
+          "createdBy": {
+            "S": "user-001"
           }
         },
         {
@@ -4508,7 +5471,20 @@
             "S": "module-version"
           },
           "command": {
-            "S": "binwalk -e -C /outputs /inputs/*"
+            "L": [
+              {
+                "S": "python3"
+              },
+              {
+                "S": "-m"
+              },
+              {
+                "S": "platform_sdk.driver"
+              },
+              {
+                "S": "/app/script.py"
+              }
+            ]
           },
           "envId": {
             "S": "env-001"
@@ -4519,23 +5495,53 @@
           "status": {
             "S": "ready"
           },
-          "statusReason": {
-            "S": "build succeeded"
-          },
           "statusUpdatedAt": {
             "S": "2026-09-12T10:04:00Z"
           },
           "buildId": {
-            "S": "script-build:e19b33f8"
-          },
-          "imageDigest": {
-            "S": "sha256:0d1e2f3a4b5c"
+            "S": "healthcare-iot-testbed-dev-image-build:e19b33f8"
           },
           "freezeKey": {
-            "S": "modules/mod-002/0001/freeze/"
+            "S": "builds/modules/mod-002/1/"
           },
           "createdAt": {
             "S": "2026-09-12T10:00:00Z"
+          },
+          "moduleId": {
+            "S": "mod-002"
+          },
+          "version": {
+            "N": "1"
+          },
+          "runtime": {
+            "S": "cloud"
+          },
+          "originalFilename": {
+            "S": "binwalk_extract.py"
+          },
+          "sourceKey": {
+            "S": "scripts/mod-002/1/29bf6f84"
+          },
+          "level": {
+            "S": "L1"
+          },
+          "sha256": {
+            "S": "7c1e04ab"
+          },
+          "sizeBytes": {
+            "N": "2048"
+          },
+          "imageUri": {
+            "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:0d1e2f3a4b5c"
+          },
+          "baseImage": {
+            "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:7a8b9c0d1e2f"
+          },
+          "jobDefinitionArn": {
+            "S": "arn:aws:batch:us-east-2:123456789012:job-definition/healthcare-iot-testbed-dev-mod-mod-002-1:1"
+          },
+          "createdBy": {
+            "S": "user-001"
           }
         },
         {
@@ -4549,7 +5555,7 @@
             "S": "module-version"
           },
           "sourceKey": {
-            "S": "modules/mod-003/0001/ble_capture.py"
+            "S": "scripts/mod-003/1/eccb1101"
           },
           "sha256": {
             "S": "4e6a0b91"
@@ -4563,14 +5569,23 @@
           "status": {
             "S": "ready"
           },
-          "statusReason": {
-            "S": "upload verified"
-          },
           "statusUpdatedAt": {
             "S": "2026-09-07T12:01:00Z"
           },
           "createdAt": {
             "S": "2026-09-07T12:00:00Z"
+          },
+          "moduleId": {
+            "S": "mod-003"
+          },
+          "version": {
+            "N": "1"
+          },
+          "runtime": {
+            "S": "local"
+          },
+          "createdBy": {
+            "S": "user-001"
           }
         },
         {
@@ -4584,7 +5599,7 @@
             "S": "module-version"
           },
           "sourceKey": {
-            "S": "modules/mod-004/0001/nrf_flasher.zip"
+            "S": "scripts/mod-004/1/97dcf4da"
           },
           "sha256": {
             "S": "d05c77e2"
@@ -4598,14 +5613,23 @@
           "status": {
             "S": "pending"
           },
-          "statusReason": {
-            "S": "awaiting upload"
-          },
           "statusUpdatedAt": {
             "S": "2026-09-08T15:00:00Z"
           },
           "createdAt": {
             "S": "2026-09-08T15:00:00Z"
+          },
+          "moduleId": {
+            "S": "mod-004"
+          },
+          "version": {
+            "N": "1"
+          },
+          "runtime": {
+            "S": "local"
+          },
+          "createdBy": {
+            "S": "user-002"
           }
         },
         {
@@ -5558,9 +6582,6 @@
           "moduleVersion": {
             "N": "2"
           },
-          "query": {
-            "S": "device=dev-001 type=firmware"
-          },
           "mode": {
             "S": "map"
           },
@@ -5573,23 +6594,20 @@
           "childCount": {
             "N": "2"
           },
-          "estimate": {
-            "S": "0.02"
-          },
           "maxCost": {
-            "S": "0.10"
+            "N": "0.10"
           },
           "held": {
-            "S": "0"
+            "N": "0"
           },
           "costProvisional": {
-            "S": "0.0134"
+            "N": "0.0134"
           },
           "costActual": {
-            "S": "0.0121"
+            "N": "0.0121"
           },
           "tokenHash": {
-            "S": "sha256:f0e1d2c3"
+            "S": "4438d901484bedfef796bf921de240bc8f7ee9f3dc85f5606edb76db9ff606a2"
           },
           "status": {
             "S": "completed"
@@ -5614,6 +6632,61 @@
           },
           "updatedAt": {
             "S": "2026-10-03T02:00:00Z"
+          },
+          "runId": {
+            "S": "run-001"
+          },
+          "inputs": {
+            "M": {
+              "deviceId": {
+                "S": "dev-001"
+              },
+              "type": {
+                "S": "firmware"
+              }
+            }
+          },
+          "inputCount": {
+            "N": "2"
+          },
+          "unitCount": {
+            "N": "2"
+          },
+          "unitsPerJob": {
+            "N": "1"
+          },
+          "unitsSucceeded": {
+            "N": "2"
+          },
+          "unitsFailed": {
+            "N": "0"
+          },
+          "outputCount": {
+            "N": "2"
+          },
+          "vcpu": {
+            "N": "1"
+          },
+          "memoryMiB": {
+            "N": "2048"
+          },
+          "timeoutSec": {
+            "N": "1800"
+          },
+          "expectedCost": {
+            "N": "0.02"
+          },
+          "moduleName": {
+            "S": "BP firmware parser"
+          },
+          "imageUri": {
+            "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:5e6f7a8b9c0d"
+          },
+          "jobDefinitionArn": {
+            "S": "arn:aws:batch:us-east-2:123456789012:job-definition/healthcare-iot-testbed-dev-mod-mod-001-2:1"
+          },
+          "batchJobId": {
+            "S": "4b1e7c20-aa11-4d2e-9f00-000000000000"
           }
         },
         {
@@ -5626,45 +6699,53 @@
           "entity": {
             "S": "run-child"
           },
-          "batchJobId": {
-            "S": "4b1e7c20-aa11-4d2e-9f00-000000000000:0"
-          },
           "attempts": {
-            "N": "1"
-          },
-          "inputCount": {
             "N": "1"
           },
           "status": {
             "S": "succeeded"
           },
           "statusReason": {
-            "S": "exit 0"
+            "S": "Essential container in task exited"
           },
           "statusUpdatedAt": {
             "S": "2026-09-14T09:03:10Z"
-          }
-        },
-        {
-          "pk": {
-            "S": "RUN#run-001"
           },
-          "sk": {
-            "S": "RESULT#e3b0c442"
+          "index": {
+            "N": "0"
           },
-          "entity": {
-            "S": "run-result"
-          },
-          "inputArtifactId": {
-            "S": "art-001"
-          },
-          "outputArtifactIds": {
-            "SS": [
-              "art-005"
+          "units": {
+            "L": [
+              {
+                "M": {
+                  "unitId": {
+                    "S": "ead31da8c0f65f1125e9d0fa33944733f8af1ba43462d3830e73db85fb49e5c7"
+                  },
+                  "key": {
+                    "S": "bp_a_v1.0.0.bin"
+                  },
+                  "artifactIds": {
+                    "L": [
+                      {
+                        "S": "art-001"
+                      }
+                    ]
+                  }
+                }
+              }
             ]
           },
-          "status": {
-            "S": "done"
+          "statusRank": {
+            "N": "3"
+          },
+          "logStreamName": {
+            "S": "run/default/4cc7b6145abc3e4aa4fb6c973ce9286f"
+          },
+          "startedAt": {
+            "S": "2026-09-14T09:01:00Z"
+          },
+          "stoppedAt": {
+            "S": "2026-09-14T09:03:10Z"
           }
         },
         {
@@ -5711,45 +6792,53 @@
           "entity": {
             "S": "run-child"
           },
-          "batchJobId": {
-            "S": "4b1e7c20-aa11-4d2e-9f00-000000000001:1"
-          },
           "attempts": {
             "N": "2"
-          },
-          "inputCount": {
-            "N": "1"
           },
           "status": {
             "S": "succeeded"
           },
           "statusReason": {
-            "S": "exit 0 after Spot interruption retry"
+            "S": "Essential container in task exited"
           },
           "statusUpdatedAt": {
             "S": "2026-09-14T09:03:40Z"
-          }
-        },
-        {
-          "pk": {
-            "S": "RUN#run-001"
           },
-          "sk": {
-            "S": "RESULT#8f14e45f"
+          "index": {
+            "N": "1"
           },
-          "entity": {
-            "S": "run-result"
-          },
-          "inputArtifactId": {
-            "S": "art-002"
-          },
-          "outputArtifactIds": {
-            "SS": [
-              "art-006"
+          "units": {
+            "L": [
+              {
+                "M": {
+                  "unitId": {
+                    "S": "1064473bd4daed5e72d0f78d86a97f8abf6a6c6ac6d7dff03a04025e50f28a14"
+                  },
+                  "key": {
+                    "S": "bp_a_v2.1.0.bin"
+                  },
+                  "artifactIds": {
+                    "L": [
+                      {
+                        "S": "art-002"
+                      }
+                    ]
+                  }
+                }
+              }
             ]
           },
-          "status": {
-            "S": "done"
+          "statusRank": {
+            "N": "3"
+          },
+          "logStreamName": {
+            "S": "run/default/45789703bfb9435ac7c2884abc4d2e9e"
+          },
+          "startedAt": {
+            "S": "2026-09-14T09:02:00Z"
+          },
+          "stoppedAt": {
+            "S": "2026-09-14T09:03:40Z"
           }
         },
         {
@@ -5833,8 +6922,26 @@
           "status": {
             "S": "completed"
           },
-          "durationSec": {
-            "N": "240"
+          "class": {
+            "S": "economy"
+          },
+          "size": {
+            "S": "S"
+          },
+          "childCount": {
+            "N": "2"
+          },
+          "unitCount": {
+            "N": "2"
+          },
+          "unitSeconds": {
+            "N": "215.4"
+          },
+          "createdAt": {
+            "S": "2026-09-14T09:00:00Z"
+          },
+          "endedAt": {
+            "S": "2026-09-14T09:04:00Z"
           }
         },
         {
@@ -5890,9 +6997,6 @@
           "moduleVersion": {
             "N": "1"
           },
-          "query": {
-            "S": "artifact=art-004"
-          },
           "mode": {
             "S": "all"
           },
@@ -5905,20 +7009,17 @@
           "childCount": {
             "N": "1"
           },
-          "estimate": {
-            "S": "0.05"
-          },
           "maxCost": {
-            "S": "0.40"
+            "N": "0.40"
           },
           "held": {
-            "S": "0.40"
+            "N": "0.40"
           },
           "costProvisional": {
-            "S": "0.0210"
+            "N": "0.0210"
           },
           "tokenHash": {
-            "S": "sha256:a9b8c7d6"
+            "S": "aef504f2def2b929a20ef3952d145a1c21eca1776256122957ee0759117bf1b5"
           },
           "status": {
             "S": "running"
@@ -5940,6 +7041,58 @@
           },
           "updatedAt": {
             "S": "2026-09-26T13:02:00Z"
+          },
+          "runId": {
+            "S": "run-002"
+          },
+          "inputs": {
+            "M": {
+              "artifactIds": {
+                "N": "1"
+              }
+            }
+          },
+          "inputCount": {
+            "N": "1"
+          },
+          "unitCount": {
+            "N": "1"
+          },
+          "unitsPerJob": {
+            "N": "1"
+          },
+          "unitsSucceeded": {
+            "N": "0"
+          },
+          "unitsFailed": {
+            "N": "0"
+          },
+          "outputCount": {
+            "N": "0"
+          },
+          "vcpu": {
+            "N": "2"
+          },
+          "memoryMiB": {
+            "N": "8192"
+          },
+          "timeoutSec": {
+            "N": "3600"
+          },
+          "expectedCost": {
+            "N": "0.05"
+          },
+          "moduleName": {
+            "S": "binwalk extract"
+          },
+          "imageUri": {
+            "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-scripts@sha256:0d1e2f3a4b5c"
+          },
+          "jobDefinitionArn": {
+            "S": "arn:aws:batch:us-east-2:123456789012:job-definition/healthcare-iot-testbed-dev-mod-mod-002-1:1"
+          },
+          "batchJobId": {
+            "S": "9c2d11f4-bb22-4e3f-8a11-000000000000"
           }
         },
         {
@@ -5952,13 +7105,7 @@
           "entity": {
             "S": "run-child"
           },
-          "batchJobId": {
-            "S": "9c2d11f4-bb22-4e3f-8a11-000000000000:0"
-          },
           "attempts": {
-            "N": "1"
-          },
-          "inputCount": {
             "N": "1"
           },
           "status": {
@@ -5968,6 +7115,39 @@
             "S": "RUNNING"
           },
           "statusUpdatedAt": {
+            "S": "2026-09-26T13:02:00Z"
+          },
+          "index": {
+            "N": "0"
+          },
+          "units": {
+            "L": [
+              {
+                "M": {
+                  "unitId": {
+                    "S": "171c8ab2e7b09e1a9641f88fe6cdfd5c7af3d793568af289140992c6ba0e9c7a"
+                  },
+                  "key": {
+                    "S": "all"
+                  },
+                  "artifactIds": {
+                    "L": [
+                      {
+                        "S": "art-004"
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "statusRank": {
+            "N": "2"
+          },
+          "logStreamName": {
+            "S": "run/default/a9ce74c24ef1d3840b02548dad98b0f6"
+          },
+          "startedAt": {
             "S": "2026-09-26T13:02:00Z"
           }
         },
@@ -5986,23 +7166,6 @@
           },
           "name": {
             "S": "Lab BLE capture"
-          }
-        },
-        {
-          "pk": {
-            "S": "MODULE#mod-002"
-          },
-          "sk": {
-            "S": "RUN#run-002"
-          },
-          "entity": {
-            "S": "module-run"
-          },
-          "moduleVersion": {
-            "N": "1"
-          },
-          "status": {
-            "S": "running"
           }
         },
         {
@@ -6083,7 +7246,7 @@
             "S": "2026-09-26T13:10:00Z"
           },
           "cost": {
-            "S": "0.0420"
+            "N": "0.0420"
           },
           "createdBy": {
             "S": "user-001"
@@ -6093,6 +7256,9 @@
           },
           "updatedAt": {
             "S": "2026-09-26T13:10:00Z"
+          },
+          "tokenHash": {
+            "S": "687a53027806debd6312a5eec12e065bad5834c3d77b66b6e15bb1ddff698750"
           }
         },
         {
@@ -6140,16 +7306,25 @@
             "S": "budget"
           },
           "monthlyLimit": {
-            "S": "50.00"
+            "N": "50.00"
           },
           "held": {
-            "S": "0.40"
+            "N": "0.40"
           },
           "heavyEnabled": {
             "BOOL": true
           },
           "updatedAt": {
             "S": "2026-09-26T13:00:00Z"
+          },
+          "period": {
+            "S": "2026-09"
+          },
+          "version": {
+            "N": "7"
+          },
+          "spentProvisional": {
+            "N": "0.0604"
           }
         },
         {
@@ -6163,136 +7338,25 @@
             "S": "budget"
           },
           "monthlyLimit": {
-            "S": "10.00"
+            "N": "10.00"
           },
           "held": {
-            "S": "0"
+            "N": "0"
           },
           "heavyEnabled": {
             "BOOL": false
           },
           "updatedAt": {
             "S": "2026-09-03T09:30:00Z"
-          }
-        },
-        {
-          "pk": {
-            "S": "USER#user-001"
           },
-          "sk": {
-            "S": "USAGE#2026-09-13T11:05:00Z#codebuild#mod-001-0002"
+          "period": {
+            "S": "2026-09"
           },
-          "entity": {
-            "S": "usage"
+          "version": {
+            "N": "0"
           },
-          "kind": {
-            "S": "provisional"
-          },
-          "amount": {
-            "S": "0.0050"
-          },
-          "resource": {
-            "S": "build mod-001 v2"
-          },
-          "costTags": {
-            "M": {
-              "userId": {
-                "S": "user-001"
-              },
-              "resourceId": {
-                "S": "mod-001-0002"
-              }
-            }
-          }
-        },
-        {
-          "pk": {
-            "S": "USER#user-001"
-          },
-          "sk": {
-            "S": "USAGE#2026-09-14T09:04:00Z#batch#run-001"
-          },
-          "entity": {
-            "S": "usage"
-          },
-          "kind": {
-            "S": "provisional"
-          },
-          "amount": {
-            "S": "0.0134"
-          },
-          "resource": {
-            "S": "run run-001"
-          },
-          "costTags": {
-            "M": {
-              "userId": {
-                "S": "user-001"
-              },
-              "resourceId": {
-                "S": "run-001"
-              }
-            }
-          }
-        },
-        {
-          "pk": {
-            "S": "USER#user-001"
-          },
-          "sk": {
-            "S": "USAGE#2026-09-26T13:10:00Z#ecs#sess-001"
-          },
-          "entity": {
-            "S": "usage"
-          },
-          "kind": {
-            "S": "provisional"
-          },
-          "amount": {
-            "S": "0.0420"
-          },
-          "resource": {
-            "S": "session sess-001"
-          },
-          "costTags": {
-            "M": {
-              "userId": {
-                "S": "user-001"
-              },
-              "resourceId": {
-                "S": "sess-001"
-              }
-            }
-          }
-        },
-        {
-          "pk": {
-            "S": "USER#user-001"
-          },
-          "sk": {
-            "S": "USAGE#2026-10-03T02:00:00Z#cur#run-001"
-          },
-          "entity": {
-            "S": "usage"
-          },
-          "kind": {
-            "S": "actual"
-          },
-          "amount": {
-            "S": "0.0121"
-          },
-          "resource": {
-            "S": "run run-001"
-          },
-          "costTags": {
-            "M": {
-              "userId": {
-                "S": "user-001"
-              },
-              "resourceId": {
-                "S": "run-001"
-              }
-            }
+          "spentProvisional": {
+            "N": "0"
           }
         },
         {
@@ -6698,6 +7762,434 @@
           },
           "type": {
             "S": "firmware"
+          }
+        },
+        {
+          "pk": {
+            "S": "ENV#platform-base"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "env"
+          },
+          "envId": {
+            "S": "platform-base"
+          },
+          "name": {
+            "S": "Analysis base"
+          },
+          "description": {
+            "S": "Python 3.12 with tshark, binwalk, scapy, dpkt, pyshark, lief, pyelftools, capstone, yara-python, pandas and unblob"
+          },
+          "latestVersion": {
+            "N": "1"
+          },
+          "latestReadyVersion": {
+            "N": "1"
+          },
+          "createdBy": {
+            "S": "platform"
+          },
+          "createdAt": {
+            "S": "2026-09-01T00:00:00Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-01T00:00:00Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "ENV#platform-base"
+          },
+          "sk": {
+            "S": "VERSION#0001"
+          },
+          "entity": {
+            "S": "env-version"
+          },
+          "envId": {
+            "S": "platform-base"
+          },
+          "version": {
+            "N": "1"
+          },
+          "imageUri": {
+            "S": "123456789012.dkr.ecr.us-east-2.amazonaws.com/healthcare-iot-testbed-dev-platform-base@sha256:b45e0a17"
+          },
+          "catalogItems": {
+            "L": []
+          },
+          "packageMode": {
+            "S": "offline"
+          },
+          "status": {
+            "S": "ready"
+          },
+          "statusUpdatedAt": {
+            "S": "2026-09-01T00:00:00Z"
+          },
+          "freezeKey": {
+            "S": "builds/envs/platform-base/1/"
+          },
+          "createdBy": {
+            "S": "platform"
+          },
+          "createdAt": {
+            "S": "2026-09-01T00:00:00Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "PLATFORM"
+          },
+          "sk": {
+            "S": "ENV#platform-base"
+          },
+          "entity": {
+            "S": "platform-env"
+          }
+        },
+        {
+          "pk": {
+            "S": "RUN#run-001"
+          },
+          "sk": {
+            "S": "RESULT#ead31da8c0f65f1125e9d0fa33944733f8af1ba43462d3830e73db85fb49e5c7"
+          },
+          "entity": {
+            "S": "run-result"
+          },
+          "key": {
+            "S": "bp_a_v1.0.0.bin"
+          },
+          "status": {
+            "S": "succeeded"
+          },
+          "inputArtifactIds": {
+            "L": [
+              {
+                "S": "art-001"
+              }
+            ]
+          },
+          "outputArtifactIds": {
+            "L": [
+              {
+                "S": "art-005"
+              }
+            ]
+          },
+          "exitCode": {
+            "N": "0"
+          },
+          "childIndex": {
+            "N": "0"
+          },
+          "recordedAt": {
+            "S": "2026-09-14T09:03:10Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "ARTIFACT#art-001"
+          },
+          "sk": {
+            "S": "RUN#run-001"
+          },
+          "entity": {
+            "S": "artifact-run"
+          },
+          "relation": {
+            "S": "input"
+          },
+          "name": {
+            "S": "BP firmware parse - all dev-001 firmware"
+          }
+        },
+        {
+          "pk": {
+            "S": "ARTIFACT#art-005"
+          },
+          "sk": {
+            "S": "RUN#run-001"
+          },
+          "entity": {
+            "S": "artifact-run"
+          },
+          "relation": {
+            "S": "output"
+          },
+          "name": {
+            "S": "BP firmware parse - all dev-001 firmware"
+          }
+        },
+        {
+          "pk": {
+            "S": "RUN#run-001"
+          },
+          "sk": {
+            "S": "RESULT#1064473bd4daed5e72d0f78d86a97f8abf6a6c6ac6d7dff03a04025e50f28a14"
+          },
+          "entity": {
+            "S": "run-result"
+          },
+          "key": {
+            "S": "bp_a_v2.1.0.bin"
+          },
+          "status": {
+            "S": "succeeded"
+          },
+          "inputArtifactIds": {
+            "L": [
+              {
+                "S": "art-002"
+              }
+            ]
+          },
+          "outputArtifactIds": {
+            "L": [
+              {
+                "S": "art-006"
+              }
+            ]
+          },
+          "exitCode": {
+            "N": "0"
+          },
+          "childIndex": {
+            "N": "1"
+          },
+          "recordedAt": {
+            "S": "2026-09-14T09:03:40Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "ARTIFACT#art-002"
+          },
+          "sk": {
+            "S": "RUN#run-001"
+          },
+          "entity": {
+            "S": "artifact-run"
+          },
+          "relation": {
+            "S": "input"
+          },
+          "name": {
+            "S": "BP firmware parse - all dev-001 firmware"
+          }
+        },
+        {
+          "pk": {
+            "S": "ARTIFACT#art-006"
+          },
+          "sk": {
+            "S": "RUN#run-001"
+          },
+          "entity": {
+            "S": "artifact-run"
+          },
+          "relation": {
+            "S": "output"
+          },
+          "name": {
+            "S": "BP firmware parse - all dev-001 firmware"
+          }
+        },
+        {
+          "pk": {
+            "S": "ARTIFACT#art-004"
+          },
+          "sk": {
+            "S": "RUN#run-002"
+          },
+          "entity": {
+            "S": "artifact-run"
+          },
+          "relation": {
+            "S": "input"
+          },
+          "name": {
+            "S": "binwalk - lab capture"
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "USAGE#2026-09#codebuild#MODULE#mod-001:VERSION#0002#healthcare-iot-testbed-dev-image-build:c7720e5d"
+          },
+          "entity": {
+            "S": "usage"
+          },
+          "kind": {
+            "S": "provisional"
+          },
+          "period": {
+            "S": "2026-09"
+          },
+          "amount": {
+            "N": "0.0050"
+          },
+          "recordedAt": {
+            "S": "2026-09-13T11:05:00Z"
+          },
+          "resource": {
+            "S": "build mod-001 v2"
+          },
+          "costTags": {
+            "M": {
+              "userId": {
+                "S": "user-001"
+              },
+              "resourceId": {
+                "S": "mod-001-0002"
+              }
+            }
+          },
+          "buildId": {
+            "S": "healthcare-iot-testbed-dev-image-build:c7720e5d"
+          },
+          "minutes": {
+            "N": "1"
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "USAGE#2026-09#batch#run-001#4b1e7c20-aa11-4d2e-9f00-000000000000:0"
+          },
+          "entity": {
+            "S": "usage"
+          },
+          "kind": {
+            "S": "provisional"
+          },
+          "period": {
+            "S": "2026-09"
+          },
+          "amount": {
+            "N": "0.0134"
+          },
+          "recordedAt": {
+            "S": "2026-09-14T09:04:00Z"
+          },
+          "resource": {
+            "S": "run run-001"
+          },
+          "costTags": {
+            "M": {
+              "userId": {
+                "S": "user-001"
+              },
+              "resourceId": {
+                "S": "run-001"
+              }
+            }
+          },
+          "runId": {
+            "S": "run-001"
+          },
+          "jobId": {
+            "S": "4b1e7c20-aa11-4d2e-9f00-000000000000:0"
+          },
+          "seconds": {
+            "N": "120"
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "USAGE#2026-09#ecs#sess-001#5f0c3e1d"
+          },
+          "entity": {
+            "S": "usage"
+          },
+          "kind": {
+            "S": "provisional"
+          },
+          "period": {
+            "S": "2026-09"
+          },
+          "amount": {
+            "N": "0.0420"
+          },
+          "recordedAt": {
+            "S": "2026-09-26T13:10:00Z"
+          },
+          "resource": {
+            "S": "session sess-001"
+          },
+          "costTags": {
+            "M": {
+              "userId": {
+                "S": "user-001"
+              },
+              "resourceId": {
+                "S": "sess-001"
+              }
+            }
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "USAGE#2026-09#cur#run-001#2026-09"
+          },
+          "entity": {
+            "S": "usage"
+          },
+          "kind": {
+            "S": "actual"
+          },
+          "period": {
+            "S": "2026-09"
+          },
+          "amount": {
+            "N": "0.0121"
+          },
+          "recordedAt": {
+            "S": "2026-10-03T02:00:00Z"
+          },
+          "resource": {
+            "S": "run run-001"
+          },
+          "costTags": {
+            "M": {
+              "userId": {
+                "S": "user-001"
+              },
+              "resourceId": {
+                "S": "run-001"
+              }
+            }
+          }
+        },
+        {
+          "pk": {
+            "S": "ACTIVE#RUNS"
+          },
+          "sk": {
+            "S": "RUN#run-002"
+          },
+          "entity": {
+            "S": "active-run"
+          },
+          "userId": {
+            "S": "user-001"
+          },
+          "createdAt": {
+            "S": "2026-09-26T13:00:00Z"
           }
         }
       ],

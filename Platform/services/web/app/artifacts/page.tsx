@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
@@ -7,12 +8,14 @@ import { getDevices, type Device } from "@/lib/devices";
 import {
   ARTIFACT_TYPES,
   formatBytes,
+  getArtifact,
   getArtifactDownloadUrl,
   listArtifacts,
   type Artifact,
   type ArtifactType,
 } from "@/lib/artifacts";
 import ArtifactUploader from "@/app/components/ArtifactUploader";
+import { RUN_SELECTION_KEY } from "@/lib/runs";
 
 const STATUS_BADGE_STYLES: Record<string, string> = {
   ready: "text-emerald-700 bg-emerald-50",
@@ -48,6 +51,7 @@ export default function ArtifactsPage() {
   const [listLoading, setListLoading] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Ignores responses from requests that were superseded by a newer load.
   const loadIdRef = useRef(0);
@@ -93,14 +97,23 @@ export default function ArtifactsPage() {
     void load(false);
   }, [user, loading, load]);
 
-  // Multipart uploads are checked in the background after they complete;
-  // keep the list fresh until they settle.
-  const hasVerifying = artifacts?.some((a) => a.status === "verifying") ?? false;
+  // Multipart uploads are checked in the background after they complete.
+  // Until they settle, re-read just those rows and merge them in place, so
+  // pages already loaded with "Load more" stay put.
+  const verifyingIds = (artifacts ?? [])
+    .filter((a) => a.status === "verifying")
+    .map((a) => a.artifactId)
+    .join(",");
   useEffect(() => {
-    if (!hasVerifying) return;
-    const timer = setTimeout(() => void load(false), REFRESH_WHILE_VERIFYING_MS);
+    if (!verifyingIds) return;
+    const timer = setTimeout(async () => {
+      const ids = verifyingIds.split(",").slice(0, 20);
+      const fresh = await Promise.all(ids.map((id) => getArtifact(id).catch(() => null)));
+      const byId = new Map(fresh.filter((a) => a !== null).map((a) => [a.artifactId, a]));
+      setArtifacts((current) => current?.map((a) => byId.get(a.artifactId) ?? a) ?? current);
+    }, REFRESH_WHILE_VERIFYING_MS);
     return () => clearTimeout(timer);
-  }, [hasVerifying, artifacts, load]);
+  }, [verifyingIds, artifacts]);
 
   async function download(artifact: Artifact) {
     setDownloadError(null);
@@ -112,6 +125,38 @@ export default function ArtifactsPage() {
   }
 
   const deviceNames = new Map(devices.map((d) => [d.deviceId, d.name]));
+  const selectable = (artifacts ?? []).filter((a) => a.status === "ready");
+  const allSelected = selectable.length > 0 && selectable.every((a) => selectedIds.has(a.artifactId));
+
+  function toggle(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      for (const a of selectable) {
+        if (allSelected) next.delete(a.artifactId);
+        else next.add(a.artifactId);
+      }
+      return next;
+    });
+  }
+
+  function runOnSelected() {
+    try {
+      sessionStorage.setItem(RUN_SELECTION_KEY, JSON.stringify(Array.from(selectedIds)));
+    } catch {
+      setDownloadError("Your browser blocked session storage, so the selection can't be passed on");
+      return;
+    }
+    router.push("/runs?selection=1");
+  }
 
   if (loading || !user) return null;
 
@@ -137,6 +182,17 @@ export default function ArtifactsPage() {
         <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap items-center gap-3">
           <h2 className="font-semibold text-slate-700 mr-auto">Your artifacts</h2>
 
+          {selectedIds.size > 0 && (
+            <>
+              <button type="button" onClick={runOnSelected} className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg font-medium">
+                Run a script on selected ({selectedIds.size})
+              </button>
+              <button type="button" onClick={() => setSelectedIds(new Set())} className="text-xs text-slate-500 hover:text-slate-700">
+                Clear selection
+              </button>
+            </>
+          )}
+
           {filters.batchId && (
             <span className="text-xs bg-blue-50 text-blue-700 px-2.5 py-1 rounded-full flex items-center gap-2">
               Upload batch {filters.batchId.slice(0, 8)}
@@ -149,6 +205,11 @@ export default function ArtifactsPage() {
                 ✕
               </button>
             </span>
+          )}
+          {filters.batchId && (
+            <Link href={`/runs?batch=${filters.batchId}`} className="text-xs text-blue-600 font-medium">
+              Run a script on this upload
+            </Link>
           )}
 
           <select
@@ -204,7 +265,10 @@ export default function ArtifactsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-slate-400 bg-slate-50/60 border-b border-slate-100">
-                <th className="px-6 py-3 font-medium text-xs uppercase tracking-wide">Name</th>
+                <th className="pl-6 py-3 w-8">
+                  <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Select all shown" />
+                </th>
+                <th className="px-3 py-3 font-medium text-xs uppercase tracking-wide">Name</th>
                 <th className="px-3 py-3 font-medium text-xs uppercase tracking-wide">Type</th>
                 <th className="px-3 py-3 font-medium text-xs uppercase tracking-wide">Status</th>
                 <th className="px-3 py-3 font-medium text-xs uppercase tracking-wide">Size</th>
@@ -216,7 +280,16 @@ export default function ArtifactsPage() {
             <tbody>
               {artifacts.map((artifact) => (
                 <tr key={artifact.artifactId} className="border-b border-slate-50 hover:bg-slate-50/80">
-                  <td className="px-6 py-3">
+                  <td className="pl-6 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(artifact.artifactId)}
+                      disabled={artifact.status !== "ready"}
+                      onChange={() => toggle(artifact.artifactId)}
+                      aria-label={`Select ${artifact.name}`}
+                    />
+                  </td>
+                  <td className="px-3 py-3">
                     <p className="font-medium text-slate-800 break-all">{artifact.name}</p>
                     {artifact.originalFilename !== artifact.name && (
                       <p className="text-xs text-slate-400 break-all">{artifact.originalFilename}</p>

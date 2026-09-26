@@ -86,6 +86,7 @@ export interface ListParams {
   type?: ArtifactType;
   tag?: string;
   batchId?: string;
+  runId?: string;
   limit?: number;
   nextToken?: string;
 }
@@ -125,6 +126,17 @@ export function completeArtifacts(
 
 export function listArtifacts(params: ListParams = {}): Promise<ArtifactPage> {
   return apiRequest("GET", "/artifacts", { query: { ...params } });
+}
+
+export interface UploadBatch {
+  uploadBatchId: string;
+  fileCount: number;
+  totalBytes: number;
+  createdAt: string;
+}
+
+export async function listUploadBatches(): Promise<UploadBatch[]> {
+  return (await apiRequest<{ batches: UploadBatch[] }>("GET", "/artifacts/batches")).batches;
 }
 
 export function listDeviceArtifacts(
@@ -259,11 +271,17 @@ class S3TransferError extends Error {
   }
 }
 
-/** XHR rather than fetch, because fetch can't report upload progress. */
+/**
+ * XHR rather than fetch, because fetch can't report upload progress.
+ * Progress is reported in bytes of `payloadBytes` (the file or part), not of
+ * the request body: a POST form adds a few KB of fields, which would
+ * otherwise push small files far past 100%.
+ */
 function xhrSend(options: {
   method: "POST" | "PUT";
   url: string;
   body: FormData | Blob;
+  payloadBytes: number;
   headers?: Record<string, string>;
   onProgress?: (bytesSent: number) => void;
   signal?: AbortSignal;
@@ -285,7 +303,10 @@ function xhrSend(options: {
     for (const [key, value] of Object.entries(options.headers ?? {})) {
       xhr.setRequestHeader(key, value);
     }
-    xhr.upload.onprogress = (e) => options.onProgress?.(e.loaded);
+    xhr.upload.onprogress = (e) => {
+      if (!e.lengthComputable || e.total === 0) return;
+      options.onProgress?.(Math.min(options.payloadBytes, Math.round((e.loaded / e.total) * options.payloadBytes)));
+    };
     xhr.onload = () =>
       settle(() => {
         if (xhr.status >= 200 && xhr.status < 300) resolve();
@@ -334,13 +355,15 @@ const PART_CONCURRENCY = 4;
  * Sends the file for an upload returned by presign or retry, and returns
  * the attempt that was actually used. A single upload whose presigned POST
  * has expired is re-issued once through the retry endpoint, which starts a
- * new attempt.
+ * new attempt; `onAttempt` hears about it straight away, so a caller that
+ * retries later after a failure uses the current attempt.
  */
 export async function transferArtifact(
   file: File,
   presigned: PresignedUpload,
   onProgress?: (bytesSent: number) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onAttempt?: (attemptId: string) => void
 ): Promise<string> {
   if (presigned.upload.mode === "single") {
     let current = presigned;
@@ -353,10 +376,18 @@ export async function transferArtifact(
         }
         // The file field must come last; S3 ignores fields after it.
         formData.append("file", file);
-        return xhrSend({ method: "POST", url: current.upload.url, body: formData, onProgress, signal });
+        return xhrSend({
+          method: "POST",
+          url: current.upload.url,
+          body: formData,
+          payloadBytes: file.size,
+          onProgress,
+          signal,
+        });
       },
       async () => {
         current = await retryArtifact(current.artifactId, current.attemptId);
+        onAttempt?.(current.attemptId);
       },
       signal
     );
@@ -411,6 +442,7 @@ async function transferMultipart(
             method: "PUT",
             url: current.url,
             body: slice(part.partNumber),
+            payloadBytes: slice(part.partNumber).size,
             headers: current.headers,
             onProgress: (bytes) => {
               sentByPart.set(part.partNumber, bytes);
@@ -432,13 +464,17 @@ async function transferMultipart(
   }
 }
 
-const VERIFY_POLL_MS = 3000;
+const VERIFY_POLL_MS = 5000;
 const VERIFY_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
  * Completes an upload and, for multipart uploads, waits for the
- * asynchronous full-file SHA-256 check. Resolves with the final artifact
- * status (always "ready"); throws with the server's reason otherwise.
+ * asynchronous full-file SHA-256 check. Resolves once the artifact is
+ * ready; throws with the server's reason otherwise.
+ *
+ * The wait polls the complete endpoint itself rather than GET: complete is
+ * idempotent, reports a failed check as an error, and re-starts a check
+ * that has stalled, so an upload can't sit in "verifying" forever.
  */
 export async function completeArtifact(
   artifactId: string,
@@ -446,23 +482,21 @@ export async function completeArtifact(
   onVerifying?: () => void,
   signal?: AbortSignal
 ): Promise<"ready"> {
-  const { results } = await completeArtifacts([{ artifactId, attemptId }]);
-  const result = results[0];
-  if (!result.ok) throw new Error(result.error);
-  if (result.status === "ready") return "ready";
-  if (result.status !== "verifying") throw new Error(`Unexpected status ${result.status}`);
-
-  onVerifying?.();
   const deadline = Date.now() + VERIFY_TIMEOUT_MS;
-  while (Date.now() < deadline) {
+  for (let first = true; ; first = false) {
+    const { results } = await completeArtifacts([{ artifactId, attemptId }]);
+    const result = results[0];
+    if (!result.ok) throw new Error(result.error);
+    if (result.status === "ready") return "ready";
+    if (result.status !== "verifying") throw new Error(`Unexpected status ${result.status}`);
+
+    if (first) onVerifying?.();
+    if (Date.now() >= deadline) {
+      throw new Error("Verification is taking longer than expected; check the Artifacts page later");
+    }
     await sleep(VERIFY_POLL_MS);
     throwIfAborted(signal);
-    const artifact = await getArtifact(artifactId);
-    if (artifact.attemptId !== attemptId) throw new Error("Upload attempt is no longer current");
-    if (artifact.status === "ready") return "ready";
-    if (artifact.status === "failed") throw new Error(artifact.statusReason ?? "Verification failed");
   }
-  throw new Error("Verification is taking longer than expected; check the Artifacts page later");
 }
 
 export type SingleUploadStage = "hashing" | "reserving" | "uploading" | "verifying";
@@ -496,7 +530,7 @@ export async function uploadArtifact(
 
   onStage?.("uploading", 0);
   const attemptId = await transferArtifact(file, result, (sent) =>
-    onStage?.("uploading", sent / file.size)
+    onStage?.("uploading", Math.min(1, sent / file.size))
   );
 
   onStage?.("verifying");
@@ -529,7 +563,7 @@ export async function retryArtifactUpload(
 
   onStage?.("uploading", 0);
   const attemptId = await transferArtifact(file, presigned, (sent) =>
-    onStage?.("uploading", sent / file.size)
+    onStage?.("uploading", Math.min(1, sent / file.size))
   );
 
   onStage?.("verifying");
