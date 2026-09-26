@@ -2,14 +2,12 @@
 
 import { useEffect, useState } from "react";
 import {
-  getFirmware,
-  sha256Hex,
-  presignFirmware,
-  uploadFirmwareToS3,
-  completeFirmware,
-  type Firmware,
-  type CompleteFirmwareResponse,
-} from "@/lib/firmware";
+  formatBytes,
+  listDeviceArtifacts,
+  retryArtifactUpload,
+  type Artifact,
+  type SingleUploadStage,
+} from "@/lib/artifacts";
 import type { Device } from "@/lib/devices";
 
 interface FirmwareListModalProps {
@@ -20,10 +18,11 @@ interface FirmwareListModalProps {
 const STATUS_BADGE_STYLES: Record<string, string> = {
   ready: "text-emerald-700 bg-emerald-50",
   pending: "text-amber-700 bg-amber-50",
+  verifying: "text-blue-700 bg-blue-50",
   failed: "text-red-700 bg-red-50",
 };
 
-type RetryStage = "checking" | "hashing" | "reserving" | "uploading" | "verifying" | "complete";
+type RetryStage = SingleUploadStage | "checking" | "complete";
 
 const RETRY_STAGE_LABELS: Record<RetryStage, string> = {
   checking: "Checking file...",
@@ -34,18 +33,14 @@ const RETRY_STAGE_LABELS: Record<RetryStage, string> = {
   complete: "Complete",
 };
 
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return `${bytes} B`;
-  const units = ["B", "KiB", "MiB", "GiB"];
-  let value = bytes;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex++;
-  }
-  return unitIndex === 0
-    ? `${value} ${units[unitIndex]}`
-    : `${value.toFixed(1)} ${units[unitIndex]}`;
+function stageLabel(stage: RetryStage, progress: number | null): string {
+  const label = RETRY_STAGE_LABELS[stage];
+  if (progress === null || (stage !== "hashing" && stage !== "uploading")) return label;
+  return `${label.replace("...", "")} ${Math.floor(progress * 100)}%`;
+}
+
+function isRetryable(firmware: Artifact): boolean {
+  return firmware.status === "pending" || firmware.status === "failed";
 }
 
 function formatDate(value: string | undefined): string {
@@ -56,17 +51,17 @@ function formatDate(value: string | undefined): string {
 }
 
 export default function FirmwareListModal({ device, onClose }: FirmwareListModalProps) {
-  const [firmwareList, setFirmwareList] = useState<Firmware[] | null>(null);
+  const [firmwareList, setFirmwareList] = useState<Artifact[] | null>(null);
   const [firmwareLoading, setFirmwareLoading] = useState(true);
   const [firmwareError, setFirmwareError] = useState<string | null>(null);
 
-  const [retryFirmware, setRetryFirmware] = useState<Firmware | null>(null);
+  const [retryFirmware, setRetryFirmware] = useState<Artifact | null>(null);
   const [retryFile, setRetryFile] = useState<File | null>(null);
   const [retryFileInputKey, setRetryFileInputKey] = useState(0);
   const [retrying, setRetrying] = useState(false);
   const [retryStage, setRetryStage] = useState<RetryStage | null>(null);
+  const [retryProgress, setRetryProgress] = useState<number | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
-  const [retryResult, setRetryResult] = useState<CompleteFirmwareResponse | null>(null);
 
   // Fresh fetch every time the viewed device changes — no caching. This
   // component is the sole owner of this state; a failure here never touches
@@ -77,7 +72,7 @@ export default function FirmwareListModal({ device, onClose }: FirmwareListModal
     setFirmwareError(null);
     setFirmwareList(null);
 
-    getFirmware(device.deviceId)
+    loadFirmware(device.deviceId)
       .then((result) => {
         if (!cancelled) setFirmwareList(result);
       })
@@ -100,14 +95,14 @@ export default function FirmwareListModal({ device, onClose }: FirmwareListModal
     onClose();
   }
 
-  function openRetry(firmware: Firmware) {
+  function openRetry(firmware: Artifact) {
     if (retrying) return;
     setRetryFirmware(firmware);
     setRetryFile(null);
     setRetryFileInputKey((k) => k + 1);
     setRetryStage(null);
+    setRetryProgress(null);
     setRetryError(null);
-    setRetryResult(null);
   }
 
   function closeRetry() {
@@ -116,8 +111,8 @@ export default function FirmwareListModal({ device, onClose }: FirmwareListModal
     setRetryFile(null);
     setRetryFileInputKey((k) => k + 1);
     setRetryStage(null);
+    setRetryProgress(null);
     setRetryError(null);
-    setRetryResult(null);
   }
 
   async function handleRetrySubmit(e: React.FormEvent) {
@@ -131,54 +126,20 @@ export default function FirmwareListModal({ device, onClose }: FirmwareListModal
 
     setRetrying(true);
     setRetryError(null);
-    setRetryResult(null);
 
     try {
-      // Fail-fast local verification only — the backend's immutable
-      // metadata and /complete verification remain authoritative. Neither
-      // check here calls presignFirmware if it fails.
-      setRetryStage("checking");
-      if (retryFile.size !== retryFirmware.sizeBytes) {
-        throw new Error("Selected file does not match the original firmware (size mismatch)");
-      }
-
-      setRetryStage("hashing");
-      const hash = await sha256Hex(retryFile);
-      if (hash !== retryFirmware.sha256) {
-        throw new Error("Selected file does not match the original firmware (checksum mismatch)");
-      }
-
-      // retryOfAttemptId is the attempt this component observed from the
-      // last getFirmware() call. If another session already superseded it,
-      // the backend's conditional write rejects this outright — that
-      // rejection is surfaced as-is below, never worked around or retried
-      // automatically.
-      setRetryStage("reserving");
-      const presign = await presignFirmware(device.deviceId, {
-        version: retryFirmware.version,
-        retryOfAttemptId: retryFirmware.attemptId,
+      // Size and SHA-256 are checked locally before the retry is reserved;
+      // the backend verifies the upload again when it completes.
+      await retryArtifactUpload(retryFirmware, retryFile, (stage, progress) => {
+        setRetryStage(stage);
+        setRetryProgress(progress ?? null);
       });
-
-      setRetryStage("uploading");
-      await uploadFirmwareToS3(presign.upload, retryFile);
-
-      // The NEW attemptId from the retry presign — not retryFirmware's
-      // original one — is what /complete must reference.
-      setRetryStage("verifying");
-      const completed = await completeFirmware(
-        device.deviceId,
-        retryFirmware.version,
-        presign.attemptId
-      );
-
-      // completeFirmware()'s response is authoritative for retry success.
-      setRetryResult(completed);
       setRetryStage("complete");
 
       // Best-effort list refresh only. If this fails, the retry above has
       // already succeeded and stays reported as such — a later reopen or
       // refetch will reconcile the list.
-      getFirmware(device.deviceId)
+      loadFirmware(device.deviceId)
         .then((result) => setFirmwareList(result))
         .catch(() => {
           // Intentionally ignored — see comment above.
@@ -187,6 +148,7 @@ export default function FirmwareListModal({ device, onClose }: FirmwareListModal
       setRetryError(err instanceof Error ? err.message : "Retry failed");
     } finally {
       setRetrying(false);
+      setRetryProgress(null);
       setRetryStage((stage) => (stage === "complete" ? stage : null));
     }
   }
@@ -225,10 +187,10 @@ export default function FirmwareListModal({ device, onClose }: FirmwareListModal
               </p>
             </div>
 
-            {retryStage === "complete" && retryResult ? (
+            {retryStage === "complete" ? (
               <div className="space-y-4">
                 <p className="text-xs text-emerald-700 bg-emerald-50 px-3 py-2 rounded-lg">
-                  Firmware {retryResult.version} is {retryResult.status}.
+                  Firmware {retryFirmware.version} is ready.
                 </p>
                 <button
                   type="button"
@@ -252,7 +214,7 @@ export default function FirmwareListModal({ device, onClose }: FirmwareListModal
 
                 {retryStage && (
                   <p className="text-xs text-blue-600 bg-blue-50 px-3 py-2 rounded-lg">
-                    {RETRY_STAGE_LABELS[retryStage]}
+                    {stageLabel(retryStage, retryProgress)}
                   </p>
                 )}
 
@@ -274,7 +236,7 @@ export default function FirmwareListModal({ device, onClose }: FirmwareListModal
                     disabled={retrying || !retryFile}
                     className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-medium transition-colors"
                   >
-                    {retrying ? RETRY_STAGE_LABELS[retryStage ?? "checking"] : "Retry Upload"}
+                    {retrying ? stageLabel(retryStage ?? "checking", retryProgress) : "Retry Upload"}
                   </button>
                 </div>
               </form>
@@ -304,7 +266,7 @@ export default function FirmwareListModal({ device, onClose }: FirmwareListModal
               <tbody>
                 {firmwareList?.map((firmware) => (
                   <tr
-                    key={firmware.firmwareId}
+                    key={firmware.artifactId}
                     className="border-b border-slate-50 hover:bg-slate-50/80 transition-colors"
                   >
                     <td className="px-3 py-3 font-medium text-slate-800 whitespace-nowrap">
@@ -318,6 +280,9 @@ export default function FirmwareListModal({ device, onClose }: FirmwareListModal
                       >
                         {firmware.status}
                       </span>
+                      {firmware.statusReason && (
+                        <p className="text-xs text-red-600 mt-1">{firmware.statusReason}</p>
+                      )}
                     </td>
                     <td className="px-3 py-3 text-slate-500 break-all">
                       {firmware.originalFilename}
@@ -329,7 +294,7 @@ export default function FirmwareListModal({ device, onClose }: FirmwareListModal
                       {formatDate(firmware.uploadedAt ?? firmware.createdAt)}
                     </td>
                     <td className="px-3 py-3 text-right whitespace-nowrap">
-                      {firmware.status === "pending" && (
+                      {isRetryable(firmware) && (
                         <button
                           type="button"
                           onClick={() => openRetry(firmware)}
@@ -348,4 +313,18 @@ export default function FirmwareListModal({ device, onClose }: FirmwareListModal
       </div>
     </div>
   );
+}
+
+// Firmware is stored as artifacts with type=firmware, linked to the device.
+// A device has few firmware versions, so the first page of 100 is all of them
+// in practice; later pages are fetched anyway so nothing is ever hidden.
+async function loadFirmware(deviceId: string): Promise<Artifact[]> {
+  const firmware: Artifact[] = [];
+  let nextToken: string | undefined;
+  do {
+    const page = await listDeviceArtifacts(deviceId, { type: "firmware", limit: 100, nextToken });
+    firmware.push(...page.artifacts);
+    nextToken = page.nextToken;
+  } while (nextToken);
+  return firmware;
 }

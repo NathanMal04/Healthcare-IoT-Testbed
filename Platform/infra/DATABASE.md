@@ -5,7 +5,7 @@ The platform stores its records in two DynamoDB tables. The sample model for bot
 | Table | Keys | Holds |
 |---|---|---|
 | `healthcare-iot-testbed-dev-users` | `userId` | One row per Cognito user: `email`, `fullName`, `role` (`admin` / `user`), `status`, timestamps. Written by the post-confirmation Lambda. |
-| `healthcare-iot-testbed-dev-metadata` | `pk` + `sk` | Everything else, in a single-table design: devices, artifacts, modules, environments, runs, sessions, ownership links, budgets and the usage ledger. |
+| `healthcare-iot-testbed-dev-metadata` | `pk` + `sk` | Everything else, in a single-table design: devices, artifacts, upload batches, modules, environments, runs, sessions, ownership links, budgets and the usage ledger. |
 
 The metadata table is single-table so that one `Query` on a partition returns a record and everything hanging off it: a run with its children, results and outputs, or a user with everything they own. The table has no secondary indexes. Every access pattern below is a `GetItem`, or a `Query` on `pk` with an optional `begins_with` on `sk`.
 
@@ -14,11 +14,12 @@ The metadata table is single-table so that one `Query` on a partition returns a 
 ## Key conventions
 
 - **Prefixed ids.** Keys are `TYPE#id`, for example `DEVICE#dev-001`, `ARTIFACT#art-004` or `RUN#run-001`. The prefix says what kind of record the key points to.
+- **Time-ordered ids.** Artifact and upload-batch ids are UUIDv7, so their link rows sort by creation time and `ScanIndexForward = false` lists newest first. The sample data uses short readable ids instead.
 - **Base record.** Every entity's own record is `pk = TYPE#id`, `sk = METADATA`. The other rows in that partition are children or links.
 - **Versions.** `VERSION#0001`, `VERSION#0002`, … are zero-padded so that they sort in order. Version numbers elsewhere (`moduleVersion`, `envVersion`, `latestVersion`) are plain numbers.
 - **`entity`.** Every row has an `entity` attribute naming its kind (`device`, `run-child`, `user-artifact`, …). Use it to tell rows apart when a query returns a mixed partition.
-- **Two-way links.** A relationship is written as two rows, one in each partition, so that it can be queried from either side. Both rows are written in the same `TransactWriteItems` call. The row in the `USER#` / `DEVICE#` partition repeats a few display fields (`name`, `status`), so that list pages don't need a second read.
-- **Ownership.** Every device, artifact, module, environment, run and session has `USER#{uid} / X#{id}` and `X#{id} / USER#{uid}` rows with `role = owner`. Their `entity` values are `user-x` / `x-user` (`user-device` / `device-user`, `user-artifact` / `artifact-user`, and likewise `module`, `env`, `run`, `session`). `owner` is currently the only role. The ownership check is a single `GetItem(USER#{uid}, X#{id})`.
+- **Two-way links.** A relationship is written as two rows, one in each partition, so that it can be queried from either side. Both rows are written in the same `TransactWriteItems` call. The row in the `USER#` / `DEVICE#` / `BATCH#` partition repeats a few **immutable** display fields (`name`, `type`, `createdAt`). Anything that changes, such as `status`, is only stored on the base record: list endpoints query the link rows, then read the base records with `BatchGetItem`, so status is never stale.
+- **Ownership.** Every device, artifact, upload batch, module, environment, run and session has `USER#{uid} / X#{id}` and `X#{id} / USER#{uid}` rows with `role = owner`. Their `entity` values are `user-x` / `x-user` (`user-device` / `device-user`, `user-artifact` / `artifact-user`, and likewise `batch`, `module`, `env`, `run`, `session`). `owner` is currently the only role. The ownership check is a single `GetItem(USER#{uid}, X#{id})`.
 - **Money.** Costs, holds and limits are decimal strings (`"0.0134"`), in USD.
 - **Timestamps.** ISO-8601 UTC strings.
 
@@ -42,26 +43,51 @@ Any stored file: uploaded firmware, pcaps, logs and binaries, plus every file a 
 
 | Attribute | Type | Meaning |
 |---|---|---|
-| `name` | S | Display name |
-| `type` | S | `firmware` / `pcap` / `log` / `binary` / `output` / `other` |
-| `version` | S | Firmware version, for `type = firmware` |
-| `sha256` | S | Full-file SHA-256. Only a verified hash is trusted, e.g. as a run-result key. |
-| `sizeBytes` | N | Size in bytes |
-| `originalFilename` | S | Name as uploaded |
-| `s3Bucket`, `s3Key` | S | Object location |
-| `attemptId` | S | Upload attempt, for race-safe completes and retries |
+| `name` | S | Display name (defaults to the file name) |
+| `type` | S | What the file is: `firmware` / `pcap` / `log` / `binary` / `other`. A run's output uses the same types, so an output pcap matches `type = pcap` queries. |
+| `origin` | S | `upload` (sent from the web app) / `run` (written by a run) |
+| `version` | S | Firmware version; required when `type = firmware`, not allowed otherwise |
+| `sha256` | S | Full-file SHA-256, declared by the uploader. Only a verified hash is trusted, e.g. as a run-result key. |
+| `sizeBytes` | N | Size in bytes (up to 5 GiB) |
+| `originalFilename` | S | Name as uploaded, including the folder path for folder uploads |
+| `s3Bucket`, `s3Key` | S | Object location: `artifacts/{artifactId}/{attemptId}` |
+| `attemptId` | S | Current upload attempt. Every complete and retry is conditional on it. |
+| `uploadMode` | S | `single` (presigned POST, up to 25 MiB) / `multipart` |
+| `uploadId`, `partSize`, `partCount` | S, N, N | Multipart only: the S3 upload id and part layout (parts of at least 16 MiB, at most 1000 parts) |
+| `uploadBatchId` | S | Upload batch the file was sent in |
+| `deviceIds` | SS | Linked devices (copy of the link rows, for display) |
 | `status` | S | See lifecycle below |
+| `statusReason` | S | Why the upload failed |
 | `statusUpdatedAt` | S | Time of the last status change |
 | `tags` | SS | Free-form labels, used in run input queries |
-| `derivedFromRun` | S | For outputs: the run that produced the file |
-| `derivedFromArtifacts` | SS | For outputs: the input artifact ids |
-| `createdBy`, `createdAt`, `updatedAt` | S | Author and timestamps |
+| `derivedFromRun` | S | For `origin = run`: the run that produced the file |
+| `derivedFromArtifacts` | SS | For `origin = run`: the input artifact ids |
+| `migratedFromFirmwareId` | S | Set on records copied from the old `FIRMWARE#` rows |
+| `createdBy`, `createdAt`, `updatedAt`, `uploadedAt` | S | Author and timestamps |
 
-Lifecycle: `pending` (upload URL issued) → `verifying` (object present, full hash being computed) → `ready`, or `failed`.
+Lifecycle:
+- **Single:** `pending` (upload URL issued) → `ready`. S3 checks the bytes against the declared SHA-256 as they are written, and complete confirms the stored checksum.
+- **Multipart:** `pending` → `verifying` (parts assembled; S3 only checks SHA-256 per part) → `ready`, once `artifacts-verify` has streamed the object and checked the full SHA-256.
+- Either can end in `failed`. A `pending` or `failed` upload can be retried, which starts a new `attemptId` and S3 key.
+- The S3 object is tagged `upload-state=pending` until it is `ready`. A lifecycle rule deletes pending objects after 7 days, which removes superseded attempts and abandoned uploads.
 
-Device links are **optional**, and an artifact can link to several devices:
+Device links are **optional**, and an artifact can link to several devices (only devices the uploader owns):
 - `DEVICE#{did} / ARTIFACT#{type}#{id}` (`device-artifact`): `name`, `type`. The type is in the sort key, so "this device's firmware" is a single `begins_with`.
 - `ARTIFACT#{id} / DEVICE#{did}` (`artifact-device`): `name` of the device.
+
+**Firmware version guard:** `DEVICE#{did} / FWVER#{version}` (`device-firmware-version`): `artifactId`, `version`. Written in the same transaction as the artifact, one per linked device, with `attribute_not_exists`, so a firmware version is unique per device.
+
+### Upload batch: `BATCH#{id}` / `METADATA`
+
+The files sent together in one upload from the web app. A run can use a batch as its input set.
+
+| Attribute | Type | Meaning |
+|---|---|---|
+| `fileCount`, `totalBytes` | N | Files registered in the batch and their total size |
+| `createdBy`, `createdAt`, `updatedAt` | S | Author and timestamps |
+
+- Members: `BATCH#{bid} / ARTIFACT#{aid}` (`batch-artifact`): `name`, `type`.
+- Ownership: `USER#{uid} / BATCH#{bid}` (`user-batch`) and `BATCH#{bid} / USER#{uid}` (`batch-user`).
 
 ### Module: `MODULE#{id}` / `METADATA`
 
@@ -190,6 +216,8 @@ The ledger is append-only. `source` is `batch`, `ecs`, `codebuild` or `cur`, and
 erDiagram
     USER ||--o{ DEVICE : owns
     USER ||--o{ ARTIFACT : owns
+    USER ||--o{ BATCH : owns
+    BATCH |o--|{ ARTIFACT : "uploaded together"
     USER ||--o{ MODULE : owns
     USER ||--o{ ENV : owns
     USER ||--o{ RUN : owns
@@ -216,13 +244,15 @@ erDiagram
 
 | Need | Operation |
 |---|---|
-| User's devices / artifacts / modules / envs / runs / sessions | `Query pk = USER#{uid}, sk begins_with DEVICE#` (or `ARTIFACT#`, `MODULE#`, `ENV#`, `RUN#`, `SESSION#`) |
+| User's devices / artifacts / batches / modules / envs / runs / sessions | `Query pk = USER#{uid}, sk begins_with DEVICE#` (or `ARTIFACT#`, `BATCH#`, `MODULE#`, `ENV#`, `RUN#`, `SESSION#`) |
 | Ownership check before any read or write | `GetItem pk = USER#{uid}, sk = X#{id}` |
 | Owners of a resource | `Query pk = X#{id}, sk begins_with USER#` |
 | A device's firmware | `Query pk = DEVICE#{did}, sk begins_with ARTIFACT#firmware#` |
+| Is this firmware version taken on the device? | `GetItem pk = DEVICE#{did}, sk = FWVER#{version}` |
+| Files in an upload batch | `Query pk = BATCH#{bid}, sk begins_with ARTIFACT#` |
 | All of a device's artifacts / runs | `Query pk = DEVICE#{did}, sk begins_with ARTIFACT#` / `RUN#` |
 | Devices an artifact or run is linked to | `Query pk = ARTIFACT#{id}` (or `RUN#{id}`), `sk begins_with DEVICE#` |
-| Artifact details | `GetItem pk = ARTIFACT#{id}, sk = METADATA` |
+| Artifact details | `GetItem pk = ARTIFACT#{id}, sk = METADATA` (many at once: `BatchGetItem`) |
 | Module and all its versions | `Query pk = MODULE#{id}`. Rows sort as `METADATA`, `RUN#…`, `VERSION#…`, so filter on `entity`, or use two queries (`sk = METADATA`, `sk begins_with VERSION#`) |
 | Latest module version | `Query pk = MODULE#{id}, sk begins_with VERSION#`, `ScanIndexForward = false`, `Limit = 1` |
 | Module run history (for estimates) | `Query pk = MODULE#{id}, sk begins_with RUN#` |
@@ -243,6 +273,6 @@ Each status-bearing row stores its **current** status (`status`, `statusReason`,
 
 ## Migration and future work
 
-- **Firmware:** the deployed firmware Lambdas (`presign-firmware`, `complete-firmware`, `list-firmware`) still write and read `DEVICE#{did} / FIRMWARE#{version}` rows. The artifacts work replaces them with `ARTIFACT#` records (`type = firmware`) plus device links. A one-off script copies existing rows, and the S3 objects stay where they are. `FIRMWARE#` rows are deliberately left out of the model.
+- **Firmware:** the web app now uploads firmware as `ARTIFACT#` records (`type = firmware`) with device links and a `FWVER#` guard. The old firmware Lambdas (`presign-firmware`, `complete-firmware`, `list-firmware`) and their `DEVICE#{did} / FIRMWARE#{version}` rows are still deployed but no longer used by the UI. [`Platform/scripts/migrate_firmware_to_artifacts.py`](../scripts/migrate_firmware_to_artifacts.py) copies the old rows into artifacts (dry run by default, `--apply` to write; safe to re-run). The S3 objects stay where they are. Once it has run, the old Lambdas and routes can be removed. `FIRMWARE#` rows are deliberately left out of the model.
 - **Old model:** `OUTPUT#`, `MODULE# / SCRIPT|TOOL` and the run-style `SESSION#` rows from the April model have been replaced by the entities above.
 - **Groups and sharing:** only `role = owner` is used today. A later user-groups system can add a `GROUP#{gid}` principal with the same two-way link shape (`GROUP#/X#` and `X#/GROUP#`) and more roles, without changing existing rows.

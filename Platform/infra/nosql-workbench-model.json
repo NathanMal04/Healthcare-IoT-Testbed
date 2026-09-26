@@ -4,8 +4,8 @@
     "Author": "",
     "DateCreated": "2026-04-08T00:00:00Z",
     "DateLastModified": "2026-09-26T00:00:00Z",
-    "Description": "Healthcare IoT Testbed - Users table and single-table Metadata table. Entities: DEVICE, ARTIFACT (all uploaded and produced files, incl. firmware), MODULE (kind script|tool, runtime cloud|local) with VERSION#n, ENV (interactive/run images) with VERSION#n, RUN (cloud Batch executions) with CHILD#/RESULT#, SESSION (interactive JupyterLab only), per-user BUDGET and USAGE# ledger. Ownership is stored as two-way USER#/X# + X#/USER# links with role=owner only (a GROUP# principal can reuse the same shape later). Device links are optional. Deployed firmware Lambdas still write DEVICE#/FIRMWARE# rows until the ARTIFACT# migration runs. See Platform/infra/DATABASE.md.",
-    "Version": "2.0"
+    "Description": "Healthcare IoT Testbed - Users table and single-table Metadata table. Entities: DEVICE, ARTIFACT (all uploaded and produced files, incl. firmware; firmware versions unique per device via DEVICE#/FWVER# guard rows), BATCH (upload batches), MODULE (kind script|tool, runtime cloud|local) with VERSION#n, ENV (interactive/run images) with VERSION#n, RUN (cloud Batch executions) with CHILD#/RESULT#, SESSION (interactive JupyterLab only), per-user BUDGET and USAGE# ledger. Ownership is stored as two-way USER#/X# + X#/USER# links with role=owner only (a GROUP# principal can reuse the same shape later). Device links are optional. Deployed firmware Lambdas still write DEVICE#/FIRMWARE# rows until the ARTIFACT# migration runs. See Platform/infra/DATABASE.md.",
+    "Version": "2.1"
   },
   "DataModel": [
     {
@@ -382,6 +382,54 @@
         {
           "AttributeName": "costTags",
           "AttributeType": "M"
+        },
+        {
+          "AttributeName": "origin",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "uploadMode",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "uploadId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "partSize",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "partCount",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "uploadBatchId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "deviceIds",
+          "AttributeType": "SS"
+        },
+        {
+          "AttributeName": "uploadedAt",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "fileCount",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "totalBytes",
+          "AttributeType": "N"
+        },
+        {
+          "AttributeName": "migratedFromFirmwareId",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "artifactId",
+          "AttributeType": "S"
         }
       ],
       "TableFacets": [
@@ -529,7 +577,7 @@
                 "S": "healthcare-iot-testbed-dev-data-lake"
               },
               "s3Key": {
-                "S": "artifacts/art-001/bp_a_v1.0.0.bin"
+                "S": "artifacts/art-001/att-001"
               },
               "attemptId": {
                 "S": "att-001"
@@ -551,6 +599,23 @@
               },
               "version": {
                 "S": "v1.0.0"
+              },
+              "origin": {
+                "S": "upload"
+              },
+              "uploadMode": {
+                "S": "single"
+              },
+              "uploadBatchId": {
+                "S": "batch-001"
+              },
+              "uploadedAt": {
+                "S": "2026-09-02T10:00:00Z"
+              },
+              "deviceIds": {
+                "SS": [
+                  "dev-001"
+                ]
               }
             },
             {
@@ -582,7 +647,7 @@
                 "S": "healthcare-iot-testbed-dev-data-lake"
               },
               "s3Key": {
-                "S": "artifacts/art-002/bp_a_v2.1.0.bin"
+                "S": "artifacts/art-002/att-002"
               },
               "attemptId": {
                 "S": "att-002"
@@ -604,6 +669,23 @@
               },
               "version": {
                 "S": "v2.1.0"
+              },
+              "origin": {
+                "S": "upload"
+              },
+              "uploadMode": {
+                "S": "single"
+              },
+              "uploadBatchId": {
+                "S": "batch-002"
+              },
+              "uploadedAt": {
+                "S": "2026-09-04T10:00:00Z"
+              },
+              "deviceIds": {
+                "SS": [
+                  "dev-001"
+                ]
               }
             },
             {
@@ -635,7 +717,7 @@
                 "S": "healthcare-iot-testbed-dev-data-lake"
               },
               "s3Key": {
-                "S": "artifacts/art-003/hr_b_v1.3.2.bin"
+                "S": "artifacts/art-003/att-003"
               },
               "attemptId": {
                 "S": "att-003"
@@ -657,6 +739,23 @@
               },
               "version": {
                 "S": "v1.3.2"
+              },
+              "origin": {
+                "S": "upload"
+              },
+              "uploadMode": {
+                "S": "single"
+              },
+              "uploadBatchId": {
+                "S": "batch-002"
+              },
+              "uploadedAt": {
+                "S": "2026-09-04T11:00:00Z"
+              },
+              "deviceIds": {
+                "SS": [
+                  "dev-002"
+                ]
               }
             },
             {
@@ -688,7 +787,7 @@
                 "S": "healthcare-iot-testbed-dev-data-lake"
               },
               "s3Key": {
-                "S": "artifacts/art-004/lab_capture.pcap"
+                "S": "artifacts/art-004/att-004"
               },
               "attemptId": {
                 "S": "att-004"
@@ -713,6 +812,27 @@
                   "ble",
                   "lab"
                 ]
+              },
+              "origin": {
+                "S": "upload"
+              },
+              "uploadMode": {
+                "S": "multipart"
+              },
+              "uploadId": {
+                "S": "mpu-art-004"
+              },
+              "partSize": {
+                "N": "16777216"
+              },
+              "partCount": {
+                "N": "3"
+              },
+              "uploadBatchId": {
+                "S": "batch-003"
+              },
+              "uploadedAt": {
+                "S": "2026-09-09T14:00:00Z"
               }
             },
             {
@@ -729,7 +849,7 @@
                 "S": "parse_bp output - v1.0.0"
               },
               "type": {
-                "S": "output"
+                "S": "other"
               },
               "sha256": {
                 "S": "d3d94468"
@@ -744,7 +864,7 @@
                 "S": "healthcare-iot-testbed-dev-data-lake"
               },
               "s3Key": {
-                "S": "artifacts/art-005/bp_a_v1.0.0.json"
+                "S": "artifacts/art-005/att-005"
               },
               "attemptId": {
                 "S": "att-005"
@@ -771,6 +891,14 @@
                 "SS": [
                   "art-001"
                 ]
+              },
+              "origin": {
+                "S": "run"
+              },
+              "deviceIds": {
+                "SS": [
+                  "dev-001"
+                ]
               }
             },
             {
@@ -787,7 +915,7 @@
                 "S": "parse_bp output - v2.1.0"
               },
               "type": {
-                "S": "output"
+                "S": "other"
               },
               "sha256": {
                 "S": "6512bd43"
@@ -802,7 +930,7 @@
                 "S": "healthcare-iot-testbed-dev-data-lake"
               },
               "s3Key": {
-                "S": "artifacts/art-006/bp_a_v2.1.0.json"
+                "S": "artifacts/art-006/att-006"
               },
               "attemptId": {
                 "S": "att-006"
@@ -828,6 +956,14 @@
               "derivedFromArtifacts": {
                 "SS": [
                   "art-002"
+                ]
+              },
+              "origin": {
+                "S": "run"
+              },
+              "deviceIds": {
+                "SS": [
+                  "dev-001"
                 ]
               }
             },
@@ -860,7 +996,7 @@
                 "S": "healthcare-iot-testbed-dev-data-lake"
               },
               "s3Key": {
-                "S": "artifacts/art-007/pump_c_v0.9.4.hex"
+                "S": "artifacts/art-007/att-007"
               },
               "attemptId": {
                 "S": "att-007"
@@ -882,6 +1018,20 @@
               },
               "version": {
                 "S": "v0.9.4"
+              },
+              "origin": {
+                "S": "upload"
+              },
+              "uploadMode": {
+                "S": "single"
+              },
+              "uploadBatchId": {
+                "S": "batch-004"
+              },
+              "deviceIds": {
+                "SS": [
+                  "dev-003"
+                ]
               }
             }
           ],
@@ -903,7 +1053,352 @@
             "version",
             "tags",
             "derivedFromRun",
-            "derivedFromArtifacts"
+            "derivedFromArtifacts",
+            "origin",
+            "uploadMode",
+            "uploadBatchId",
+            "uploadedAt",
+            "deviceIds",
+            "uploadId",
+            "partSize",
+            "partCount"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "UploadBatch",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "UploadBatchId",
+            "SortKeyAlias": "Metadata"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "BATCH#batch-001"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "upload-batch"
+              },
+              "uploadBatchId": {
+                "S": "batch-001"
+              },
+              "fileCount": {
+                "N": "1"
+              },
+              "totalBytes": {
+                "N": "2516582"
+              },
+              "createdBy": {
+                "S": "user-001"
+              },
+              "createdAt": {
+                "S": "2026-09-02T10:00:00Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-02T10:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "BATCH#batch-002"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "upload-batch"
+              },
+              "uploadBatchId": {
+                "S": "batch-002"
+              },
+              "fileCount": {
+                "N": "2"
+              },
+              "totalBytes": {
+                "N": "4508876"
+              },
+              "createdBy": {
+                "S": "user-001"
+              },
+              "createdAt": {
+                "S": "2026-09-04T10:00:00Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-04T10:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "BATCH#batch-003"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "upload-batch"
+              },
+              "uploadBatchId": {
+                "S": "batch-003"
+              },
+              "fileCount": {
+                "N": "1"
+              },
+              "totalBytes": {
+                "N": "48213990"
+              },
+              "createdBy": {
+                "S": "user-001"
+              },
+              "createdAt": {
+                "S": "2026-09-09T14:00:00Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-09T14:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "BATCH#batch-004"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "upload-batch"
+              },
+              "uploadBatchId": {
+                "S": "batch-004"
+              },
+              "fileCount": {
+                "N": "1"
+              },
+              "totalBytes": {
+                "N": "917504"
+              },
+              "createdBy": {
+                "S": "user-002"
+              },
+              "createdAt": {
+                "S": "2026-09-10T16:00:00Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-10T16:00:00Z"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "uploadBatchId",
+            "fileCount",
+            "totalBytes",
+            "createdBy",
+            "createdAt",
+            "updatedAt"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "BatchArtifactLink",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "UploadBatchId",
+            "SortKeyAlias": "ArtifactId"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "BATCH#batch-001"
+              },
+              "sk": {
+                "S": "ARTIFACT#art-001"
+              },
+              "entity": {
+                "S": "batch-artifact"
+              },
+              "name": {
+                "S": "BP Monitor A firmware v1.0.0"
+              },
+              "type": {
+                "S": "firmware"
+              }
+            },
+            {
+              "pk": {
+                "S": "BATCH#batch-002"
+              },
+              "sk": {
+                "S": "ARTIFACT#art-002"
+              },
+              "entity": {
+                "S": "batch-artifact"
+              },
+              "name": {
+                "S": "BP Monitor A firmware v2.1.0"
+              },
+              "type": {
+                "S": "firmware"
+              }
+            },
+            {
+              "pk": {
+                "S": "BATCH#batch-002"
+              },
+              "sk": {
+                "S": "ARTIFACT#art-003"
+              },
+              "entity": {
+                "S": "batch-artifact"
+              },
+              "name": {
+                "S": "HR Sensor B firmware v1.3.2"
+              },
+              "type": {
+                "S": "firmware"
+              }
+            },
+            {
+              "pk": {
+                "S": "BATCH#batch-003"
+              },
+              "sk": {
+                "S": "ARTIFACT#art-004"
+              },
+              "entity": {
+                "S": "batch-artifact"
+              },
+              "name": {
+                "S": "Lab BLE capture"
+              },
+              "type": {
+                "S": "pcap"
+              }
+            },
+            {
+              "pk": {
+                "S": "BATCH#batch-004"
+              },
+              "sk": {
+                "S": "ARTIFACT#art-007"
+              },
+              "entity": {
+                "S": "batch-artifact"
+              },
+              "name": {
+                "S": "Insulin Pump C firmware v0.9.4"
+              },
+              "type": {
+                "S": "firmware"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "name",
+            "type"
+          ],
+          "DataAccess": {
+            "MySql": {}
+          }
+        },
+        {
+          "FacetName": "FirmwareVersionGuard",
+          "KeyAttributeAlias": {
+            "PartitionKeyAlias": "DeviceId",
+            "SortKeyAlias": "FirmwareVersion"
+          },
+          "TableData": [
+            {
+              "pk": {
+                "S": "DEVICE#dev-001"
+              },
+              "sk": {
+                "S": "FWVER#v1.0.0"
+              },
+              "entity": {
+                "S": "device-firmware-version"
+              },
+              "artifactId": {
+                "S": "art-001"
+              },
+              "version": {
+                "S": "v1.0.0"
+              },
+              "createdAt": {
+                "S": "2026-09-02T10:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "DEVICE#dev-001"
+              },
+              "sk": {
+                "S": "FWVER#v2.1.0"
+              },
+              "entity": {
+                "S": "device-firmware-version"
+              },
+              "artifactId": {
+                "S": "art-002"
+              },
+              "version": {
+                "S": "v2.1.0"
+              },
+              "createdAt": {
+                "S": "2026-09-04T10:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "DEVICE#dev-002"
+              },
+              "sk": {
+                "S": "FWVER#v1.3.2"
+              },
+              "entity": {
+                "S": "device-firmware-version"
+              },
+              "artifactId": {
+                "S": "art-003"
+              },
+              "version": {
+                "S": "v1.3.2"
+              },
+              "createdAt": {
+                "S": "2026-09-04T11:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "DEVICE#dev-003"
+              },
+              "sk": {
+                "S": "FWVER#v0.9.4"
+              },
+              "entity": {
+                "S": "device-firmware-version"
+              },
+              "artifactId": {
+                "S": "art-007"
+              },
+              "version": {
+                "S": "v0.9.4"
+              },
+              "createdAt": {
+                "S": "2026-09-10T16:00:00Z"
+              }
+            }
+          ],
+          "NonKeyAttributes": [
+            "entity",
+            "artifactId",
+            "version",
+            "createdAt"
           ],
           "DataAccess": {
             "MySql": {}
@@ -2239,8 +2734,11 @@
               "name": {
                 "S": "BP Monitor A firmware v1.0.0"
               },
-              "status": {
-                "S": "ready"
+              "type": {
+                "S": "firmware"
+              },
+              "createdAt": {
+                "S": "2026-09-02T10:00:00Z"
               }
             },
             {
@@ -2259,8 +2757,11 @@
               "name": {
                 "S": "BP Monitor A firmware v2.1.0"
               },
-              "status": {
-                "S": "ready"
+              "type": {
+                "S": "firmware"
+              },
+              "createdAt": {
+                "S": "2026-09-04T10:00:00Z"
               }
             },
             {
@@ -2279,8 +2780,11 @@
               "name": {
                 "S": "HR Sensor B firmware v1.3.2"
               },
-              "status": {
-                "S": "ready"
+              "type": {
+                "S": "firmware"
+              },
+              "createdAt": {
+                "S": "2026-09-04T11:00:00Z"
               }
             },
             {
@@ -2299,8 +2803,11 @@
               "name": {
                 "S": "Lab BLE capture"
               },
-              "status": {
-                "S": "ready"
+              "type": {
+                "S": "pcap"
+              },
+              "createdAt": {
+                "S": "2026-09-09T14:00:00Z"
               }
             },
             {
@@ -2319,8 +2826,11 @@
               "name": {
                 "S": "parse_bp output - v1.0.0"
               },
-              "status": {
-                "S": "ready"
+              "type": {
+                "S": "other"
+              },
+              "createdAt": {
+                "S": "2026-09-14T09:03:10Z"
               }
             },
             {
@@ -2339,8 +2849,11 @@
               "name": {
                 "S": "parse_bp output - v2.1.0"
               },
-              "status": {
-                "S": "ready"
+              "type": {
+                "S": "other"
+              },
+              "createdAt": {
+                "S": "2026-09-14T09:03:40Z"
               }
             },
             {
@@ -2359,8 +2872,11 @@
               "name": {
                 "S": "Insulin Pump C firmware v0.9.4"
               },
-              "status": {
-                "S": "verifying"
+              "type": {
+                "S": "firmware"
+              },
+              "createdAt": {
+                "S": "2026-09-10T16:00:00Z"
               }
             },
             {
@@ -2422,13 +2938,83 @@
               "status": {
                 "S": "running"
               }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "BATCH#batch-001"
+              },
+              "entity": {
+                "S": "user-batch"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "createdAt": {
+                "S": "2026-09-02T10:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "BATCH#batch-002"
+              },
+              "entity": {
+                "S": "user-batch"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "createdAt": {
+                "S": "2026-09-04T10:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "BATCH#batch-003"
+              },
+              "entity": {
+                "S": "user-batch"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "createdAt": {
+                "S": "2026-09-09T14:00:00Z"
+              }
+            },
+            {
+              "pk": {
+                "S": "USER#user-002"
+              },
+              "sk": {
+                "S": "BATCH#batch-004"
+              },
+              "entity": {
+                "S": "user-batch"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "createdAt": {
+                "S": "2026-09-10T16:00:00Z"
+              }
             }
           ],
           "NonKeyAttributes": [
             "entity",
             "role",
             "name",
-            "status"
+            "status",
+            "type",
+            "createdAt"
           ],
           "DataAccess": {
             "MySql": {}
@@ -2692,6 +3278,62 @@
               "role": {
                 "S": "owner"
               }
+            },
+            {
+              "pk": {
+                "S": "BATCH#batch-001"
+              },
+              "sk": {
+                "S": "USER#user-001"
+              },
+              "entity": {
+                "S": "batch-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            },
+            {
+              "pk": {
+                "S": "BATCH#batch-002"
+              },
+              "sk": {
+                "S": "USER#user-001"
+              },
+              "entity": {
+                "S": "batch-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            },
+            {
+              "pk": {
+                "S": "BATCH#batch-003"
+              },
+              "sk": {
+                "S": "USER#user-001"
+              },
+              "entity": {
+                "S": "batch-user"
+              },
+              "role": {
+                "S": "owner"
+              }
+            },
+            {
+              "pk": {
+                "S": "BATCH#batch-004"
+              },
+              "sk": {
+                "S": "USER#user-002"
+              },
+              "entity": {
+                "S": "batch-user"
+              },
+              "role": {
+                "S": "owner"
+              }
             }
           ],
           "NonKeyAttributes": [
@@ -2765,7 +3407,7 @@
                 "S": "DEVICE#dev-001"
               },
               "sk": {
-                "S": "ARTIFACT#output#art-005"
+                "S": "ARTIFACT#other#art-005"
               },
               "entity": {
                 "S": "device-artifact"
@@ -2774,7 +3416,7 @@
                 "S": "parse_bp output - v1.0.0"
               },
               "type": {
-                "S": "output"
+                "S": "other"
               }
             },
             {
@@ -2782,7 +3424,7 @@
                 "S": "DEVICE#dev-001"
               },
               "sk": {
-                "S": "ARTIFACT#output#art-006"
+                "S": "ARTIFACT#other#art-006"
               },
               "entity": {
                 "S": "device-artifact"
@@ -2791,7 +3433,7 @@
                 "S": "parse_bp output - v2.1.0"
               },
               "type": {
-                "S": "output"
+                "S": "other"
               }
             },
             {
@@ -3995,7 +4637,7 @@
             "S": "healthcare-iot-testbed-dev-data-lake"
           },
           "s3Key": {
-            "S": "artifacts/art-001/bp_a_v1.0.0.bin"
+            "S": "artifacts/art-001/att-001"
           },
           "attemptId": {
             "S": "att-001"
@@ -4017,6 +4659,23 @@
           },
           "version": {
             "S": "v1.0.0"
+          },
+          "origin": {
+            "S": "upload"
+          },
+          "uploadMode": {
+            "S": "single"
+          },
+          "uploadBatchId": {
+            "S": "batch-001"
+          },
+          "uploadedAt": {
+            "S": "2026-09-02T10:00:00Z"
+          },
+          "deviceIds": {
+            "SS": [
+              "dev-001"
+            ]
           }
         },
         {
@@ -4035,8 +4694,11 @@
           "name": {
             "S": "BP Monitor A firmware v1.0.0"
           },
-          "status": {
-            "S": "ready"
+          "type": {
+            "S": "firmware"
+          },
+          "createdAt": {
+            "S": "2026-09-02T10:00:00Z"
           }
         },
         {
@@ -4113,7 +4775,7 @@
             "S": "healthcare-iot-testbed-dev-data-lake"
           },
           "s3Key": {
-            "S": "artifacts/art-002/bp_a_v2.1.0.bin"
+            "S": "artifacts/art-002/att-002"
           },
           "attemptId": {
             "S": "att-002"
@@ -4135,6 +4797,23 @@
           },
           "version": {
             "S": "v2.1.0"
+          },
+          "origin": {
+            "S": "upload"
+          },
+          "uploadMode": {
+            "S": "single"
+          },
+          "uploadBatchId": {
+            "S": "batch-002"
+          },
+          "uploadedAt": {
+            "S": "2026-09-04T10:00:00Z"
+          },
+          "deviceIds": {
+            "SS": [
+              "dev-001"
+            ]
           }
         },
         {
@@ -4153,8 +4832,11 @@
           "name": {
             "S": "BP Monitor A firmware v2.1.0"
           },
-          "status": {
-            "S": "ready"
+          "type": {
+            "S": "firmware"
+          },
+          "createdAt": {
+            "S": "2026-09-04T10:00:00Z"
           }
         },
         {
@@ -4231,7 +4913,7 @@
             "S": "healthcare-iot-testbed-dev-data-lake"
           },
           "s3Key": {
-            "S": "artifacts/art-003/hr_b_v1.3.2.bin"
+            "S": "artifacts/art-003/att-003"
           },
           "attemptId": {
             "S": "att-003"
@@ -4253,6 +4935,23 @@
           },
           "version": {
             "S": "v1.3.2"
+          },
+          "origin": {
+            "S": "upload"
+          },
+          "uploadMode": {
+            "S": "single"
+          },
+          "uploadBatchId": {
+            "S": "batch-002"
+          },
+          "uploadedAt": {
+            "S": "2026-09-04T11:00:00Z"
+          },
+          "deviceIds": {
+            "SS": [
+              "dev-002"
+            ]
           }
         },
         {
@@ -4271,8 +4970,11 @@
           "name": {
             "S": "HR Sensor B firmware v1.3.2"
           },
-          "status": {
-            "S": "ready"
+          "type": {
+            "S": "firmware"
+          },
+          "createdAt": {
+            "S": "2026-09-04T11:00:00Z"
           }
         },
         {
@@ -4349,7 +5051,7 @@
             "S": "healthcare-iot-testbed-dev-data-lake"
           },
           "s3Key": {
-            "S": "artifacts/art-004/lab_capture.pcap"
+            "S": "artifacts/art-004/att-004"
           },
           "attemptId": {
             "S": "att-004"
@@ -4374,6 +5076,27 @@
               "ble",
               "lab"
             ]
+          },
+          "origin": {
+            "S": "upload"
+          },
+          "uploadMode": {
+            "S": "multipart"
+          },
+          "uploadId": {
+            "S": "mpu-art-004"
+          },
+          "partSize": {
+            "N": "16777216"
+          },
+          "partCount": {
+            "N": "3"
+          },
+          "uploadBatchId": {
+            "S": "batch-003"
+          },
+          "uploadedAt": {
+            "S": "2026-09-09T14:00:00Z"
           }
         },
         {
@@ -4392,8 +5115,11 @@
           "name": {
             "S": "Lab BLE capture"
           },
-          "status": {
-            "S": "ready"
+          "type": {
+            "S": "pcap"
+          },
+          "createdAt": {
+            "S": "2026-09-09T14:00:00Z"
           }
         },
         {
@@ -4424,7 +5150,7 @@
             "S": "parse_bp output - v1.0.0"
           },
           "type": {
-            "S": "output"
+            "S": "other"
           },
           "sha256": {
             "S": "d3d94468"
@@ -4439,7 +5165,7 @@
             "S": "healthcare-iot-testbed-dev-data-lake"
           },
           "s3Key": {
-            "S": "artifacts/art-005/bp_a_v1.0.0.json"
+            "S": "artifacts/art-005/att-005"
           },
           "attemptId": {
             "S": "att-005"
@@ -4466,6 +5192,14 @@
             "SS": [
               "art-001"
             ]
+          },
+          "origin": {
+            "S": "run"
+          },
+          "deviceIds": {
+            "SS": [
+              "dev-001"
+            ]
           }
         },
         {
@@ -4484,8 +5218,11 @@
           "name": {
             "S": "parse_bp output - v1.0.0"
           },
-          "status": {
-            "S": "ready"
+          "type": {
+            "S": "other"
+          },
+          "createdAt": {
+            "S": "2026-09-14T09:03:10Z"
           }
         },
         {
@@ -4507,7 +5244,7 @@
             "S": "DEVICE#dev-001"
           },
           "sk": {
-            "S": "ARTIFACT#output#art-005"
+            "S": "ARTIFACT#other#art-005"
           },
           "entity": {
             "S": "device-artifact"
@@ -4516,7 +5253,7 @@
             "S": "parse_bp output - v1.0.0"
           },
           "type": {
-            "S": "output"
+            "S": "other"
           }
         },
         {
@@ -4547,7 +5284,7 @@
             "S": "parse_bp output - v2.1.0"
           },
           "type": {
-            "S": "output"
+            "S": "other"
           },
           "sha256": {
             "S": "6512bd43"
@@ -4562,7 +5299,7 @@
             "S": "healthcare-iot-testbed-dev-data-lake"
           },
           "s3Key": {
-            "S": "artifacts/art-006/bp_a_v2.1.0.json"
+            "S": "artifacts/art-006/att-006"
           },
           "attemptId": {
             "S": "att-006"
@@ -4589,6 +5326,14 @@
             "SS": [
               "art-002"
             ]
+          },
+          "origin": {
+            "S": "run"
+          },
+          "deviceIds": {
+            "SS": [
+              "dev-001"
+            ]
           }
         },
         {
@@ -4607,8 +5352,11 @@
           "name": {
             "S": "parse_bp output - v2.1.0"
           },
-          "status": {
-            "S": "ready"
+          "type": {
+            "S": "other"
+          },
+          "createdAt": {
+            "S": "2026-09-14T09:03:40Z"
           }
         },
         {
@@ -4630,7 +5378,7 @@
             "S": "DEVICE#dev-001"
           },
           "sk": {
-            "S": "ARTIFACT#output#art-006"
+            "S": "ARTIFACT#other#art-006"
           },
           "entity": {
             "S": "device-artifact"
@@ -4639,7 +5387,7 @@
             "S": "parse_bp output - v2.1.0"
           },
           "type": {
-            "S": "output"
+            "S": "other"
           }
         },
         {
@@ -4685,7 +5433,7 @@
             "S": "healthcare-iot-testbed-dev-data-lake"
           },
           "s3Key": {
-            "S": "artifacts/art-007/pump_c_v0.9.4.hex"
+            "S": "artifacts/art-007/att-007"
           },
           "attemptId": {
             "S": "att-007"
@@ -4707,6 +5455,20 @@
           },
           "version": {
             "S": "v0.9.4"
+          },
+          "origin": {
+            "S": "upload"
+          },
+          "uploadMode": {
+            "S": "single"
+          },
+          "uploadBatchId": {
+            "S": "batch-004"
+          },
+          "deviceIds": {
+            "SS": [
+              "dev-003"
+            ]
           }
         },
         {
@@ -4725,8 +5487,11 @@
           "name": {
             "S": "Insulin Pump C firmware v0.9.4"
           },
-          "status": {
-            "S": "verifying"
+          "type": {
+            "S": "firmware"
+          },
+          "createdAt": {
+            "S": "2026-09-10T16:00:00Z"
           }
         },
         {
@@ -5528,6 +6293,411 @@
                 "S": "run-001"
               }
             }
+          }
+        },
+        {
+          "pk": {
+            "S": "DEVICE#dev-001"
+          },
+          "sk": {
+            "S": "FWVER#v1.0.0"
+          },
+          "entity": {
+            "S": "device-firmware-version"
+          },
+          "artifactId": {
+            "S": "art-001"
+          },
+          "version": {
+            "S": "v1.0.0"
+          },
+          "createdAt": {
+            "S": "2026-09-02T10:00:00Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "DEVICE#dev-001"
+          },
+          "sk": {
+            "S": "FWVER#v2.1.0"
+          },
+          "entity": {
+            "S": "device-firmware-version"
+          },
+          "artifactId": {
+            "S": "art-002"
+          },
+          "version": {
+            "S": "v2.1.0"
+          },
+          "createdAt": {
+            "S": "2026-09-04T10:00:00Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "DEVICE#dev-002"
+          },
+          "sk": {
+            "S": "FWVER#v1.3.2"
+          },
+          "entity": {
+            "S": "device-firmware-version"
+          },
+          "artifactId": {
+            "S": "art-003"
+          },
+          "version": {
+            "S": "v1.3.2"
+          },
+          "createdAt": {
+            "S": "2026-09-04T11:00:00Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "DEVICE#dev-003"
+          },
+          "sk": {
+            "S": "FWVER#v0.9.4"
+          },
+          "entity": {
+            "S": "device-firmware-version"
+          },
+          "artifactId": {
+            "S": "art-007"
+          },
+          "version": {
+            "S": "v0.9.4"
+          },
+          "createdAt": {
+            "S": "2026-09-10T16:00:00Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "BATCH#batch-001"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "upload-batch"
+          },
+          "uploadBatchId": {
+            "S": "batch-001"
+          },
+          "fileCount": {
+            "N": "1"
+          },
+          "totalBytes": {
+            "N": "2516582"
+          },
+          "createdBy": {
+            "S": "user-001"
+          },
+          "createdAt": {
+            "S": "2026-09-02T10:00:00Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-02T10:00:00Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "BATCH#batch-001"
+          },
+          "entity": {
+            "S": "user-batch"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "createdAt": {
+            "S": "2026-09-02T10:00:00Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "BATCH#batch-001"
+          },
+          "sk": {
+            "S": "USER#user-001"
+          },
+          "entity": {
+            "S": "batch-user"
+          },
+          "role": {
+            "S": "owner"
+          }
+        },
+        {
+          "pk": {
+            "S": "BATCH#batch-001"
+          },
+          "sk": {
+            "S": "ARTIFACT#art-001"
+          },
+          "entity": {
+            "S": "batch-artifact"
+          },
+          "name": {
+            "S": "BP Monitor A firmware v1.0.0"
+          },
+          "type": {
+            "S": "firmware"
+          }
+        },
+        {
+          "pk": {
+            "S": "BATCH#batch-002"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "upload-batch"
+          },
+          "uploadBatchId": {
+            "S": "batch-002"
+          },
+          "fileCount": {
+            "N": "2"
+          },
+          "totalBytes": {
+            "N": "4508876"
+          },
+          "createdBy": {
+            "S": "user-001"
+          },
+          "createdAt": {
+            "S": "2026-09-04T10:00:00Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-04T10:00:00Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "BATCH#batch-002"
+          },
+          "entity": {
+            "S": "user-batch"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "createdAt": {
+            "S": "2026-09-04T10:00:00Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "BATCH#batch-002"
+          },
+          "sk": {
+            "S": "USER#user-001"
+          },
+          "entity": {
+            "S": "batch-user"
+          },
+          "role": {
+            "S": "owner"
+          }
+        },
+        {
+          "pk": {
+            "S": "BATCH#batch-002"
+          },
+          "sk": {
+            "S": "ARTIFACT#art-002"
+          },
+          "entity": {
+            "S": "batch-artifact"
+          },
+          "name": {
+            "S": "BP Monitor A firmware v2.1.0"
+          },
+          "type": {
+            "S": "firmware"
+          }
+        },
+        {
+          "pk": {
+            "S": "BATCH#batch-002"
+          },
+          "sk": {
+            "S": "ARTIFACT#art-003"
+          },
+          "entity": {
+            "S": "batch-artifact"
+          },
+          "name": {
+            "S": "HR Sensor B firmware v1.3.2"
+          },
+          "type": {
+            "S": "firmware"
+          }
+        },
+        {
+          "pk": {
+            "S": "BATCH#batch-003"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "upload-batch"
+          },
+          "uploadBatchId": {
+            "S": "batch-003"
+          },
+          "fileCount": {
+            "N": "1"
+          },
+          "totalBytes": {
+            "N": "48213990"
+          },
+          "createdBy": {
+            "S": "user-001"
+          },
+          "createdAt": {
+            "S": "2026-09-09T14:00:00Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-09T14:00:00Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-001"
+          },
+          "sk": {
+            "S": "BATCH#batch-003"
+          },
+          "entity": {
+            "S": "user-batch"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "createdAt": {
+            "S": "2026-09-09T14:00:00Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "BATCH#batch-003"
+          },
+          "sk": {
+            "S": "USER#user-001"
+          },
+          "entity": {
+            "S": "batch-user"
+          },
+          "role": {
+            "S": "owner"
+          }
+        },
+        {
+          "pk": {
+            "S": "BATCH#batch-003"
+          },
+          "sk": {
+            "S": "ARTIFACT#art-004"
+          },
+          "entity": {
+            "S": "batch-artifact"
+          },
+          "name": {
+            "S": "Lab BLE capture"
+          },
+          "type": {
+            "S": "pcap"
+          }
+        },
+        {
+          "pk": {
+            "S": "BATCH#batch-004"
+          },
+          "sk": {
+            "S": "METADATA"
+          },
+          "entity": {
+            "S": "upload-batch"
+          },
+          "uploadBatchId": {
+            "S": "batch-004"
+          },
+          "fileCount": {
+            "N": "1"
+          },
+          "totalBytes": {
+            "N": "917504"
+          },
+          "createdBy": {
+            "S": "user-002"
+          },
+          "createdAt": {
+            "S": "2026-09-10T16:00:00Z"
+          },
+          "updatedAt": {
+            "S": "2026-09-10T16:00:00Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "USER#user-002"
+          },
+          "sk": {
+            "S": "BATCH#batch-004"
+          },
+          "entity": {
+            "S": "user-batch"
+          },
+          "role": {
+            "S": "owner"
+          },
+          "createdAt": {
+            "S": "2026-09-10T16:00:00Z"
+          }
+        },
+        {
+          "pk": {
+            "S": "BATCH#batch-004"
+          },
+          "sk": {
+            "S": "USER#user-002"
+          },
+          "entity": {
+            "S": "batch-user"
+          },
+          "role": {
+            "S": "owner"
+          }
+        },
+        {
+          "pk": {
+            "S": "BATCH#batch-004"
+          },
+          "sk": {
+            "S": "ARTIFACT#art-007"
+          },
+          "entity": {
+            "S": "batch-artifact"
+          },
+          "name": {
+            "S": "Insulin Pump C firmware v0.9.4"
+          },
+          "type": {
+            "S": "firmware"
           }
         }
       ],
