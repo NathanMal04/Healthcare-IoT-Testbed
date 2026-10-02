@@ -224,6 +224,10 @@ def _presign_outputs(table, run, child, body):
             "derivedFromRun": run_id, "derivedFromArtifacts": set(inputs), "runUnitId": unit["unitId"],
             "createdBy": owner, "createdAt": now, "updatedAt": now,
         }
+        if item["type"] == "firmware":
+            # Same default as uploaded firmware (artifacts-presign), so every
+            # firmware artifact carries reverse-engineering progress.
+            item["reverseEngineeringStatus"] = "not_started"
         client.transact_write_items(TransactItems=[
             _put(item),
             _put({"pk": f"USER#{owner}", "sk": f"ARTIFACT#{artifact_id}", "entity": "user-artifact",

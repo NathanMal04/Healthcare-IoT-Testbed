@@ -3,13 +3,20 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { getDevices, createDevice, type Device } from "@/lib/devices";
+import {
+  getDevices,
+  createDevice,
+  updateDeviceReverseEngineeringStatus,
+  type Device,
+  type ReverseEngineeringStatus,
+} from "@/lib/devices";
 import {
   MAX_ARTIFACT_SIZE_BYTES,
   uploadArtifact,
   type SingleUploadStage,
 } from "@/lib/artifacts";
 import FirmwareListModal from "@/app/components/FirmwareListModal";
+import ReverseEngineeringStatusSelect from "@/app/components/ReverseEngineeringStatusSelect";
 
 type UploadStage = SingleUploadStage | "complete";
 
@@ -52,6 +59,9 @@ export default function DashboardPage() {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadedVersion, setUploadedVersion] = useState<string | null>(null);
+
+  const [savingStatusIds, setSavingStatusIds] = useState<Set<string>>(new Set());
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && !user) router.push("/login");
@@ -123,6 +133,39 @@ export default function DashboardPage() {
       );
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  // The select is controlled by the device list, which only changes once the
+  // API has saved the new value; on failure it keeps showing the saved one.
+  async function handleStatusChange(device: Device, next: ReverseEngineeringStatus) {
+    if (next === device.reverseEngineeringStatus || savingStatusIds.has(device.deviceId)) return;
+
+    setStatusError(null);
+    setSavingStatusIds((current) => new Set(current).add(device.deviceId));
+    try {
+      const updated = await updateDeviceReverseEngineeringStatus(device.deviceId, next);
+      if (!isMountedRef.current) return;
+      setDevices((current) =>
+        current?.map((d) =>
+          d.deviceId === device.deviceId
+            ? { ...d, reverseEngineeringStatus: updated.reverseEngineeringStatus }
+            : d
+        ) ?? current
+      );
+    } catch (err) {
+      if (!isMountedRef.current) return;
+      setStatusError(
+        `Couldn't update ${device.name}: ${err instanceof Error ? err.message : "Failed to update status"}`
+      );
+    } finally {
+      if (isMountedRef.current) {
+        setSavingStatusIds((current) => {
+          const remaining = new Set(current);
+          remaining.delete(device.deviceId);
+          return remaining;
+        });
+      }
     }
   }
 
@@ -254,6 +297,10 @@ export default function DashboardPage() {
           </span>
         </div>
 
+        {statusError && (
+          <p className="text-xs text-red-600 bg-red-50 px-6 py-2">{statusError}</p>
+        )}
+
         {devicesLoading ? (
           <div className="px-6 py-8 text-sm text-slate-400">Loading devices…</div>
         ) : devicesError ? (
@@ -268,6 +315,9 @@ export default function DashboardPage() {
               <tr className="text-left text-slate-400 bg-slate-50/60 border-b border-slate-100">
                 <th className="px-6 py-3 font-medium text-xs uppercase tracking-wide">Device</th>
                 <th className="px-6 py-3 font-medium text-xs uppercase tracking-wide">Role</th>
+                <th className="px-6 py-3 font-medium text-xs uppercase tracking-wide">
+                  Status of being reversed
+                </th>
                 <th className="px-6 py-3 font-medium text-xs uppercase tracking-wide"></th>
               </tr>
             </thead>
@@ -281,6 +331,14 @@ export default function DashboardPage() {
                     {device.name}
                   </td>
                   <td className="px-6 py-4 text-slate-400">{device.role}</td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <ReverseEngineeringStatusSelect
+                      value={device.reverseEngineeringStatus}
+                      saving={savingStatusIds.has(device.deviceId)}
+                      onChange={(next) => void handleStatusChange(device, next)}
+                      ariaLabel={`Status of being reversed for ${device.name}`}
+                    />
+                  </td>
                   <td className="px-6 py-4 text-right space-x-3">
                     <button
                       onClick={() => openViewModal(device)}

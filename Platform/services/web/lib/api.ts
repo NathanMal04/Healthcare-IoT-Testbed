@@ -48,7 +48,7 @@ export async function throwApiError(response: Response, fallback: string): Promi
  * and `query` values that are undefined or empty are left out.
  */
 export async function apiRequest<T>(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH",
   path: string,
   options: { body?: unknown; query?: Record<string, string | number | undefined> } = {}
 ): Promise<T> {

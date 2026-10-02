@@ -15,6 +15,9 @@ ARTIFACT_TYPES = {"firmware", "pcap", "log", "binary", "other"}
 
 UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
+RE_STATUSES = {"not_started", "in_progress", "complete"}
+DEFAULT_RE_STATUS = "not_started"
+
 
 def handler(event, context):
     """GET /artifacts, GET /devices/{deviceId}/artifacts and GET /artifacts/batches.
@@ -157,7 +160,7 @@ def _public_view(item):
     # (uploadId, createdBy). attemptId is included for the same reason
     # list-firmware includes it: the UI needs it to retry a pending or failed
     # upload, and every endpoint that accepts it re-checks ownership.
-    return {
+    view = {
         "artifactId": item["artifactId"],
         "name": item.get("name"),
         "type": item.get("type"),
@@ -177,6 +180,12 @@ def _public_view(item):
         "uploadedAt": item.get("uploadedAt"),
         "statusUpdatedAt": item.get("statusUpdatedAt"),
     }
+    if item.get("type") == "firmware":
+        # Reverse-engineering progress, separate from the upload "status".
+        # Firmware stored before the field existed reads as not started.
+        value = item.get("reverseEngineeringStatus")
+        view["reverseEngineeringStatus"] = value if value in RE_STATUSES else DEFAULT_RE_STATUS
+    return view
 
 
 def _encode_token(last_key):

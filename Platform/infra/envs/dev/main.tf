@@ -183,6 +183,8 @@ resource "aws_iam_policy" "lambda_dynamodb_create_device" {
   })
 }
 
+# list-devices queries the caller's USER#/DEVICE# links, then reads the
+# DEVICE#/METADATA records (for reverseEngineeringStatus) with BatchGetItem.
 resource "aws_iam_policy" "lambda_dynamodb_list_devices" {
   name = "${var.name}-lambda-list-devices"
 
@@ -190,7 +192,22 @@ resource "aws_iam_policy" "lambda_dynamodb_list_devices" {
     Version = "2012-10-17"
     Statement = [{
       Effect   = "Allow"
-      Action   = "dynamodb:Query"
+      Action   = ["dynamodb:Query", "dynamodb:BatchGetItem"]
+      Resource = module.metadata_table.table_arn
+    }]
+  })
+}
+
+# update-device reads the caller's USER#/DEVICE# link (ownership check) and
+# updates DEVICE#/METADATA.
+resource "aws_iam_policy" "lambda_dynamodb_update_device" {
+  name = "${var.name}-lambda-update-device"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["dynamodb:GetItem", "dynamodb:UpdateItem"]
       Resource = module.metadata_table.table_arn
     }]
   })
@@ -324,6 +341,26 @@ resource "aws_iam_role_policy_attachment" "list_devices_dynamodb" {
   policy_arn = aws_iam_policy.lambda_dynamodb_list_devices.arn
 }
 
+module "update_device_fn" {
+  source        = "../../modules/lambda"
+  function_name = "${var.name}-update-device"
+  source_dir    = "../../../services/lambdas/update-device"
+  handler       = "lambda_function.handler"
+  runtime       = "python3.12"
+
+  environment_variables = {
+    METADATA_TABLE_NAME = module.metadata_table.table_name
+  }
+
+  project     = var.name
+  environment = "dev"
+}
+
+resource "aws_iam_role_policy_attachment" "update_device_dynamodb" {
+  role       = module.update_device_fn.role_name
+  policy_arn = aws_iam_policy.lambda_dynamodb_update_device.arn
+}
+
 module "presign_firmware_fn" {
   source        = "../../modules/lambda"
   function_name = "${var.name}-presign-firmware"
@@ -424,9 +461,14 @@ module "api" {
 }
 
 # Integrations defined with the api_lambda_method / api_cors_preflight
-# modules in artifacts.tf, builds.tf, runs.tf and usage.tf.
+# modules: PATCH /devices/{deviceId} below, plus artifacts.tf, builds.tf,
+# runs.tf and usage.tf.
 locals {
   module_route_integration_ids = concat(
+    [
+      module.devices_device_id_patch.integration_id,
+      module.devices_device_id_preflight.integration_id,
+    ],
     local.artifact_integration_ids,
     local.builds_integration_ids,
     local.runs_integration_ids,
@@ -598,6 +640,32 @@ resource "aws_api_gateway_resource" "devices_device_id" {
   rest_api_id = module.api.rest_api_id
   parent_id   = aws_api_gateway_resource.devices.id
   path_part   = "{deviceId}"
+}
+
+# PATCH /devices/{deviceId} -> update-device (reverseEngineeringStatus).
+# Uses the api_lambda_method / api_cors_preflight modules (see artifacts.tf),
+# which take the full route path for the invoke permission, so they work on
+# this path-parameter resource.
+module "devices_device_id_patch" {
+  source = "../../modules/api_lambda_method"
+
+  rest_api_id          = module.api.rest_api_id
+  resource_id          = aws_api_gateway_resource.devices_device_id.id
+  execution_arn        = module.api.execution_arn
+  http_method          = "PATCH"
+  route_path           = "devices/*"
+  authorizer_id        = module.api.cognito_authorizer_id
+  lambda_invoke_arn    = module.update_device_fn.invoke_arn
+  lambda_function_name = module.update_device_fn.function_name
+  statement_suffix     = "devices-id-PATCH"
+}
+
+module "devices_device_id_preflight" {
+  source = "../../modules/api_cors_preflight"
+
+  rest_api_id     = module.api.rest_api_id
+  resource_id     = aws_api_gateway_resource.devices_device_id.id
+  allowed_methods = ["PATCH"]
 }
 
 resource "aws_api_gateway_resource" "devices_device_id_firmware" {

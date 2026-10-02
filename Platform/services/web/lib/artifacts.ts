@@ -1,5 +1,6 @@
 import { createSHA256 } from "hash-wasm";
 import { apiRequest } from "@/lib/api";
+import { toReverseEngineeringStatus, type ReverseEngineeringStatus } from "@/lib/reverseEngineering";
 
 // --- Types -------------------------------------------------------------------
 
@@ -29,6 +30,11 @@ export interface Artifact {
   createdAt: string;
   uploadedAt: string | null;
   statusUpdatedAt: string | null;
+  /**
+   * Reverse-engineering progress; firmware only, absent for other types.
+   * Separate from `status`, which is the upload lifecycle.
+   */
+  reverseEngineeringStatus?: ReverseEngineeringStatus;
 }
 
 export interface ArtifactDetail extends Artifact {
@@ -154,6 +160,30 @@ export async function getArtifact(artifactId: string): Promise<ArtifactDetail> {
     `/artifacts/${encodeURIComponent(artifactId)}`
   );
   return data.artifact;
+}
+
+export interface FirmwareReverseEngineeringUpdate {
+  artifactId: string;
+  type: "firmware";
+  version: string | null;
+  status: ArtifactStatus;
+  reverseEngineeringStatus: ReverseEngineeringStatus;
+  updatedAt: string | null;
+}
+
+/** Sets a firmware artifact's reverse-engineering status; never its upload status. */
+export function updateFirmwareReverseEngineeringStatus(
+  artifactId: string,
+  reverseEngineeringStatus: ReverseEngineeringStatus
+): Promise<FirmwareReverseEngineeringUpdate> {
+  return apiRequest("PATCH", `/artifacts/${encodeURIComponent(artifactId)}`, {
+    body: { reverseEngineeringStatus },
+  });
+}
+
+/** The firmware's reverse-engineering status, reading a missing value as not started. */
+export function firmwareReverseEngineeringStatus(artifact: Artifact): ReverseEngineeringStatus {
+  return toReverseEngineeringStatus(artifact.reverseEngineeringStatus);
 }
 
 export async function getArtifactDownloadUrl(artifactId: string): Promise<string> {
