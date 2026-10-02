@@ -2,13 +2,17 @@
 
 import { useEffect, useState } from "react";
 import {
+  firmwareReverseEngineeringStatus,
   formatBytes,
   listDeviceArtifacts,
   retryArtifactUpload,
+  updateFirmwareReverseEngineeringStatus,
   type Artifact,
   type SingleUploadStage,
 } from "@/lib/artifacts";
 import type { Device } from "@/lib/devices";
+import type { ReverseEngineeringStatus } from "@/lib/reverseEngineering";
+import ReverseEngineeringStatusSelect from "@/app/components/ReverseEngineeringStatusSelect";
 
 interface FirmwareListModalProps {
   device: Device;
@@ -69,6 +73,9 @@ export default function FirmwareListModal({ device, onClose }: FirmwareListModal
   const [retryProgress, setRetryProgress] = useState<number | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
 
+  const [savingReIds, setSavingReIds] = useState<Set<string>>(new Set());
+  const [reError, setReError] = useState<string | null>(null);
+
   // Fresh fetch every time the viewed device changes — no caching. This
   // component is the sole owner of this state; a failure here never touches
   // the dashboard's own device list/loading/error state.
@@ -95,6 +102,36 @@ export default function FirmwareListModal({ device, onClose }: FirmwareListModal
       cancelled = true;
     };
   }, [device.deviceId]);
+
+  // The select shows the list's saved value, which only changes once the API
+  // has saved the new one. Only reverseEngineeringStatus is taken from the
+  // response; the upload status shown alongside it is left as it was.
+  async function handleReStatusChange(firmware: Artifact, next: ReverseEngineeringStatus) {
+    if (next === firmwareReverseEngineeringStatus(firmware) || savingReIds.has(firmware.artifactId)) return;
+
+    setReError(null);
+    setSavingReIds((current) => new Set(current).add(firmware.artifactId));
+    try {
+      const updated = await updateFirmwareReverseEngineeringStatus(firmware.artifactId, next);
+      setFirmwareList((current) =>
+        current?.map((f) =>
+          f.artifactId === firmware.artifactId
+            ? { ...f, reverseEngineeringStatus: updated.reverseEngineeringStatus }
+            : f
+        ) ?? current
+      );
+    } catch (err) {
+      setReError(
+        `Couldn't update ${firmware.version ?? firmware.name}: ${err instanceof Error ? err.message : "Failed to update status"}`
+      );
+    } finally {
+      setSavingReIds((current) => {
+        const remaining = new Set(current);
+        remaining.delete(firmware.artifactId);
+        return remaining;
+      });
+    }
+  }
 
   function handleModalClose() {
     if (retrying) return;
@@ -166,7 +203,7 @@ export default function FirmwareListModal({ device, onClose }: FirmwareListModal
         if (e.target === e.currentTarget) handleModalClose();
       }}
     >
-      <div className="w-full max-w-2xl bg-white rounded-2xl border border-slate-100 shadow-sm p-8">
+      <div className="w-full max-w-3xl bg-white rounded-2xl border border-slate-100 shadow-sm p-8">
         <div className="mb-6 flex items-start justify-between">
           <div>
             <h2 className="text-xl font-bold text-slate-800 tracking-tight">Firmware</h2>
@@ -258,12 +295,16 @@ export default function FirmwareListModal({ device, onClose }: FirmwareListModal
           <p className="text-sm text-slate-400 py-8 text-center">No firmware uploaded yet.</p>
         ) : (
           <div className="max-h-96 overflow-auto">
+            {reError && (
+              <p className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg mb-3">{reError}</p>
+            )}
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-slate-400 bg-slate-50/60 border-b border-slate-100">
                   <th className="px-3 py-2 font-medium text-xs uppercase tracking-wide">Version</th>
-                  <th className="px-3 py-2 font-medium text-xs uppercase tracking-wide">Status</th>
+                  <th className="px-3 py-2 font-medium text-xs uppercase tracking-wide">Upload</th>
                   <th className="px-3 py-2 font-medium text-xs uppercase tracking-wide">File</th>
+                  <th className="px-3 py-2 font-medium text-xs uppercase tracking-wide">RE Status</th>
                   <th className="px-3 py-2 font-medium text-xs uppercase tracking-wide">Size</th>
                   <th className="px-3 py-2 font-medium text-xs uppercase tracking-wide">Date</th>
                   <th className="px-3 py-2 font-medium text-xs uppercase tracking-wide"></th>
@@ -292,6 +333,14 @@ export default function FirmwareListModal({ device, onClose }: FirmwareListModal
                     </td>
                     <td className="px-3 py-3 text-slate-500 break-all">
                       {firmware.originalFilename}
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      <ReverseEngineeringStatusSelect
+                        value={firmwareReverseEngineeringStatus(firmware)}
+                        saving={savingReIds.has(firmware.artifactId)}
+                        onChange={(next) => void handleReStatusChange(firmware, next)}
+                        ariaLabel={`Reverse-engineering status for firmware ${firmware.version ?? firmware.name}`}
+                      />
                     </td>
                     <td className="px-3 py-3 text-slate-500 whitespace-nowrap">
                       {formatBytes(firmware.sizeBytes)}

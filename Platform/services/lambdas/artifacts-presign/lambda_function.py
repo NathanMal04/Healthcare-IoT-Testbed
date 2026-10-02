@@ -57,6 +57,7 @@ MIN_PART_SIZE = 16 * 1024 ** 2
 MAX_PARTS = 1000
 
 ARTIFACT_TYPES = {"firmware", "pcap", "log", "binary", "other"}
+DEFAULT_RE_STATUS = "not_started"
 CONTENT_TYPE = "application/octet-stream"
 
 # Objects stay tagged "pending" until the upload is verified. The bucket's
@@ -181,6 +182,10 @@ def _create_artifact(user_id, batch_id, tags, devices, spec):
     }
     if spec.get("version"):
         item["version"] = spec["version"]
+    if spec["type"] == "firmware":
+        # Reverse-engineering progress, separate from the upload "status";
+        # changed with PATCH /artifacts/{artifactId} (artifacts-update).
+        item["reverseEngineeringStatus"] = DEFAULT_RE_STATUS
     if tags:
         item["tags"] = set(tags)
     if devices:

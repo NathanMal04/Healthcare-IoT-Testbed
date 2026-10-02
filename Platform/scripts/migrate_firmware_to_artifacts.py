@@ -131,6 +131,7 @@ def _transaction(table_name, row, artifact_id, user_id, device_id, device_name):
         "uploadMode": "single",
         "status": row["status"],
         "statusUpdatedAt": row.get("updatedAt") or created_at,
+        "reverseEngineeringStatus": "not_started",
         "deviceIds": {device_id},
         "migratedFromFirmwareId": row.get("firmwareId"),
         "createdBy": row.get("createdBy") or user_id,

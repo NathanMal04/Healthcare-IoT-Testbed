@@ -14,6 +14,9 @@ DOWNLOAD_EXPIRES_SEC = int(os.environ.get("DOWNLOAD_EXPIRES_SEC", "300"))
 UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 UNSAFE_FILENAME_CHARS = re.compile(r'[^A-Za-z0-9._ -]')
 
+RE_STATUSES = {"not_started", "in_progress", "complete"}
+DEFAULT_RE_STATUS = "not_started"
+
 
 def handler(event, context):
     """GET /artifacts/{artifactId} and GET /artifacts/{artifactId}/download."""
@@ -60,7 +63,7 @@ def _content_disposition(item):
 
 
 def _public_view(item):
-    return {
+    view = {
         "artifactId": item["artifactId"],
         "name": item.get("name"),
         "type": item.get("type"),
@@ -80,6 +83,12 @@ def _public_view(item):
         "uploadedAt": item.get("uploadedAt"),
         "statusUpdatedAt": item.get("statusUpdatedAt"),
     }
+    if item.get("type") == "firmware":
+        # Reverse-engineering progress, separate from the upload "status".
+        # Firmware stored before the field existed reads as not started.
+        value = item.get("reverseEngineeringStatus")
+        view["reverseEngineeringStatus"] = value if value in RE_STATUSES else DEFAULT_RE_STATUS
+    return view
 
 
 def _resp(status, body):

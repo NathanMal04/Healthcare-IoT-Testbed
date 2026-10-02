@@ -34,6 +34,7 @@ A physical device under test.
 | `name` | S | Display name |
 | `type` | S | Device category, e.g. `blood-pressure` |
 | `status` | S | `active` |
+| `reverseEngineeringStatus` | S | `not_started` / `in_progress` / `complete`. Set by the owner with `PATCH /devices/{id}` (`update-device`). Separate from `status`. Devices created before it existed have no attribute and read as `not_started`. Only stored here, not on the link rows; `GET /devices` reads it with `BatchGetItem`. |
 | `dataPath` | S | S3 prefix for the device's files |
 | `createdAt`, `updatedAt` | S | Timestamps |
 
@@ -57,6 +58,7 @@ Any stored file: uploaded firmware, pcaps, logs and binaries, plus every file a 
 | `uploadBatchId` | S | Upload batch the file was sent in |
 | `deviceIds` | SS | Linked devices (copy of the link rows, for display) |
 | `status` | S | See lifecycle below |
+| `reverseEngineeringStatus` | S | **Firmware only.** Reverse-engineering progress: `not_started` / `in_progress` / `complete`, separate from the upload `status`. Written as `not_started` whenever a firmware artifact is created (upload, run output, migration). Set by the owner with `PATCH /artifacts/{id}` (`artifacts-update`), which rejects other types. Firmware stored before it existed has no attribute and is returned as `not_started`; other types never have it and their API responses leave it out. Independent of the device's `reverseEngineeringStatus`. |
 | `statusReason` | S | Why the upload failed |
 | `statusUpdatedAt` | S | Time of the last status change |
 | `tags` | SS | Free-form labels, used in run input queries |

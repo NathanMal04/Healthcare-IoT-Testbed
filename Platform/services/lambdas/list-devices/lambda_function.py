@@ -9,27 +9,78 @@ TABLE = os.environ["METADATA_TABLE_NAME"]
 
 DEVICE_SK_PREFIX = "DEVICE#"
 
+RE_STATUSES = {"not_started", "in_progress", "complete"}
+# Devices created before reverseEngineeringStatus existed have no attribute;
+# they read as not started, so no migration is needed.
+DEFAULT_RE_STATUS = "not_started"
+
+BATCH_GET_MAX_KEYS = 100
+
 
 def handler(event, context):
     user_id = event["requestContext"]["authorizer"]["claims"]["sub"]
 
     table = dynamodb.Table(TABLE)
-    result = table.query(
-        KeyConditionExpression=(
-            Key("pk").eq(f"USER#{user_id}") & Key("sk").begins_with(DEVICE_SK_PREFIX)
-        )
+    links = _query_all(
+        table,
+        Key("pk").eq(f"USER#{user_id}") & Key("sk").begins_with(DEVICE_SK_PREFIX),
     )
+
+    # The link rows only carry immutable display fields; anything that
+    # changes lives on DEVICE#/METADATA, read here in one BatchGetItem per
+    # 100 devices rather than a GetItem per device.
+    device_ids = [item["sk"][len(DEVICE_SK_PREFIX):] for item in links]
+    metadata = _batch_get_metadata(device_ids)
 
     devices = [
         {
-            "deviceId": item["sk"][len(DEVICE_SK_PREFIX):],
-            "name": item.get("name"),
-            "role": item.get("role"),
+            "deviceId": device_id,
+            "name": link.get("name"),
+            "role": link.get("role"),
+            "reverseEngineeringStatus": _re_status(metadata.get(device_id)),
         }
-        for item in result.get("Items", [])
+        for device_id, link in zip(device_ids, links)
     ]
 
     return _resp(200, {"devices": devices})
+
+
+def _query_all(table, key_condition):
+    items, kwargs = [], {"KeyConditionExpression": key_condition}
+    while True:
+        page = table.query(**kwargs)
+        items.extend(page.get("Items", []))
+        if not page.get("LastEvaluatedKey"):
+            return items
+        kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+
+def _batch_get_metadata(device_ids):
+    """Returns {deviceId: metadata item} for the devices that have one."""
+    found = {}
+    unique_ids = list(dict.fromkeys(device_ids))
+    for start in range(0, len(unique_ids), BATCH_GET_MAX_KEYS):
+        keys = [
+            {"pk": f"DEVICE#{device_id}", "sk": "METADATA"}
+            for device_id in unique_ids[start:start + BATCH_GET_MAX_KEYS]
+        ]
+        request = {
+            TABLE: {
+                "Keys": keys,
+                "ProjectionExpression": "pk, reverseEngineeringStatus",
+            }
+        }
+        while request:
+            result = dynamodb.batch_get_item(RequestItems=request)
+            for item in result.get("Responses", {}).get(TABLE, []):
+                found[item["pk"][len("DEVICE#"):]] = item
+            request = result.get("UnprocessedKeys") or None
+    return found
+
+
+def _re_status(item):
+    value = (item or {}).get("reverseEngineeringStatus")
+    return value if value in RE_STATUSES else DEFAULT_RE_STATUS
 
 
 def _resp(status, body):

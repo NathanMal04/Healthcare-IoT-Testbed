@@ -14,6 +14,10 @@ BUCKET = os.environ["DATA_LAKE_BUCKET"]
 
 REQUIRED_FIELDS = ["name", "type"]
 
+# Separate from the device's lifecycle "status"; changed with
+# PATCH /devices/{deviceId} (update-device).
+DEFAULT_RE_STATUS = "not_started"
+
 
 def handler(event, context):
     user_id = event["requestContext"]["authorizer"]["claims"]["sub"]
@@ -44,6 +48,7 @@ def handler(event, context):
         "name": values["name"],
         "type": values["type"],
         "status": "active",
+        "reverseEngineeringStatus": DEFAULT_RE_STATUS,
         "dataPath": data_path,
         "createdAt": now,
         "updatedAt": now,
@@ -96,6 +101,7 @@ def handler(event, context):
             "name": values["name"],
             "type": values["type"],
             "status": "active",
+            "reverseEngineeringStatus": DEFAULT_RE_STATUS,
             "dataPath": data_path,
             "createdAt": now,
             "updatedAt": now,

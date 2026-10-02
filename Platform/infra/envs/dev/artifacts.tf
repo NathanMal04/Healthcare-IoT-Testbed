@@ -11,6 +11,7 @@
 #   GET  /devices/{deviceId}/artifacts       -> artifacts-list     (?type, tag, limit, nextToken)
 #   GET  /artifacts/{artifactId}             -> artifacts-get
 #   GET  /artifacts/{artifactId}/download    -> artifacts-get
+#   PATCH /artifacts/{artifactId}            -> artifacts-update   (firmware reverseEngineeringStatus)
 #
 # artifacts-verify has no route: artifacts-complete invokes it asynchronously
 # to check the full SHA-256 of multipart uploads.
@@ -105,6 +106,21 @@ module "artifacts_get_fn" {
   environment_variables = {
     METADATA_TABLE_NAME  = module.metadata_table.table_name
     DOWNLOAD_EXPIRES_SEC = "300"
+  }
+
+  project     = var.name
+  environment = "dev"
+}
+
+module "artifacts_update_fn" {
+  source        = "../../modules/lambda"
+  function_name = "${var.name}-artifacts-update"
+  source_dir    = "../../../services/lambdas/artifacts-update"
+  handler       = "lambda_function.handler"
+  runtime       = "python3.12"
+
+  environment_variables = {
+    METADATA_TABLE_NAME = module.metadata_table.table_name
   }
 
   project     = var.name
@@ -238,6 +254,21 @@ resource "aws_iam_policy" "artifacts_get" {
   })
 }
 
+# Reads the caller's USER#/ARTIFACT# link and ARTIFACT#/METADATA, and sets
+# reverseEngineeringStatus on firmware. No S3 access.
+resource "aws_iam_policy" "artifacts_update" {
+  name = "${var.name}-lambda-artifacts-update"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["dynamodb:GetItem", "dynamodb:UpdateItem"]
+      Resource = module.metadata_table.table_arn
+    }]
+  })
+}
+
 resource "aws_iam_role_policy_attachment" "artifacts_presign" {
   role       = module.artifacts_presign_fn.role_name
   policy_arn = aws_iam_policy.artifacts_presign.arn
@@ -261,6 +292,11 @@ resource "aws_iam_role_policy_attachment" "artifacts_list" {
 resource "aws_iam_role_policy_attachment" "artifacts_get" {
   role       = module.artifacts_get_fn.role_name
   policy_arn = aws_iam_policy.artifacts_get.arn
+}
+
+resource "aws_iam_role_policy_attachment" "artifacts_update" {
+  role       = module.artifacts_update_fn.role_name
+  policy_arn = aws_iam_policy.artifacts_update.arn
 }
 
 # --- Routes ------------------------------------------------------------------
@@ -365,6 +401,12 @@ locals {
       path        = "artifacts/*/retry"
       fn          = module.artifacts_presign_fn
     }
+    "artifacts-id-PATCH" = {
+      resource_id = aws_api_gateway_resource.artifacts_artifact_id.id
+      method      = "PATCH"
+      path        = "artifacts/*"
+      fn          = module.artifacts_update_fn
+    }
     "artifacts-id-download-GET" = {
       resource_id = aws_api_gateway_resource.artifacts_artifact_id_download.id
       method      = "GET"
@@ -379,12 +421,17 @@ locals {
     }
   }
 
-  # Every resource above has exactly one method besides OPTIONS.
+  # One preflight per resource, allowing every method on it. Routes are
+  # grouped by path (a static string, unlike resource_id, so the for_each
+  # keys are known at plan time), and each preflight keeps the key of the
+  # first route on its path, so adding a method to a resource doesn't
+  # replace its existing preflight.
   artifact_preflights = {
     for key, route in local.artifact_routes : key => {
       resource_id = route.resource_id
-      methods     = [route.method]
+      methods     = [for k in sort(keys(local.artifact_routes)) : local.artifact_routes[k].method if local.artifact_routes[k].path == route.path]
     }
+    if key == sort([for k, r in local.artifact_routes : k if r.path == route.path])[0]
   }
 }
 
