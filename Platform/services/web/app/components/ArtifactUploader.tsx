@@ -10,9 +10,17 @@ import {
 } from "@/lib/artifacts";
 import { UploadQueue, type QueueItem, type QueueStage } from "@/lib/uploadQueue";
 import type { Device } from "@/lib/devices";
+import { useScopeLock } from "@/context/WorkspaceContext";
 
 interface ArtifactUploaderProps {
+  /** The devices of the current scope; the upload's scope comes from the ones chosen. */
   devices: Device[];
+  /**
+   * In a workspace, files must be linked to at least one of its devices: the
+   * backend puts an upload in the workspace of its devices, and an upload
+   * without devices would be personal.
+   */
+  requireDevice?: boolean;
   /** Called when a run of uploads ends, with the batch id if one was created. */
   onFinished: (uploadBatchId: string | undefined) => void;
 }
@@ -91,7 +99,7 @@ async function filesFromDrop(dataTransfer: DataTransfer): Promise<{ file: File; 
   return results;
 }
 
-export default function ArtifactUploader({ devices, onFinished }: ArtifactUploaderProps) {
+export default function ArtifactUploader({ devices, requireDevice = false, onFinished }: ArtifactUploaderProps) {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [skipped, setSkipped] = useState<string[]>([]);
   const [tagsInput, setTagsInput] = useState("");
@@ -107,6 +115,9 @@ export default function ArtifactUploader({ devices, onFinished }: ArtifactUpload
   // Staged items live in React state until the upload starts; after that the
   // queue owns them and pushes snapshots back here.
   const started = queue !== null;
+
+  // The upload belongs to the current scope; keep it from changing mid-upload.
+  useScopeLock(running);
 
   useEffect(() => {
     // webkitdirectory isn't in React's attribute types.
@@ -154,6 +165,9 @@ export default function ArtifactUploader({ devices, onFinished }: ArtifactUpload
 
   function validate(): string | null {
     if (!items.length) return "Add at least one file";
+    if (requireDevice && !deviceIds.length) {
+      return "Choose at least one workspace device: files join the workspace through their devices";
+    }
     const tags = parseTags(tagsInput);
     if (tags.length > 20) return "At most 20 tags";
     const badTag = tags.find((t) => !TAG_PATTERN.test(t));
@@ -307,10 +321,12 @@ export default function ArtifactUploader({ devices, onFinished }: ArtifactUpload
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-500 uppercase tracking-wide mb-1.5">
-                Devices (all files, optional)
+                {requireDevice ? "Workspace devices (all files, at least one)" : "Devices (all files, optional)"}
               </label>
               {devices.length === 0 ? (
-                <p className="text-xs text-slate-400 py-2">No devices yet.</p>
+                <p className="text-xs text-slate-400 py-2">
+                  {requireDevice ? "Add a device to this workspace first." : "No devices yet."}
+                </p>
               ) : (
                 <div className="flex flex-wrap gap-2">
                   {devices.map((device) => {

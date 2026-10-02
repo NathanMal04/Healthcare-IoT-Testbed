@@ -28,6 +28,7 @@ module "artifacts_presign_fn" {
   source_dir    = "../../../services/lambdas/artifacts-presign"
   handler       = "lambda_function.handler"
   runtime       = "python3.12"
+  layers        = [aws_lambda_layer_version.shared.arn]
   memory_size   = 512
 
   environment_variables = {
@@ -50,6 +51,7 @@ module "artifacts_complete_fn" {
   source_dir    = "../../../services/lambdas/artifacts-complete"
   handler       = "lambda_function.handler"
   runtime       = "python3.12"
+  layers        = [aws_lambda_layer_version.shared.arn]
   memory_size   = 512
 
   environment_variables = {
@@ -86,6 +88,7 @@ module "artifacts_list_fn" {
   source_dir    = "../../../services/lambdas/artifacts-list"
   handler       = "lambda_function.handler"
   runtime       = "python3.12"
+  layers        = [aws_lambda_layer_version.shared.arn]
   memory_size   = 256
 
   environment_variables = {
@@ -102,6 +105,7 @@ module "artifacts_get_fn" {
   source_dir    = "../../../services/lambdas/artifacts-get"
   handler       = "lambda_function.handler"
   runtime       = "python3.12"
+  layers        = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
     METADATA_TABLE_NAME  = module.metadata_table.table_name
@@ -118,6 +122,7 @@ module "artifacts_update_fn" {
   source_dir    = "../../../services/lambdas/artifacts-update"
   handler       = "lambda_function.handler"
   runtime       = "python3.12"
+  layers        = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
     METADATA_TABLE_NAME = module.metadata_table.table_name
@@ -141,8 +146,10 @@ resource "aws_iam_policy" "artifacts_presign" {
     Version = "2012-10-17"
     Statement = [
       {
+        # ConditionCheckItem: a workspace upload re-checks the caller's
+        # membership inside the batch and artifact transactions.
         Effect   = "Allow"
-        Action   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"]
+        Action   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:ConditionCheckItem"]
         Resource = module.metadata_table.table_arn
       },
       {

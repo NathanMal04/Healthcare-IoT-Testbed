@@ -3,6 +3,7 @@ import json
 import os
 import re
 import boto3
+import testbed_authz
 from datetime import datetime, timedelta, timezone
 from botocore.exceptions import ClientError
 
@@ -66,14 +67,14 @@ def handler(event, context):
 
 
 def _complete(table, user_id, artifact_id, attempt_id):
-    link = table.get_item(Key={"pk": f"USER#{user_id}", "sk": f"ARTIFACT#{artifact_id}"}).get("Item")
-    if link is None or link.get("role") != "owner":
+    # The owner of a personal artifact, or any member of a workspace
+    # artifact's workspace; 404 otherwise so ids aren't revealed.
+    try:
+        item = testbed_authz.require_resource(table, user_id, "ARTIFACT", artifact_id, legacy_roles=("owner",))
+    except testbed_authz.AuthorizationError:
         raise ItemError(404, "Artifact not found")
 
     key = {"pk": f"ARTIFACT#{artifact_id}", "sk": "METADATA"}
-    item = table.get_item(Key=key).get("Item")
-    if item is None:
-        raise ItemError(404, "Artifact not found")
 
     if item["attemptId"] != attempt_id:
         raise ItemError(409, "Upload attempt is no longer current")

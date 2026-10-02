@@ -16,6 +16,8 @@ import {
 } from "@/lib/artifacts";
 import ArtifactUploader from "@/app/components/ArtifactUploader";
 import { RUN_SELECTION_KEY } from "@/lib/runs";
+import { useWorkspace } from "@/context/WorkspaceContext";
+import { isWorkspaceUnavailable, scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
 
 const STATUS_BADGE_STYLES: Record<string, string> = {
   ready: "text-emerald-700 bg-emerald-50",
@@ -39,8 +41,20 @@ function formatDate(value: string | null | undefined): string {
 }
 
 export default function ArtifactsPage() {
+  const { scope } = useWorkspace();
+  // Keyed on the scope: switching remounts the view, so filters, pagination,
+  // selection and staged uploads reset, and a late response for the previous
+  // scope lands in the unmounted view instead of this one.
+  return <ArtifactsView key={scopeKey(scope)} />;
+}
+
+function ArtifactsView() {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const { scope, reportWorkspaceUnavailable } = useWorkspace();
+  const workspaceId = scopeWorkspaceId(scope);
+  // Runs can't use workspace files yet, so the run shortcuts are Personal only.
+  const runsAvailable = scope.kind === "personal";
 
   const [devices, setDevices] = useState<Device[]>([]);
   const [filters, setFilters] = useState<Filters>({ type: "", tag: "", batchId: "" });
@@ -62,10 +76,10 @@ export default function ArtifactsPage() {
 
   useEffect(() => {
     if (loading || !user) return;
-    getDevices()
+    getDevices(workspaceId)
       .then(setDevices)
       .catch(() => setDevices([]));
-  }, [user, loading]);
+  }, [user, loading, workspaceId]);
 
   const load = useCallback(
     async (append: boolean, token?: string) => {
@@ -77,6 +91,8 @@ export default function ArtifactsPage() {
           type: filters.type || undefined,
           tag: filters.tag || undefined,
           batchId: filters.batchId || undefined,
+          // A batch already has a scope; otherwise list the workspace's files.
+          workspaceId: filters.batchId ? undefined : workspaceId,
           nextToken: token,
         });
         if (loadId !== loadIdRef.current) return;
@@ -85,11 +101,12 @@ export default function ArtifactsPage() {
       } catch (err) {
         if (loadId !== loadIdRef.current) return;
         setListError(err instanceof Error ? err.message : "Failed to load artifacts");
+        if (workspaceId && isWorkspaceUnavailable(err)) reportWorkspaceUnavailable();
       } finally {
         if (loadId === loadIdRef.current) setListLoading(false);
       }
     },
-    [filters]
+    [filters, workspaceId, reportWorkspaceUnavailable]
   );
 
   useEffect(() => {
@@ -166,11 +183,20 @@ export default function ArtifactsPage() {
         <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Artifacts</h1>
         <p className="text-slate-400 mt-1 text-sm">
           Files from your reverse engineering work, ready for analysis
+          {" · "}
+          {scope.kind === "workspace" ? (
+            <span className="text-slate-600">
+              Workspace: <span className="font-medium">{scope.name}</span>
+            </span>
+          ) : (
+            <span className="text-slate-600">Personal</span>
+          )}
         </p>
       </div>
 
       <ArtifactUploader
         devices={devices}
+        requireDevice={scope.kind === "workspace"}
         onFinished={(uploadBatchId) => {
           if (uploadBatchId) setFilters({ type: "", tag: "", batchId: uploadBatchId });
           else void load(false);
@@ -180,9 +206,15 @@ export default function ArtifactsPage() {
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap items-center gap-3">
-          <h2 className="font-semibold text-slate-700 mr-auto">Your artifacts</h2>
+          <h2 className="font-semibold text-slate-700 mr-auto">
+            {scope.kind === "workspace" ? `${scope.name} artifacts` : "Your artifacts"}
+          </h2>
 
-          {selectedIds.size > 0 && (
+          {!runsAvailable && (
+            <span className="text-xs text-slate-400">Workspace analysis runs are not available yet.</span>
+          )}
+
+          {runsAvailable && selectedIds.size > 0 && (
             <>
               <button type="button" onClick={runOnSelected} className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg font-medium">
                 Run a script on selected ({selectedIds.size})
@@ -206,7 +238,7 @@ export default function ArtifactsPage() {
               </button>
             </span>
           )}
-          {filters.batchId && (
+          {runsAvailable && filters.batchId && (
             <Link href={`/runs?batch=${filters.batchId}`} className="text-xs text-blue-600 font-medium">
               Run a script on this upload
             </Link>
@@ -265,10 +297,12 @@ export default function ArtifactsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-slate-400 bg-slate-50/60 border-b border-slate-100">
-                <th className="pl-6 py-3 w-8">
-                  <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Select all shown" />
-                </th>
-                <th className="px-3 py-3 font-medium text-xs uppercase tracking-wide">Name</th>
+                {runsAvailable && (
+                  <th className="pl-6 py-3 w-8">
+                    <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Select all shown" />
+                  </th>
+                )}
+                <th className={`${runsAvailable ? "px-3" : "pl-6 pr-3"} py-3 font-medium text-xs uppercase tracking-wide`}>Name</th>
                 <th className="px-3 py-3 font-medium text-xs uppercase tracking-wide">Type</th>
                 <th className="px-3 py-3 font-medium text-xs uppercase tracking-wide">Status</th>
                 <th className="px-3 py-3 font-medium text-xs uppercase tracking-wide">Size</th>
@@ -280,16 +314,18 @@ export default function ArtifactsPage() {
             <tbody>
               {artifacts.map((artifact) => (
                 <tr key={artifact.artifactId} className="border-b border-slate-50 hover:bg-slate-50/80">
-                  <td className="pl-6 py-3">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(artifact.artifactId)}
-                      disabled={artifact.status !== "ready"}
-                      onChange={() => toggle(artifact.artifactId)}
-                      aria-label={`Select ${artifact.name}`}
-                    />
-                  </td>
-                  <td className="px-3 py-3">
+                  {runsAvailable && (
+                    <td className="pl-6 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(artifact.artifactId)}
+                        disabled={artifact.status !== "ready"}
+                        onChange={() => toggle(artifact.artifactId)}
+                        aria-label={`Select ${artifact.name}`}
+                      />
+                    </td>
+                  )}
+                  <td className={`${runsAvailable ? "px-3" : "pl-6 pr-3"} py-3`}>
                     <p className="font-medium text-slate-800 break-all">{artifact.name}</p>
                     {artifact.originalFilename !== artifact.name && (
                       <p className="text-xs text-slate-400 break-all">{artifact.originalFilename}</p>

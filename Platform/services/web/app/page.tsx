@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -17,6 +17,8 @@ import {
 } from "@/lib/artifacts";
 import FirmwareListModal from "@/app/components/FirmwareListModal";
 import ReverseEngineeringStatusSelect from "@/app/components/ReverseEngineeringStatusSelect";
+import { useScopeLock, useWorkspace } from "@/context/WorkspaceContext";
+import { isWorkspaceUnavailable, scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
 
 type UploadStage = SingleUploadStage | "complete";
 
@@ -35,8 +37,18 @@ function uploadStageLabel(stage: UploadStage, progress: number | null): string {
 }
 
 export default function DashboardPage() {
+  const { scope } = useWorkspace();
+  // Keyed on the scope: switching remounts the view, so no devices, errors or
+  // dialogs carry over, and a late response for the previous scope lands in
+  // the unmounted view instead of this one.
+  return <DashboardView key={scopeKey(scope)} />;
+}
+
+function DashboardView() {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const { scope, invitations, openPanel, reportWorkspaceUnavailable } = useWorkspace();
+  const workspaceId = scopeWorkspaceId(scope);
 
   const [devices, setDevices] = useState<Device[] | null>(null);
   const [devicesLoading, setDevicesLoading] = useState(true);
@@ -63,6 +75,10 @@ export default function DashboardPage() {
   const [savingStatusIds, setSavingStatusIds] = useState<Set<string>>(new Set());
   const [statusError, setStatusError] = useState<string | null>(null);
 
+  // An upload or a device being created belongs to this scope; don't let the
+  // scope change under it.
+  useScopeLock(uploading || submitting);
+
   useEffect(() => {
     if (!loading && !user) router.push("/login");
   }, [user, loading, router]);
@@ -75,28 +91,35 @@ export default function DashboardPage() {
     };
   }, []);
 
-  async function loadDevices() {
+  // Only the latest load may update the list (e.g. a reload after creating a
+  // device overtaking the first one).
+  const loadIdRef = useRef(0);
+
+  const loadDevices = useCallback(async () => {
     if (!isMountedRef.current) return;
+    const loadId = ++loadIdRef.current;
+    const isCurrent = () => isMountedRef.current && loadId === loadIdRef.current;
     setDevicesLoading(true);
     setDevicesError(null);
     try {
-      const result = await getDevices();
-      if (isMountedRef.current) setDevices(result);
+      const result = await getDevices(workspaceId);
+      if (isCurrent()) setDevices(result);
     } catch (err) {
-      if (isMountedRef.current) {
+      if (isCurrent()) {
         setDevicesError(
           err instanceof Error ? err.message : "Failed to load devices"
         );
+        if (workspaceId && isWorkspaceUnavailable(err)) reportWorkspaceUnavailable();
       }
     } finally {
-      if (isMountedRef.current) setDevicesLoading(false);
+      if (isCurrent()) setDevicesLoading(false);
     }
-  }
+  }, [workspaceId, reportWorkspaceUnavailable]);
 
   useEffect(() => {
     if (loading || !user) return;
     loadDevices();
-  }, [user, loading]);
+  }, [user, loading, loadDevices]);
 
   function openAddModal() {
     setIsAddOpen(true);
@@ -121,7 +144,8 @@ export default function DashboardPage() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      await createDevice({ name: trimmedName, type: trimmedType });
+      // In a workspace the device is created there; otherwise it's personal.
+      await createDevice({ name: trimmedName, type: trimmedType, ...(workspaceId ? { workspaceId } : {}) });
       await loadDevices();
       setIsAddOpen(false);
       setName("");
@@ -268,6 +292,14 @@ export default function DashboardPage() {
           <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Dashboard</h1>
           <p className="text-slate-400 mt-1 text-sm">
             Device vulnerability analysis overview
+            {" · "}
+            {scope.kind === "workspace" ? (
+              <span className="text-slate-600">
+                Workspace: <span className="font-medium">{scope.name}</span> ({scope.role})
+              </span>
+            ) : (
+              <span className="text-slate-600">Personal</span>
+            )}
           </p>
         </div>
         <button
@@ -277,6 +309,21 @@ export default function DashboardPage() {
           + Upload Device
         </button>
       </div>
+
+      {invitations && invitations.length > 0 && (
+        <div className="mb-6 text-sm bg-blue-50 text-blue-800 px-4 py-2.5 rounded-lg flex items-center justify-between gap-4">
+          <span>
+            You have {invitations.length} pending workspace invitation{invitations.length === 1 ? "" : "s"}.
+          </span>
+          <button
+            type="button"
+            onClick={() => openPanel("invitations")}
+            className="text-blue-700 hover:text-blue-900 font-medium"
+          >
+            Review
+          </button>
+        </div>
+      )}
 
       {/* Stats row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
@@ -308,7 +355,9 @@ export default function DashboardPage() {
             Couldn&apos;t load devices: {devicesError}
           </div>
         ) : devices && devices.length === 0 ? (
-          <div className="px-6 py-8 text-sm text-slate-400">No devices yet.</div>
+          <div className="px-6 py-8 text-sm text-slate-400">
+            {scope.kind === "workspace" ? "No devices in this workspace yet." : "No devices yet."}
+          </div>
         ) : (
           <table className="w-full text-sm">
             <thead>
@@ -374,7 +423,9 @@ export default function DashboardPage() {
             <div className="mb-6">
               <h2 className="text-xl font-bold text-slate-800 tracking-tight">Add Device</h2>
               <p className="text-slate-400 text-sm mt-1">
-                Register a new device for vulnerability analysis
+                {scope.kind === "workspace"
+                  ? `Register a new device in ${scope.name}, shared with its members`
+                  : "Register a new device for vulnerability analysis"}
               </p>
             </div>
 

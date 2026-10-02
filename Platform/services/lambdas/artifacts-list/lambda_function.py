@@ -3,6 +3,7 @@ import json
 import os
 import re
 import boto3
+import testbed_authz
 from boto3.dynamodb.conditions import Key
 
 dynamodb = boto3.resource("dynamodb")
@@ -22,8 +23,14 @@ DEFAULT_RE_STATUS = "not_started"
 def handler(event, context):
     """GET /artifacts, GET /devices/{deviceId}/artifacts and GET /artifacts/batches.
 
-    Query parameters: type, tag, batchId or runId (GET /artifacts only), limit, nextToken.
-    With runId, only the run's outputs are listed.
+    Query parameters: type, tag, batchId, runId or workspaceId (GET /artifacts
+    only), limit, nextToken. With runId, only the run's outputs are listed;
+    with workspaceId, the artifacts of that workspace (members only).
+
+    Every listing has a scope, Personal or one workspace, and an artifact is
+    only returned if the workspaceId on its METADATA matches it (none for
+    Personal). Link rows only find candidates: a DEVICE#, BATCH#, USER# or
+    WORKSPACE# row alone never exposes an artifact from another scope.
 
     Link rows (USER#/ARTIFACT#, DEVICE#/ARTIFACT#type#, BATCH#/ARTIFACT#)
     choose which artifacts are listed, and their METADATA rows are then read
@@ -50,13 +57,20 @@ def handler(event, context):
 
     extra = {}
     relation = None
+    scope = None  # workspaceId the listed artifacts must have; None = Personal
     if event.get("resource") == "/devices/{deviceId}/artifacts":
         device_id = _validate_uuid((event.get("pathParameters") or {}).get("deviceId"))
         if device_id is None:
             return _resp(400, {"error": "deviceId is invalid or missing"})
-        # Same read rule as list-firmware: any USER->DEVICE relationship.
-        if table.get_item(Key={"pk": f"USER#{user_id}", "sk": f"DEVICE#{device_id}"}).get("Item") is None:
+        # Same read rule as list-firmware for a personal device: any
+        # USER->DEVICE relationship. A workspace device: any member.
+        try:
+            device = testbed_authz.require_resource(
+                table, user_id, "DEVICE", device_id, legacy_roles=testbed_authz.ANY_ROLE
+            )
+        except testbed_authz.AuthorizationError:
             return _resp(403, {"error": "Not authorized for this device"})
+        scope = device.get("workspaceId")
         pk = f"DEVICE#{device_id}"
         prefix = f"ARTIFACT#{artifact_type}#" if artifact_type else "ARTIFACT#"
         artifact_type = None  # already applied by the key condition
@@ -64,9 +78,13 @@ def handler(event, context):
         batch_id = _validate_uuid(params["batchId"])
         if batch_id is None:
             return _resp(400, {"error": "batchId is invalid"})
-        if table.get_item(Key={"pk": f"USER#{user_id}", "sk": f"BATCH#{batch_id}"}).get("Item") is None:
+        try:
+            batch = testbed_authz.require_resource(
+                table, user_id, "BATCH", batch_id, legacy_roles=testbed_authz.ANY_ROLE
+            )
+        except testbed_authz.AuthorizationError:
             return _resp(404, {"error": "Upload batch not found"})
-        batch = table.get_item(Key={"pk": f"BATCH#{batch_id}", "sk": "METADATA"}).get("Item") or {}
+        scope = batch.get("workspaceId")
         extra["batch"] = {
             "uploadBatchId": batch_id,
             "fileCount": int(batch.get("fileCount", 0)),
@@ -84,6 +102,21 @@ def handler(event, context):
         pk = f"RUN#{run_id}"
         prefix = "ARTIFACT#"
         relation = "output"
+    elif "workspaceId" in params:
+        workspace_id = _validate_uuid(params["workspaceId"])
+        if workspace_id is None:
+            return _resp(400, {"error": "workspaceId is invalid"})
+        # A non-member gets the same 404 as a workspace that doesn't exist.
+        try:
+            testbed_authz.require_member(table, user_id, workspace_id)
+        except testbed_authz.AuthorizationError:
+            return _resp(404, {"error": "Workspace not found"})
+        if table.get_item(Key={"pk": f"WORKSPACE#{workspace_id}", "sk": "METADATA"}).get("Item") is None:
+            return _resp(404, {"error": "Workspace not found"})
+        scope = workspace_id
+        extra["workspaceId"] = workspace_id
+        pk = f"WORKSPACE#{workspace_id}"
+        prefix = "ARTIFACT#"
     else:
         pk = f"USER#{user_id}"
         prefix = "ARTIFACT#"
@@ -109,6 +142,8 @@ def handler(event, context):
 
     artifacts = []
     for item in sorted(items, key=lambda i: i["artifactId"], reverse=True):
+        if item.get("workspaceId") != scope:
+            continue
         if artifact_type and item.get("type") != artifact_type:
             continue
         if tag and tag not in (item.get("tags") or set()):
@@ -122,7 +157,8 @@ def handler(event, context):
 
 
 def _list_batches(table, user_id):
-    """The caller's 50 most recent upload batches, for the run input picker."""
+    """The caller's 50 most recent personal upload batches, for the run input
+    picker. Workspace batches aren't listed: runs can't use them yet."""
     rows = table.query(
         KeyConditionExpression=Key("pk").eq(f"USER#{user_id}") & Key("sk").begins_with("BATCH#"),
         ScanIndexForward=False, Limit=50,
@@ -138,7 +174,7 @@ def _list_batches(table, user_id):
     batches = [{
         "uploadBatchId": i["uploadBatchId"], "fileCount": int(i.get("fileCount", 0)),
         "totalBytes": int(i.get("totalBytes", 0)), "createdAt": i.get("createdAt"),
-    } for i in items]
+    } for i in items if "workspaceId" not in i]
     return _resp(200, {"batches": sorted(batches, key=lambda b: b["uploadBatchId"], reverse=True)})
 
 
@@ -180,6 +216,9 @@ def _public_view(item):
         "uploadedAt": item.get("uploadedAt"),
         "statusUpdatedAt": item.get("statusUpdatedAt"),
     }
+    if item.get("workspaceId"):
+        # Only on workspace artifacts, so personal responses are unchanged.
+        view["workspaceId"] = item["workspaceId"]
     if item.get("type") == "firmware":
         # Reverse-engineering progress, separate from the upload "status".
         # Firmware stored before the field existed reads as not started.

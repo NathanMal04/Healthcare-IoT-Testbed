@@ -170,6 +170,11 @@ resource "aws_iam_policy" "lambda_dynamodb" {
 # DeleteItem/GetItem permissions — dynamodb:TransactWriteItems itself is not
 # a required grant (see the example policies at
 # https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transaction-apis-iam.html).
+#
+# A workspace device is written with the workspace/device rows instead of the
+# ownership rows, after GetItem of the caller's USER#/WORKSPACE# membership
+# and WORKSPACE#/METADATA; the transaction re-checks both with ConditionCheck
+# items, which need dynamodb:ConditionCheckItem.
 resource "aws_iam_policy" "lambda_dynamodb_create_device" {
   name = "${var.name}-lambda-create-device"
 
@@ -177,14 +182,16 @@ resource "aws_iam_policy" "lambda_dynamodb_create_device" {
     Version = "2012-10-17"
     Statement = [{
       Effect   = "Allow"
-      Action   = "dynamodb:PutItem"
+      Action   = ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:ConditionCheckItem"]
       Resource = module.metadata_table.table_arn
     }]
   })
 }
 
-# list-devices queries the caller's USER#/DEVICE# links, then reads the
-# DEVICE#/METADATA records (for reverseEngineeringStatus) with BatchGetItem.
+# list-devices queries the caller's USER#/DEVICE# links (or, with
+# ?workspaceId, the WORKSPACE#/DEVICE# links after GetItem of the caller's
+# membership and WORKSPACE#/METADATA), then reads the DEVICE#/METADATA
+# records with BatchGetItem.
 resource "aws_iam_policy" "lambda_dynamodb_list_devices" {
   name = "${var.name}-lambda-list-devices"
 
@@ -192,7 +199,7 @@ resource "aws_iam_policy" "lambda_dynamodb_list_devices" {
     Version = "2012-10-17"
     Statement = [{
       Effect   = "Allow"
-      Action   = ["dynamodb:Query", "dynamodb:BatchGetItem"]
+      Action   = ["dynamodb:Query", "dynamodb:BatchGetItem", "dynamodb:GetItem"]
       Resource = module.metadata_table.table_arn
     }]
   })
@@ -306,6 +313,7 @@ module "create_device_fn" {
   source_dir    = "../../../services/lambdas/create-device"
   handler       = "lambda_function.handler"
   runtime       = "python3.12"
+  layers        = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
     METADATA_TABLE_NAME = module.metadata_table.table_name
@@ -327,6 +335,7 @@ module "list_devices_fn" {
   source_dir    = "../../../services/lambdas/list-devices"
   handler       = "lambda_function.handler"
   runtime       = "python3.12"
+  layers        = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
     METADATA_TABLE_NAME = module.metadata_table.table_name
@@ -347,6 +356,7 @@ module "update_device_fn" {
   source_dir    = "../../../services/lambdas/update-device"
   handler       = "lambda_function.handler"
   runtime       = "python3.12"
+  layers        = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
     METADATA_TABLE_NAME = module.metadata_table.table_name
@@ -367,6 +377,7 @@ module "presign_firmware_fn" {
   source_dir    = "../../../services/lambdas/presign-firmware"
   handler       = "lambda_function.handler"
   runtime       = "python3.12"
+  layers        = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
     METADATA_TABLE_NAME     = module.metadata_table.table_name
@@ -395,6 +406,7 @@ module "complete_firmware_fn" {
   source_dir    = "../../../services/lambdas/complete-firmware"
   handler       = "lambda_function.handler"
   runtime       = "python3.12"
+  layers        = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
     METADATA_TABLE_NAME = module.metadata_table.table_name
@@ -420,6 +432,7 @@ module "list_firmware_fn" {
   source_dir    = "../../../services/lambdas/list-firmware"
   handler       = "lambda_function.handler"
   runtime       = "python3.12"
+  layers        = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
     METADATA_TABLE_NAME = module.metadata_table.table_name
@@ -462,7 +475,7 @@ module "api" {
 
 # Integrations defined with the api_lambda_method / api_cors_preflight
 # modules: PATCH /devices/{deviceId} below, plus artifacts.tf, builds.tf,
-# runs.tf and usage.tf.
+# runs.tf, usage.tf and workspaces.tf.
 locals {
   module_route_integration_ids = concat(
     [
@@ -473,6 +486,7 @@ locals {
     local.builds_integration_ids,
     local.runs_integration_ids,
     local.usage_integration_ids,
+    local.workspaces_integration_ids,
   )
 }
 

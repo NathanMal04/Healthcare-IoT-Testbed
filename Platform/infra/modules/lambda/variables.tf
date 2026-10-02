@@ -85,6 +85,12 @@ variable "additional_policy_arns" {
   default     = []
 }
 
+variable "layers" {
+  description = "Lambda layer version ARNs to attach (Zip packages only)."
+  type        = list(string)
+  default     = []
+}
+
 # --- Config ---
 
 variable "environment_variables" {
