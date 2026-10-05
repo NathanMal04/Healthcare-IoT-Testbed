@@ -49,6 +49,9 @@ def handler(event, context):
     if not builds:
         return
     build = builds[0]
+    # The event gives the build's full ARN; builds-api stored the short id
+    # ("project:uuid") that StartBuild returned, and BatchGetBuilds returns.
+    build_id = build["id"]
     env = {v["name"]: v.get("value", "") for v in build.get("environment", {}).get("environmentVariables", [])}
     exported = {v["name"]: v.get("value", "") for v in build.get("exportedEnvironmentVariables", [])}
     target = env.get("TARGET", "")
