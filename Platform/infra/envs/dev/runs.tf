@@ -469,13 +469,17 @@ resource "aws_iam_policy" "runs_api" {
       },
       {
         # Tags go on at submit time (userId, runId) for cost allocation.
-        # Batch checks TagResource on the job definition as well as the job.
+        # With tags, SubmitJob checks TagResource on every resource in the
+        # request: the job, its job definition and its job queue.
         Effect = "Allow"
         Action = "batch:TagResource"
-        Resource = [
-          "arn:aws:batch:${var.aws_region}:${local.account_id}:job/*",
-          "arn:aws:batch:${var.aws_region}:${local.account_id}:job-definition/${var.name}-mod-*",
-        ]
+        Resource = concat(
+          [
+            "arn:aws:batch:${var.aws_region}:${local.account_id}:job/*",
+            "arn:aws:batch:${var.aws_region}:${local.account_id}:job-definition/${var.name}-mod-*",
+          ],
+          values(local.job_queues),
+        )
       },
       {
         Effect   = "Allow"
