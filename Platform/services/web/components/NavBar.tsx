@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { usePathname, useRouter } from "next/navigation";
+import WorkspaceSwitcher from "@/app/components/WorkspaceSwitcher";
 
 const LINKS = [
   { href: "/", label: "Dashboard" },
@@ -53,6 +54,7 @@ export default function NavBar() {
       </div>
       {user && (
         <div className="flex items-center gap-4">
+          <WorkspaceSwitcher />
           <span className="text-sm text-slate-400">{user.username}</span>
           <button
             onClick={handleSignOut}

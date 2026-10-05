@@ -2,6 +2,7 @@ import json
 import os
 import re
 import boto3
+import testbed_authz
 from datetime import datetime, timezone
 from botocore.exceptions import ClientError
 
@@ -38,8 +39,9 @@ def handler(event, context):
     # Same ownership rule as the other artifact endpoints (artifacts-presign
     # retry/parts, artifacts-get): an owner link, and 404 otherwise so the
     # endpoint doesn't reveal which artifact ids exist.
-    link = table.get_item(Key={"pk": f"USER#{user_id}", "sk": f"ARTIFACT#{artifact_id}"}).get("Item")
-    if link is None or link.get("role") != "owner":
+    try:
+        item = testbed_authz.require_resource(table, user_id, "ARTIFACT", artifact_id, legacy_roles=("owner",))
+    except testbed_authz.AuthorizationError:
         return _resp(404, {"error": "Artifact not found"})
 
     unsupported = sorted(set(body) - UPDATABLE_FIELDS)
@@ -53,9 +55,6 @@ def handler(event, context):
         })
 
     key = {"pk": f"ARTIFACT#{artifact_id}", "sk": "METADATA"}
-    item = table.get_item(Key=key).get("Item")
-    if item is None:
-        return _resp(404, {"error": "Artifact not found"})
     if item.get("type") != "firmware":
         return _resp(400, {"error": "reverseEngineeringStatus is only supported for firmware artifacts"})
 

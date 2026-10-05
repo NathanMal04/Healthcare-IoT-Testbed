@@ -3,6 +3,7 @@ import os
 import re
 import urllib.parse
 import boto3
+import testbed_authz
 from boto3.dynamodb.conditions import Key
 
 s3 = boto3.client("s3")
@@ -26,11 +27,13 @@ def handler(event, context):
         return _resp(400, {"error": "artifactId is invalid or missing"})
 
     table = dynamodb.Table(TABLE)
-    if table.get_item(Key={"pk": f"USER#{user_id}", "sk": f"ARTIFACT#{artifact_id}"}).get("Item") is None:
-        return _resp(404, {"error": "Artifact not found"})
-
-    item = table.get_item(Key={"pk": f"ARTIFACT#{artifact_id}", "sk": "METADATA"}).get("Item")
-    if item is None:
+    # Any USER#/ARTIFACT# link may read, whatever its role; 404 otherwise so
+    # the endpoint doesn't reveal which artifact ids exist.
+    try:
+        item = testbed_authz.require_resource(
+            table, user_id, "ARTIFACT", artifact_id, legacy_roles=testbed_authz.ANY_ROLE
+        )
+    except testbed_authz.AuthorizationError:
         return _resp(404, {"error": "Artifact not found"})
 
     if event.get("resource") == "/artifacts/{artifactId}/download":
@@ -83,6 +86,9 @@ def _public_view(item):
         "uploadedAt": item.get("uploadedAt"),
         "statusUpdatedAt": item.get("statusUpdatedAt"),
     }
+    if item.get("workspaceId"):
+        # Only on workspace artifacts, so personal responses are unchanged.
+        view["workspaceId"] = item["workspaceId"]
     if item.get("type") == "firmware":
         # Reverse-engineering progress, separate from the upload "status".
         # Firmware stored before the field existed reads as not started.

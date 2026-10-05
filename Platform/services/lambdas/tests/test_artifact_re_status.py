@@ -12,6 +12,7 @@ import copy
 import importlib.util
 import json
 import os
+import sys
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -24,6 +25,8 @@ os.environ.setdefault("METADATA_TABLE_NAME", "metadata")
 os.environ.setdefault("DATA_LAKE_BUCKET", "data-lake")
 
 LAMBDAS = Path(__file__).resolve().parent.parent
+# The shared layer (testbed_authz), which Lambda puts on the path from /opt/python.
+sys.path.insert(0, str(LAMBDAS / "_shared" / "python"))
 TABLE = os.environ["METADATA_TABLE_NAME"]
 
 USER = "user-sub-1"
@@ -33,6 +36,7 @@ FIRMWARE = "0192a000-0000-7000-8000-000000000001"
 PCAP = "0192a000-0000-7000-8000-000000000002"
 LEGACY_FIRMWARE = "0192a000-0000-7000-8000-000000000003"
 MISSING = "0192a000-0000-7000-8000-0000000000ff"
+WORKSPACE = "0192b000-0000-7000-8000-000000000001"
 SHA = "a" * 64
 
 
@@ -78,6 +82,7 @@ def artifact(artifact_id, artifact_type, owner=USER, **extra):
         "artifactId": artifact_id, "name": f"{artifact_type}.bin", "type": artifact_type,
         "origin": "upload", "status": "ready", "statusUpdatedAt": "2026-09-01T00:00:00+00:00",
         "sha256": SHA, "sizeBytes": 10, "originalFilename": f"{artifact_type}.bin",
+        "s3Bucket": "data-lake", "s3Key": f"artifacts/{artifact_id}/attempt-1",
         "attemptId": "attempt-1", "uploadMode": "single", "createdBy": owner,
         "createdAt": "2026-09-01T00:00:00+00:00", "updatedAt": "2026-09-01T00:00:00+00:00",
         **extra,
@@ -96,7 +101,9 @@ def standard_rows():
         # Stored before Stage 2: no reverseEngineeringStatus attribute.
         + artifact(LEGACY_FIRMWARE, "firmware", version="0.9")
         + artifact(PCAP, "pcap")
-        + [{"pk": f"USER#{USER}", "sk": f"DEVICE#{DEVICE}", "entity": "user-device", "role": "owner", "name": "Pump"}]
+        + [{"pk": f"USER#{USER}", "sk": f"DEVICE#{DEVICE}", "entity": "user-device", "role": "owner", "name": "Pump"},
+           # create-device always writes the device record with its links.
+           {"pk": f"DEVICE#{DEVICE}", "sk": "METADATA", "entity": "device", "name": "Pump"}]
     )
 
 
@@ -162,8 +169,13 @@ class PresignTests(unittest.TestCase):
     def setUp(self):
         self.module = load_lambda("artifacts-presign")
         self.table = mock.Mock()
+        rows = {
+            (f"USER#{USER}", f"DEVICE#{DEVICE}"): {"role": "owner", "name": "Pump"},
+            # create-device always writes the device record with its links.
+            (f"DEVICE#{DEVICE}", "METADATA"): {"pk": f"DEVICE#{DEVICE}", "sk": "METADATA", "name": "Pump"},
+        }
         self.table.get_item.side_effect = lambda Key: (
-            {"Item": {"role": "owner", "name": "Pump"}} if Key == {"pk": f"USER#{USER}", "sk": f"DEVICE#{DEVICE}"} else {}
+            {"Item": dict(rows[(Key["pk"], Key["sk"])])} if (Key["pk"], Key["sk"]) in rows else {}
         )
         self.module.dynamodb = mock.Mock(Table=mock.Mock(return_value=self.table))
         self.module.client = mock.Mock()
@@ -392,6 +404,49 @@ class UpdateTests(unittest.TestCase):
     def test_cors_header(self):
         resp = self.patch({"reverseEngineeringStatus": "complete"})
         self.assertEqual(resp["headers"]["Access-Control-Allow-Origin"], "https://vzoniq.com")
+
+    # Hypothetical workspace firmware: nothing writes workspaceId yet (Stage 3A.4).
+
+    def test_workspace_member_can_update(self):
+        add_workspace(self.table, FIRMWARE, member=OTHER_USER)
+        resp = self.patch({"reverseEngineeringStatus": "complete"}, user=OTHER_USER)
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertEqual(self.stored()["reverseEngineeringStatus"], "complete")
+
+    def test_legacy_owner_of_workspace_artifact_needs_membership(self):
+        add_workspace(self.table, FIRMWARE, member=OTHER_USER)
+        self.assertEqual(self.patch({"reverseEngineeringStatus": "complete"})["statusCode"], 404)
+        self.assertEqual(self.table.update_calls, [])
+
+
+class WorkspaceReadTests(unittest.TestCase):
+    """artifacts-get on a hypothetical workspace artifact."""
+
+    def setUp(self):
+        self.table = FakeTable(standard_rows())
+        add_workspace(self.table, FIRMWARE, member=OTHER_USER)
+        self.module = load_lambda("artifacts-get")
+        self.module.dynamodb = FakeResource(self.table)
+
+    def get(self, user):
+        return self.module.handler(
+            event(user=user, resource="/artifacts/{artifactId}", path={"artifactId": FIRMWARE}), None
+        )
+
+    def test_member_can_read(self):
+        resp = self.get(OTHER_USER)
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertEqual(response_body(resp)["artifact"]["artifactId"], FIRMWARE)
+
+    def test_legacy_owner_without_membership_is_404(self):
+        self.assertEqual(self.get(USER)["statusCode"], 404)
+
+
+def add_workspace(table, artifact_id, member):
+    table.items[(f"ARTIFACT#{artifact_id}", "METADATA")]["workspaceId"] = WORKSPACE
+    table.items[(f"USER#{member}", f"WORKSPACE#{WORKSPACE}")] = {
+        "pk": f"USER#{member}", "sk": f"WORKSPACE#{WORKSPACE}", "role": "member",
+    }
 
 
 if __name__ == "__main__":

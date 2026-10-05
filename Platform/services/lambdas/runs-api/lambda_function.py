@@ -227,7 +227,10 @@ def _resolve_inputs(table, user_id, inputs):
         source = {k: v for k, v in (("type", artifact_type), ("tag", tag)) if v} or {"all": True}
 
     items = _batch_get([{"pk": f"ARTIFACT#{a}", "sk": "METADATA"} for a in ids])
-    items = [i for i in items if i.get("createdBy") == user_id]
+    # Runs aren't workspace-aware yet: a workspace artifact is never an input,
+    # even one the caller uploaded (createdBy alone must not outlive their
+    # membership, and the manifest would hand out download URLs).
+    items = [i for i in items if i.get("createdBy") == user_id and "workspaceId" not in i]
     if artifact_type:
         items = [i for i in items if i.get("type") == artifact_type]
     if tag:

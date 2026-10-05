@@ -2,6 +2,7 @@ import json
 import os
 import re
 import boto3
+import testbed_authz
 from boto3.dynamodb.conditions import Key
 
 dynamodb = boto3.resource("dynamodb")
@@ -77,8 +78,16 @@ def _public_view(item):
 
 
 def _has_relationship(table, user_id, device_id):
-    item = table.get_item(Key={"pk": f"USER#{user_id}", "sk": f"DEVICE#{device_id}"}).get("Item")
-    return item is not None
+    # Any USER#/DEVICE# relationship may read, as before, but only for a
+    # personal device: the old FIRMWARE# rows aren't workspace-aware, so a
+    # workspace device is refused even with a leftover USER#/DEVICE# row.
+    try:
+        item = testbed_authz.require_resource(
+            table, user_id, "DEVICE", device_id, legacy_roles=testbed_authz.ANY_ROLE
+        )
+    except testbed_authz.AuthorizationError:
+        return False
+    return "workspaceId" not in item
 
 
 def _validate_device_id(raw):

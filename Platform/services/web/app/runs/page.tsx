@@ -15,6 +15,7 @@ import {
 } from "@/lib/runs";
 import { formatBytes, getArtifactDownloadUrl, listArtifacts, type Artifact } from "@/lib/artifacts";
 import NewRunForm from "@/app/components/NewRunForm";
+import { useWorkspace } from "@/context/WorkspaceContext";
 import {
   StatusBadge,
   TextModal,
@@ -233,6 +234,7 @@ function RunView({ runId }: { runId: string }) {
 function RunsContent() {
   const params = useSearchParams();
   const router = useRouter();
+  const { scope } = useWorkspace();
   const runId = params.get("id");
   const prefill = {
     moduleId: params.get("module") ?? undefined,
@@ -271,6 +273,13 @@ function RunsContent() {
           </button>
         )}
       </div>
+
+      {scope.kind === "workspace" && (
+        <p className="text-sm bg-amber-50 text-amber-800 px-4 py-2.5 rounded-lg">
+          Workspace analysis runs are not available yet. Runs here use your Personal files and devices, not{" "}
+          {scope.name}&apos;s.
+        </p>
+      )}
 
       {creating && (
         <NewRunForm

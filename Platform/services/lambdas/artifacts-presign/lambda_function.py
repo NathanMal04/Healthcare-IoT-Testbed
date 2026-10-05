@@ -6,6 +6,7 @@ import secrets
 import time
 import uuid
 import boto3
+import testbed_authz
 from datetime import datetime, timedelta, timezone
 from boto3.dynamodb.types import TypeSerializer
 from botocore.config import Config
@@ -123,8 +124,11 @@ def _handle_presign(table, user_id, body):
         return _resp(400, {"error": f"At most {MAX_FILES_PER_REQUEST} files per request"})
 
     tags = _validate_tags(body.get("tags"))
-    devices = _resolve_devices(table, user_id, body.get("deviceIds"))
-    batch_id = _resolve_batch(table, user_id, body.get("uploadBatchId"))
+    # The devices decide the scope: no devices or only personal devices make
+    # personal artifacts (as before); devices of one workspace make artifacts
+    # of that workspace.
+    devices, workspace_id = _resolve_devices(table, user_id, body.get("deviceIds"))
+    batch_id = _resolve_batch(table, user_id, body.get("uploadBatchId"), workspace_id)
 
     results = []
     accepted_count = 0
@@ -134,7 +138,7 @@ def _handle_presign(table, user_id, body):
         client_ref = _client_ref(raw, index)
         try:
             spec = _validate_file(raw)
-            result = _create_artifact(user_id, batch_id, tags, devices, spec)
+            result = _create_artifact(user_id, batch_id, tags, devices, spec, workspace_id)
         except RequestError as e:
             results.append({"clientRef": client_ref, "ok": False, "status": e.status, "error": e.message})
             continue
@@ -149,10 +153,13 @@ def _handle_presign(table, user_id, body):
             ExpressionAttributeValues={":n": accepted_count, ":b": accepted_bytes, ":now": _now()},
         )
 
-    return _resp(200, {"uploadBatchId": batch_id, "results": results})
+    body = {"uploadBatchId": batch_id, "results": results}
+    if workspace_id:
+        body["workspaceId"] = workspace_id
+    return _resp(200, body)
 
 
-def _create_artifact(user_id, batch_id, tags, devices, spec):
+def _create_artifact(user_id, batch_id, tags, devices, spec, workspace_id=None):
     artifact_id = _uuid7()
     attempt_id = str(uuid.uuid4())
     s3_key = _build_s3_key(artifact_id, attempt_id)
@@ -190,6 +197,10 @@ def _create_artifact(user_id, batch_id, tags, devices, spec):
         item["tags"] = set(tags)
     if devices:
         item["deviceIds"] = set(devices)
+    if workspace_id:
+        # Authoritative: testbed_authz authorizes this artifact by membership
+        # of this workspace, never by USER#/ARTIFACT# links.
+        item["workspaceId"] = workspace_id
 
     upload_id = None
     if size <= SINGLE_UPLOAD_MAX_BYTES:
@@ -202,16 +213,34 @@ def _create_artifact(user_id, batch_id, tags, devices, spec):
         item["partSize"] = part_size
         item["partCount"] = -(-size // part_size)
 
+    if workspace_id:
+        # A workspace artifact has workspace links, which are listing rows
+        # only, and no ownership links.
+        scope_items = [
+            _put({
+                "pk": f"WORKSPACE#{workspace_id}", "sk": f"ARTIFACT#{artifact_id}", "entity": "workspace-artifact",
+                "name": spec["name"], "type": spec["type"], "createdBy": user_id, "createdAt": now,
+            }),
+            _put({
+                "pk": f"ARTIFACT#{artifact_id}", "sk": f"WORKSPACE#{workspace_id}", "entity": "artifact-workspace",
+                "createdAt": now,
+            }),
+        ]
+    else:
+        scope_items = [
+            _put({
+                "pk": f"USER#{user_id}", "sk": f"ARTIFACT#{artifact_id}", "entity": "user-artifact",
+                "role": "owner", "name": spec["name"], "type": spec["type"], "createdAt": now,
+            }),
+            _put({
+                "pk": f"ARTIFACT#{artifact_id}", "sk": f"USER#{user_id}", "entity": "artifact-user",
+                "role": "owner",
+            }),
+        ]
+
     transact_items = [
         _put(item),
-        _put({
-            "pk": f"USER#{user_id}", "sk": f"ARTIFACT#{artifact_id}", "entity": "user-artifact",
-            "role": "owner", "name": spec["name"], "type": spec["type"], "createdAt": now,
-        }),
-        _put({
-            "pk": f"ARTIFACT#{artifact_id}", "sk": f"USER#{user_id}", "entity": "artifact-user",
-            "role": "owner",
-        }),
+        *scope_items,
         _put({
             "pk": f"BATCH#{batch_id}", "sk": f"ARTIFACT#{artifact_id}", "entity": "batch-artifact",
             "name": spec["name"], "type": spec["type"],
@@ -226,6 +255,12 @@ def _create_artifact(user_id, batch_id, tags, devices, spec):
             "pk": f"ARTIFACT#{artifact_id}", "sk": f"DEVICE#{device_id}",
             "entity": "artifact-device", "name": device_name,
         }))
+
+    # The caller must still be a member when the artifact is written.
+    membership_index = None
+    if workspace_id:
+        membership_index = len(transact_items)
+        transact_items.append(_membership_check(user_id, workspace_id))
 
     # Firmware versions are unique per device. The guard rows are the last
     # items in the transaction so a cancellation reason can be mapped back to
@@ -247,6 +282,9 @@ def _create_artifact(user_id, batch_id, tags, devices, spec):
             _abort_multipart_upload(s3_key, upload_id)
         if e.response["Error"]["Code"] == "TransactionCanceledException":
             reasons = e.response.get("CancellationReasons", [])
+            if (membership_index is not None and membership_index < len(reasons)
+                    and reasons[membership_index].get("Code") == "ConditionalCheckFailed"):
+                raise RequestError(403, "Not authorized for this workspace")
             guard_start = len(transact_items) - len(guard_devices)
             for offset, reason in enumerate(reasons[guard_start:]):
                 if reason.get("Code") == "ConditionalCheckFailed":
@@ -529,64 +567,105 @@ def _validate_tags(raw):
 
 
 def _resolve_devices(table, user_id, raw):
-    """Returns {deviceId: deviceName} for devices the caller owns."""
+    """Returns ({deviceId: deviceName}, workspaceId or None).
+
+    Each device is authorized by its own scope (testbed_authz): the owner of a
+    personal device, or a member of a workspace device's workspace. All of
+    them must share one scope, which becomes the artifacts' scope.
+    """
     if raw is None:
-        return {}
+        return {}, None
     if not isinstance(raw, list) or len(raw) > MAX_DEVICES:
         raise RequestError(400, f"deviceIds must be a list of at most {MAX_DEVICES} ids")
 
-    devices = {}
+    devices, scopes = {}, set()
     for device_id in raw:
         if _validate_uuid(device_id) is None:
             raise RequestError(400, "deviceIds contains an invalid id")
         if device_id in devices:
             continue
-        link = table.get_item(Key={"pk": f"USER#{user_id}", "sk": f"DEVICE#{device_id}"}).get("Item")
-        if link is None or link.get("role") != "owner":
+        try:
+            item = testbed_authz.require_resource(table, user_id, "DEVICE", device_id, legacy_roles=("owner",))
+        except testbed_authz.AuthorizationError:
             raise RequestError(403, f"Not authorized for device {device_id}")
-        devices[device_id] = link.get("name") or device_id
-    return devices
+        devices[device_id] = item.get("name") or device_id
+        scopes.add(item.get("workspaceId"))
+
+    if len(scopes) > 1:
+        raise RequestError(400, "All devices in one upload must be personal or all belong to the same workspace")
+    return devices, next(iter(scopes), None)
 
 
-def _resolve_batch(table, user_id, raw):
-    """Returns an upload batch id, creating the batch when none is given."""
+def _resolve_batch(table, user_id, raw, workspace_id=None):
+    """Returns an upload batch id, creating the batch when none is given.
+
+    A batch has the scope of the uploads in it: personal (owned through
+    USER#/BATCH# links) or one workspace (workspaceId on its METADATA), and a
+    batch can only be reused for uploads of the same scope.
+    """
     if raw is not None:
         batch_id = _validate_uuid(raw)
         if batch_id is None:
             raise RequestError(400, "uploadBatchId is invalid")
-        link = table.get_item(Key={"pk": f"USER#{user_id}", "sk": f"BATCH#{batch_id}"}).get("Item")
-        if link is None or link.get("role") != "owner":
+        try:
+            batch = testbed_authz.require_resource(table, user_id, "BATCH", batch_id, legacy_roles=("owner",))
+        except testbed_authz.AuthorizationError:
             raise RequestError(404, "Upload batch not found")
+        if batch.get("workspaceId") != workspace_id:
+            raise RequestError(409, "This upload batch belongs to a different workspace or to Personal")
         return batch_id
 
     batch_id = _uuid7()
     now = _now()
-    client.transact_write_items(TransactItems=[
-        _put({
-            "pk": f"BATCH#{batch_id}", "sk": "METADATA", "entity": "upload-batch",
-            "uploadBatchId": batch_id, "fileCount": 0, "totalBytes": 0,
-            "createdBy": user_id, "createdAt": now, "updatedAt": now,
-        }),
-        _put({
-            "pk": f"USER#{user_id}", "sk": f"BATCH#{batch_id}", "entity": "user-batch",
-            "role": "owner", "createdAt": now,
-        }),
-        _put({
-            "pk": f"BATCH#{batch_id}", "sk": f"USER#{user_id}", "entity": "batch-user",
-            "role": "owner",
-        }),
-    ])
+    batch = {
+        "pk": f"BATCH#{batch_id}", "sk": "METADATA", "entity": "upload-batch",
+        "uploadBatchId": batch_id, "fileCount": 0, "totalBytes": 0,
+        "createdBy": user_id, "createdAt": now, "updatedAt": now,
+    }
+    if not workspace_id:
+        client.transact_write_items(TransactItems=[
+            _put(batch),
+            _put({
+                "pk": f"USER#{user_id}", "sk": f"BATCH#{batch_id}", "entity": "user-batch",
+                "role": "owner", "createdAt": now,
+            }),
+            _put({
+                "pk": f"BATCH#{batch_id}", "sk": f"USER#{user_id}", "entity": "batch-user",
+                "role": "owner",
+            }),
+        ])
+        return batch_id
+
+    batch["workspaceId"] = workspace_id
+    try:
+        client.transact_write_items(TransactItems=[
+            _put(batch),
+            _put({
+                "pk": f"WORKSPACE#{workspace_id}", "sk": f"BATCH#{batch_id}", "entity": "workspace-batch",
+                "createdBy": user_id, "createdAt": now,
+            }),
+            _put({
+                "pk": f"BATCH#{batch_id}", "sk": f"WORKSPACE#{workspace_id}", "entity": "batch-workspace",
+                "createdAt": now,
+            }),
+            _membership_check(user_id, workspace_id),
+        ])
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "TransactionCanceledException":
+            reasons = e.response.get("CancellationReasons", [])
+            if len(reasons) == 4 and reasons[3].get("Code") == "ConditionalCheckFailed":
+                raise RequestError(403, "Not authorized for this workspace")
+        raise
     return batch_id
 
 
 def _get_owned_artifact(table, user_id, artifact_id):
-    link = table.get_item(Key={"pk": f"USER#{user_id}", "sk": f"ARTIFACT#{artifact_id}"}).get("Item")
-    if link is None or link.get("role") != "owner":
+    # The owner of a personal artifact, or any member of a workspace
+    # artifact's workspace; 404 otherwise so ids aren't revealed.
+    try:
+        return testbed_authz.require_resource(table, user_id, "ARTIFACT", artifact_id, legacy_roles=("owner",))
+    except testbed_authz.AuthorizationError:
         raise RequestError(404, "Artifact not found")
-    item = table.get_item(Key={"pk": f"ARTIFACT#{artifact_id}", "sk": "METADATA"}).get("Item")
-    if item is None:
-        raise RequestError(404, "Artifact not found")
-    return item
 
 
 def _is_stale(item):
@@ -645,6 +724,23 @@ def _sha256_hex_to_base64(sha256_hex):
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def _membership_check(user_id, workspace_id):
+    # Re-checks the caller's membership inside the write transaction.
+    roles = {f":role{i}": role for i, role in enumerate(testbed_authz.WORKSPACE_ROLES)}
+    return {
+        "ConditionCheck": {
+            "TableName": TABLE,
+            "Key": {
+                "pk": serializer.serialize(f"USER#{user_id}"),
+                "sk": serializer.serialize(f"WORKSPACE#{workspace_id}"),
+            },
+            "ConditionExpression": f"#role IN ({', '.join(roles)})",
+            "ExpressionAttributeNames": {"#role": "role"},
+            "ExpressionAttributeValues": {k: serializer.serialize(v) for k, v in roles.items()},
+        }
+    }
 
 
 def _put(item):

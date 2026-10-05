@@ -4,6 +4,7 @@ import os
 import re
 import uuid
 import boto3
+import testbed_authz
 from datetime import datetime, timezone
 from botocore.exceptions import ClientError
 
@@ -252,8 +253,14 @@ def _validate_device_id(raw):
 
 
 def _is_owner(table, user_id, device_id):
-    item = table.get_item(Key={"pk": f"USER#{user_id}", "sk": f"DEVICE#{device_id}"}).get("Item")
-    return item is not None and item.get("role") == "owner"
+    # The old firmware routes and their FIRMWARE# rows only serve personal
+    # devices: a workspace device is refused, even for a member and even if
+    # a USER#/DEVICE# row was left behind.
+    try:
+        item = testbed_authz.require_resource(table, user_id, "DEVICE", device_id, legacy_roles=("owner",))
+    except testbed_authz.AuthorizationError:
+        return False
+    return "workspaceId" not in item
 
 
 def _resp(status, body):

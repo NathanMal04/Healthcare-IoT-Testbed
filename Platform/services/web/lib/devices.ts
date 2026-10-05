@@ -10,12 +10,16 @@ export {
 export interface Device {
   deviceId: string;
   name: string;
+  /** Personal devices: the ownership role. Workspace devices: the user's role in the workspace. */
   role: string;
   reverseEngineeringStatus: ReverseEngineeringStatus;
+  /** Set only on workspace devices. */
+  workspaceId?: string;
 }
 
-export async function getDevices(): Promise<Device[]> {
-  const data = await apiRequest<{ devices: Device[] }>("GET", "/devices");
+/** Personal devices, or the devices of a workspace when workspaceId is given. */
+export async function getDevices(workspaceId?: string): Promise<Device[]> {
+  const data = await apiRequest<{ devices: Device[] }>("GET", "/devices", { query: { workspaceId } });
   // Devices without the attribute haven't been started.
   return data.devices.map((device) => ({
     ...device,
@@ -26,6 +30,8 @@ export async function getDevices(): Promise<Device[]> {
 export interface NewDevice {
   name: string;
   type: string;
+  /** Creates the device in this workspace; omitted for a personal device. */
+  workspaceId?: string;
 }
 
 export interface CreatedDevice {
@@ -35,6 +41,8 @@ export interface CreatedDevice {
   status: string;
   reverseEngineeringStatus: ReverseEngineeringStatus;
   dataPath: string;
+  workspaceId?: string;
+  createdBy?: string;
   createdAt: string;
   updatedAt: string;
 }

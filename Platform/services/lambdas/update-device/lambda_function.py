@@ -2,6 +2,7 @@ import json
 import os
 import re
 import boto3
+import testbed_authz
 from datetime import datetime, timezone
 from botocore.exceptions import ClientError
 
@@ -40,9 +41,16 @@ def handler(event, context):
 
     table = dynamodb.Table(TABLE)
 
-    # Same rule as the other device mutation endpoints (presign-firmware,
-    # complete-firmware, artifacts-presign): only an owner may change it.
-    if not _is_owner(table, user_id, device_id):
+    # A personal device (no workspaceId on its METADATA) keeps the rule of the
+    # other device mutation endpoints (presign-firmware, complete-firmware,
+    # artifacts-presign): only an owner may change it. A workspace device may
+    # be changed by any member of its workspace, and only by members: a
+    # leftover USER#/DEVICE# owner row is never consulted for it.
+    try:
+        testbed_authz.require_resource(table, user_id, "DEVICE", device_id, legacy_roles=("owner",))
+    except testbed_authz.NotFound:
+        return _resp(404, {"error": "Device not found"})
+    except testbed_authz.Forbidden:
         return _resp(403, {"error": "Not authorized for this device"})
 
     unsupported = sorted(set(body) - UPDATABLE_FIELDS)
@@ -80,11 +88,6 @@ def handler(event, context):
         "reverseEngineeringStatus": updated["reverseEngineeringStatus"],
         "updatedAt": updated.get("updatedAt"),
     })
-
-
-def _is_owner(table, user_id, device_id):
-    item = table.get_item(Key={"pk": f"USER#{user_id}", "sk": f"DEVICE#{device_id}"}).get("Item")
-    return item is not None and item.get("role") == "owner"
 
 
 def _validate_device_id(raw):

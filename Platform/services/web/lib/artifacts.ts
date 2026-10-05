@@ -30,6 +30,8 @@ export interface Artifact {
   createdAt: string;
   uploadedAt: string | null;
   statusUpdatedAt: string | null;
+  /** Set only on workspace artifacts. */
+  workspaceId?: string;
   /**
    * Reverse-engineering progress; firmware only, absent for other types.
    * Separate from `status`, which is the upload lifecycle.
@@ -93,6 +95,8 @@ export interface ListParams {
   tag?: string;
   batchId?: string;
   runId?: string;
+  /** Lists a workspace's artifacts instead of Personal ones (GET /artifacts only). */
+  workspaceId?: string;
   limit?: number;
   nextToken?: string;
 }
