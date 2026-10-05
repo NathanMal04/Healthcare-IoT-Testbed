@@ -475,7 +475,7 @@ module "api" {
 
 # Integrations defined with the api_lambda_method / api_cors_preflight
 # modules: PATCH /devices/{deviceId} below, plus artifacts.tf, builds.tf,
-# runs.tf, usage.tf and workspaces.tf.
+# runs.tf, usage.tf, workspaces.tf and cves.tf.
 locals {
   module_route_integration_ids = concat(
     [
@@ -487,6 +487,7 @@ locals {
     local.runs_integration_ids,
     local.usage_integration_ids,
     local.workspaces_integration_ids,
+    local.cves_integration_ids,
   )
 }
 

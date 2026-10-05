@@ -5,8 +5,8 @@
 #
 # Functions using it: create-device, list-devices, update-device and the old
 # presign-firmware, complete-firmware and list-firmware (main.tf), every
-# artifacts-* function except artifacts-verify (artifacts.tf), and
-# workspaces-api (workspaces.tf).
+# artifacts-* function except artifacts-verify (artifacts.tf), workspaces-api
+# (workspaces.tf) and cves-api (cves.tf).
 
 data "archive_file" "shared_layer" {
   type        = "zip"
