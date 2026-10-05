@@ -113,7 +113,9 @@ resource "aws_vpc_endpoint" "s3" {
         Sid       = "DataLake"
         Effect    = "Allow"
         Principal = "*"
-        Action    = ["s3:GetObject", "s3:PutObject"]
+        # Output uploads carry the upload-state=pending tag, which S3 also
+        # checks as s3:PutObjectTagging.
+        Action    = ["s3:GetObject", "s3:PutObject", "s3:PutObjectTagging"]
         Resource  = "${var.data_lake_bucket_arn}/*"
         Condition = { StringEquals = { "aws:PrincipalAccount" = var.account_id } }
       },
