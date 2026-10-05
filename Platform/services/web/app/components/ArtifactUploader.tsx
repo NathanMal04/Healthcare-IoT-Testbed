@@ -11,6 +11,8 @@ import {
 import { UploadQueue, type QueueItem, type QueueStage } from "@/lib/uploadQueue";
 import type { Device } from "@/lib/devices";
 import { useScopeLock } from "@/context/WorkspaceContext";
+import { UploadCloud } from "lucide-react";
+import { Alert, cardClass, inputClass as sharedInputClass, labelClass, primaryButton, secondaryButton } from "@/app/components/ui";
 
 interface ArtifactUploaderProps {
   /** The devices of the current scope; the upload's scope comes from the ones chosen. */
@@ -37,10 +39,10 @@ const STAGE_LABELS: Record<QueueStage, string> = {
 
 const STAGE_STYLES: Record<QueueStage, string> = {
   queued: "text-slate-500",
-  hashing: "text-blue-600",
-  reserving: "text-blue-600",
-  uploading: "text-blue-600",
-  verifying: "text-blue-600",
+  hashing: "text-brand-600",
+  reserving: "text-brand-600",
+  uploading: "text-brand-600",
+  verifying: "text-brand-600",
   ready: "text-emerald-700",
   failed: "text-red-600",
 };
@@ -222,14 +224,13 @@ export default function ArtifactUploader({ devices, requireDevice = false, onFin
     return { totalBytes, doneBytes, counts };
   }, [items]);
 
-  const inputClass =
-    "w-full px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50";
+  const inputClass = sharedInputClass;
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 space-y-5">
+    <div className={`${cardClass} p-5 space-y-5`}>
       <div>
-        <h2 className="font-semibold text-slate-700">Upload files</h2>
-        <p className="text-xs text-slate-400 mt-1">
+        <h2 className="text-sm font-semibold text-slate-800">Upload files</h2>
+        <p className="text-xs text-slate-500 mt-1">
           Firmware, pcaps, logs, binaries or anything else, up to 5 GiB each. Files uploaded together
           form one upload batch.
         </p>
@@ -248,23 +249,18 @@ export default function ArtifactUploader({ devices, requireDevice = false, onFin
             addFiles(await filesFromDrop(e.dataTransfer));
           }}
           className={`border-2 border-dashed rounded-xl px-6 py-8 text-center transition-colors ${
-            dragging ? "border-blue-400 bg-blue-50" : "border-slate-200"
+            dragging ? "border-brand-500 bg-brand-50" : "border-line-strong bg-surface-muted"
           }`}
         >
-          <p className="text-sm text-slate-500">Drop files or folders here</p>
-          <div className="mt-3 flex items-center justify-center gap-3">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="text-sm bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg"
-            >
+          <UploadCloud className={`mx-auto h-8 w-8 ${dragging ? "text-brand-600" : "text-slate-400"}`} aria-hidden="true" />
+          <p className="text-sm text-slate-600 mt-2">
+            <span className="font-medium text-slate-800">Drop files or folders here</span>, or choose them below
+          </p>
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+            <button type="button" onClick={() => fileInputRef.current?.click()} className={secondaryButton}>
               Choose files
             </button>
-            <button
-              type="button"
-              onClick={() => folderInputRef.current?.click()}
-              className="text-sm bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg"
-            >
+            <button type="button" onClick={() => folderInputRef.current?.click()} className={secondaryButton}>
               Choose folder
             </button>
           </div>
@@ -297,17 +293,17 @@ export default function ArtifactUploader({ devices, requireDevice = false, onFin
       )}
 
       {skipped.length > 0 && (
-        <p className="text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded-lg">
+        <Alert tone="warning">
           Skipped {skipped.length} file{skipped.length === 1 ? "" : "s"}: {skipped.slice(0, 5).join(", ")}
           {skipped.length > 5 ? ", …" : ""}
-        </p>
+        </Alert>
       )}
 
       {items.length > 0 && (
         <>
           <div className="grid md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium text-slate-500 uppercase tracking-wide mb-1.5">
+              <label className={labelClass}>
                 Tags (all files)
               </label>
               <input
@@ -320,7 +316,7 @@ export default function ArtifactUploader({ devices, requireDevice = false, onFin
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-500 uppercase tracking-wide mb-1.5">
+              <label className={labelClass}>
                 {requireDevice ? "Workspace devices (all files, at least one)" : "Devices (all files, optional)"}
               </label>
               {devices.length === 0 ? (
@@ -335,7 +331,7 @@ export default function ArtifactUploader({ devices, requireDevice = false, onFin
                       <label
                         key={device.deviceId}
                         className={`text-xs px-2.5 py-1.5 rounded-lg border cursor-pointer ${
-                          checked ? "border-blue-400 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600"
+                          checked ? "border-brand-500 bg-brand-50 text-brand-700" : "border-line text-slate-600 hover:border-line-strong"
                         } ${started ? "opacity-50 cursor-not-allowed" : ""}`}
                       >
                         <input
@@ -360,7 +356,7 @@ export default function ArtifactUploader({ devices, requireDevice = false, onFin
 
           {started && (
             <div>
-              <div className="flex justify-between text-xs text-slate-500 mb-1">
+              <div className="flex justify-between text-xs text-slate-600 mb-1">
                 <span>
                   {summary.counts.ready} of {items.length} ready
                   {summary.counts.failed > 0 && `, ${summary.counts.failed} failed`}
@@ -369,19 +365,19 @@ export default function ArtifactUploader({ devices, requireDevice = false, onFin
                   {formatBytes(summary.doneBytes)} / {formatBytes(summary.totalBytes)}
                 </span>
               </div>
-              <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+              <div className="h-2 bg-surface-sunken rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-blue-600 transition-all"
+                  className="h-full bg-brand-600 transition-all"
                   style={{ width: `${summary.totalBytes ? (summary.doneBytes / summary.totalBytes) * 100 : 0}%` }}
                 />
               </div>
             </div>
           )}
 
-          <div className="max-h-96 overflow-auto border border-slate-100 rounded-lg">
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-slate-50">
-                <tr className="text-left text-slate-400">
+          <div className="max-h-96 overflow-auto border border-line rounded-lg">
+            <table className="w-full text-sm min-w-[36rem]">
+              <thead className="sticky top-0 bg-surface-muted">
+                <tr className="text-left text-slate-500">
                   <th className="px-3 py-2 font-medium text-xs uppercase tracking-wide">File</th>
                   <th className="px-3 py-2 font-medium text-xs uppercase tracking-wide">Size</th>
                   <th className="px-3 py-2 font-medium text-xs uppercase tracking-wide">Type</th>
@@ -391,7 +387,7 @@ export default function ArtifactUploader({ devices, requireDevice = false, onFin
               </thead>
               <tbody>
                 {items.map((item) => (
-                  <tr key={item.id} className="border-t border-slate-50">
+                  <tr key={item.id} className="border-t border-line/70">
                     <td className="px-3 py-2 text-slate-700 break-all">{item.path}</td>
                     <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{formatBytes(item.file.size)}</td>
                     <td className="px-3 py-2">
@@ -399,7 +395,7 @@ export default function ArtifactUploader({ devices, requireDevice = false, onFin
                         value={item.type}
                         disabled={started}
                         onChange={(e) => updateStaged(item.id, { type: e.target.value as ArtifactType })}
-                        className="text-sm border border-slate-200 rounded-md px-2 py-1 disabled:opacity-60"
+                        className="text-sm border border-line rounded-md px-2 py-1 bg-white disabled:opacity-60"
                       >
                         {ARTIFACT_TYPES.map((type) => (
                           <option key={type} value={type}>
@@ -416,7 +412,7 @@ export default function ArtifactUploader({ devices, requireDevice = false, onFin
                           disabled={started}
                           onChange={(e) => updateStaged(item.id, { version: e.target.value })}
                           placeholder="v1.0.0"
-                          className="w-28 text-sm border border-slate-200 rounded-md px-2 py-1 disabled:opacity-60"
+                          className="w-28 text-sm border border-line rounded-md px-2 py-1 disabled:opacity-60"
                         />
                       ) : (
                         <span className="text-slate-300">—</span>
@@ -450,7 +446,7 @@ export default function ArtifactUploader({ devices, requireDevice = false, onFin
             </table>
           </div>
 
-          {formError && <p className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg">{formError}</p>}
+          {formError && <Alert tone="error">{formError}</Alert>}
 
           <div className="flex items-center justify-end gap-3">
             {!started && (
@@ -458,14 +454,14 @@ export default function ArtifactUploader({ devices, requireDevice = false, onFin
                 <button
                   type="button"
                   onClick={reset}
-                  className="text-sm bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 px-4 py-2 rounded-lg"
+                  className={secondaryButton}
                 >
                   Clear
                 </button>
                 <button
                   type="button"
                   onClick={startUpload}
-                  className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium"
+                  className={primaryButton}
                 >
                   Upload {items.length} file{items.length === 1 ? "" : "s"}
                 </button>
@@ -475,7 +471,7 @@ export default function ArtifactUploader({ devices, requireDevice = false, onFin
               <button
                 type="button"
                 onClick={() => queue?.cancel()}
-                className="text-sm bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 px-4 py-2 rounded-lg"
+                className={secondaryButton}
               >
                 Cancel
               </button>
@@ -484,7 +480,7 @@ export default function ArtifactUploader({ devices, requireDevice = false, onFin
               <button
                 type="button"
                 onClick={retryFailed}
-                className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium"
+                className={primaryButton}
               >
                 Retry {summary.counts.failed} failed
               </button>
@@ -493,7 +489,7 @@ export default function ArtifactUploader({ devices, requireDevice = false, onFin
               <button
                 type="button"
                 onClick={reset}
-                className="text-sm bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 px-4 py-2 rounded-lg"
+                className={secondaryButton}
               >
                 New upload
               </button>
