@@ -4,11 +4,14 @@ import { useWorkspace } from "@/context/WorkspaceContext";
 import { scopeKey, workspaceScope } from "@/lib/workspaces";
 
 const CREATE_OPTION = "__create__";
+const SELECT_CLASS =
+  "text-sm bg-slate-800 text-white border border-slate-700 rounded-lg px-2 py-1.5 max-w-[14rem] disabled:opacity-50";
 
 /** The scope selector in the nav bar: Personal, the user's workspaces, and "Create workspace". */
 export default function WorkspaceSwitcher() {
   const {
     scope,
+    scopeReady,
     workspaces,
     workspacesError,
     invitations,
@@ -36,34 +39,45 @@ export default function WorkspaceSwitcher() {
 
   return (
     <div className="flex items-center gap-3">
-      <select
-        aria-label="Personal or workspace"
-        value={current}
-        onChange={(e) => handleChange(e.target.value)}
-        disabled={scopeLocked}
-        title={scopeLocked ? "Finish the upload before switching" : undefined}
-        className="text-sm bg-slate-800 text-white border border-slate-700 rounded-lg px-2 py-1.5 max-w-[14rem] disabled:opacity-50"
-      >
-        <option value="personal">Personal</option>
-        {workspaces && workspaces.length > 0 && (
-          <optgroup label="Workspaces">
-            {workspaces.map((w) => (
-              <option key={w.workspaceId} value={scopeKey(workspaceScope(w))}>
-                {w.name}
-              </option>
-            ))}
-          </optgroup>
-        )}
-        {scope.kind === "workspace" && !listed && <option value={current}>{scope.name}</option>}
-        {workspacesError && (
-          <option disabled value="__error__">
-            Couldn&apos;t load workspaces
-          </option>
-        )}
-        <option value={CREATE_OPTION}>+ Create workspace…</option>
-      </select>
+      {/* Until the saved workspace is restored, the scope is a placeholder
+          Personal; show neither it nor any choice. */}
+      {!scopeReady ? (
+        <select aria-label="Personal or workspace" value="__loading__" disabled className={SELECT_CLASS}>
+          <option value="__loading__">Loading…</option>
+          {/* Never shown (the select can't open); it only sizes the select
+              like the real one, so the nav bar doesn't shift. */}
+          <option value={CREATE_OPTION}>+ Create workspace…</option>
+        </select>
+      ) : (
+        <select
+          aria-label="Personal or workspace"
+          value={current}
+          onChange={(e) => handleChange(e.target.value)}
+          disabled={scopeLocked}
+          title={scopeLocked ? "Finish the upload before switching" : undefined}
+          className={SELECT_CLASS}
+        >
+          <option value="personal">Personal</option>
+          {workspaces && workspaces.length > 0 && (
+            <optgroup label="Workspaces">
+              {workspaces.map((w) => (
+                <option key={w.workspaceId} value={scopeKey(workspaceScope(w))}>
+                  {w.name}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {scope.kind === "workspace" && !listed && <option value={current}>{scope.name}</option>}
+          {workspacesError && (
+            <option disabled value="__error__">
+              Couldn&apos;t load workspaces
+            </option>
+          )}
+          <option value={CREATE_OPTION}>+ Create workspace…</option>
+        </select>
+      )}
 
-      {scope.kind === "workspace" && (
+      {scopeReady && scope.kind === "workspace" && (
         <button
           type="button"
           onClick={() => openPanel("members")}
