@@ -19,7 +19,7 @@
   boot.kernelPackages = pkgs.linuxPackages_latest;
 
   # Networking
-  networking.hostName = "nixos";
+  networking.hostName = "iot_testbed";
   networking.networkmanager.enable = true;
 
   # Time zone
@@ -65,7 +65,7 @@
   services.libinput.enable = true;
 
   # Blank / generic user (no personal credentials)
-  users.users.user = {
+  users.users.hacker = {
     isNormalUser = true;
     description = "User";
     extraGroups = [ "networkmanager" "wheel" "docker" "dialout" "uucp" "wireshark" ];
@@ -93,8 +93,23 @@
     ];
   };
 
-  # Allow unfree
+    # Allow unfree packages
   nixpkgs.config.allowUnfree = true;
+  hardware.enableRedistributableFirmware = true;
+
+  # Extract only the 4 MediaTek bin files out of the official linux-firmware package
+  hardware.firmware = [
+    (pkgs.runCommand "mt7662u-firmware" {} ''
+      mkdir -p $out/lib/firmware
+      
+      # Copy the specific files from the official local linux-firmware tree
+      cp ${pkgs.linux-firmware}/lib/firmware/mediatek/mt7662u.bin $out/lib/firmware/mt7662u.bin
+      cp ${pkgs.linux-firmware}/lib/firmware/mediatek/mt7662u_rom_patch.bin $out/lib/firmware/mt7662u_rom_patch.bin
+      cp ${pkgs.linux-firmware}/lib/firmware/mediatek/mt7662.bin $out/lib/firmware/mt7662.bin
+      cp ${pkgs.linux-firmware}/lib/firmware/mediatek/mt7662_rom_patch.bin $out/lib/firmware/mt7662_rom_patch.bin
+    '')
+  ];
+
 
   # System packages – cyber-focused
   environment.systemPackages = with pkgs; [
@@ -199,7 +214,7 @@
     useUserPackages = true;
     backupFileExtension = "backup";
 
-    users.user = { pkgs, ... }: {
+    users.hacker = { pkgs, ... }: {
       home.stateVersion = "25.11";
     };
   };
