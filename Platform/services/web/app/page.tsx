@@ -37,7 +37,10 @@ function uploadStageLabel(stage: UploadStage, progress: number | null): string {
 }
 
 export default function DashboardPage() {
-  const { scope } = useWorkspace();
+  const { scope, scopeReady } = useWorkspace();
+  // Until the saved workspace is restored, nothing scoped mounts, so no
+  // Personal requests go out first.
+  if (!scopeReady) return <p className="text-sm text-slate-400">Loading workspace…</p>;
   // Keyed on the scope: switching remounts the view, so no devices, errors or
   // dialogs carry over, and a late response for the previous scope lands in
   // the unmounted view instead of this one.

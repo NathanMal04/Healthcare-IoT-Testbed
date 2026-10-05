@@ -15,9 +15,35 @@ import {
 
 export type WorkspacePanel = "create" | "members" | "invitations";
 
+// The selected workspace's id, per user, so it survives a reload. Only the id
+// is kept: the name and role always come from a fresh GET /workspaces.
+const SELECTED_WORKSPACE_KEY = "workspace:selected:";
+
+function readSelectedWorkspaceId(userId: string): string | null {
+  try {
+    return localStorage.getItem(SELECTED_WORKSPACE_KEY + userId);
+  } catch {
+    return null; // storage unavailable (private mode, blocked site data)
+  }
+}
+
+function writeSelectedWorkspaceId(userId: string, workspaceId: string | null) {
+  try {
+    if (workspaceId) localStorage.setItem(SELECTED_WORKSPACE_KEY + userId, workspaceId);
+    else localStorage.removeItem(SELECTED_WORKSPACE_KEY + userId);
+  } catch {
+    // storage unavailable; the selection just won't survive a reload
+  }
+}
+
 interface WorkspaceContextValue {
-  /** Personal (the default) or the selected workspace. Kept in memory only. */
+  /** Personal (the default) or the selected workspace; the workspace's id is saved per user. */
   scope: Scope;
+  /**
+   * False while the signed-in user's saved workspace is being restored. Scoped
+   * views wait for it so nothing loads for Personal first.
+   */
+  scopeReady: boolean;
   selectPersonal: () => void;
   selectWorkspace: (workspace: Workspace) => void;
 
@@ -61,6 +87,12 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [panel, setPanel] = useState<WorkspacePanel | null>(null);
   const [locks, setLocks] = useState(0);
+  // The user whose initial scope has been settled: the saved workspace
+  // restored, or Personal. Derived during render, so a newly signed-in user is
+  // never "ready" with a scope that hasn't been resolved for them.
+  const [resolvedUserId, setResolvedUserId] = useState<string | null>(null);
+  const resolvedUserIdRef = useRef<string | null>(null);
+  const scopeReady = !userId || resolvedUserId === userId;
 
   // Responses to superseded requests (and to a previous user's) are ignored.
   const workspacesLoadId = useRef(0);
@@ -71,6 +103,8 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     workspacesLoadId.current++;
     invitationsLoadId.current++;
+    resolvedUserIdRef.current = null;
+    setResolvedUserId(null);
     setScope(PERSONAL_SCOPE);
     setWorkspaces(null);
     setWorkspacesError(null);
@@ -79,6 +113,11 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     setNotice(null);
     setPanel(null);
   }, [userId]);
+
+  const markResolved = useCallback((id: string) => {
+    resolvedUserIdRef.current = id;
+    setResolvedUserId(id);
+  }, []);
 
   const refreshWorkspaces = useCallback(async () => {
     if (!userId) return null;
@@ -89,12 +128,24 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       setWorkspaces(list);
       setWorkspacesError(null);
 
+      // The first load for this user restores their saved workspace, if they
+      // still belong to it.
+      if (resolvedUserIdRef.current !== userId) {
+        const savedId = readSelectedWorkspaceId(userId);
+        const saved = savedId ? list.find((w) => w.workspaceId === savedId) : undefined;
+        if (saved) setScope(workspaceScope(saved));
+        else if (savedId) writeSelectedWorkspaceId(userId, null);
+        markResolved(userId);
+        return list;
+      }
+
       // Keep the selected workspace's name and role current, and leave it if
       // the user no longer belongs to it.
       const current = scopeRef.current;
       if (current.kind === "workspace") {
         const fresh = list.find((w) => w.workspaceId === current.workspaceId);
         if (!fresh) {
+          writeSelectedWorkspaceId(userId, null);
           setScope(PERSONAL_SCOPE);
           setPanel(null);
           setNotice(`You no longer have access to ${current.name}. Showing Personal.`);
@@ -104,10 +155,15 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       }
       return list;
     } catch (err) {
-      if (loadId === workspacesLoadId.current) setWorkspacesError(describeError(err, "Couldn't load workspaces"));
+      if (loadId === workspacesLoadId.current) {
+        setWorkspacesError(describeError(err, "Couldn't load workspaces"));
+        // Stay on Personal for now, but keep the saved workspace so the next
+        // load can restore it.
+        if (resolvedUserIdRef.current !== userId) markResolved(userId);
+      }
       return null;
     }
-  }, [userId]);
+  }, [userId, markResolved]);
 
   const refreshInvitations = useCallback(async () => {
     if (!userId) return;
@@ -130,19 +186,29 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
   const scopeLocked = locks > 0;
 
+  // An explicit choice also settles the initial scope, so a restore still in
+  // flight can't override it.
   const selectPersonal = useCallback(() => {
     if (scopeLocked) return;
     setScope(PERSONAL_SCOPE);
     setNotice(null);
-  }, [scopeLocked]);
+    if (userId) {
+      writeSelectedWorkspaceId(userId, null);
+      markResolved(userId);
+    }
+  }, [scopeLocked, userId, markResolved]);
 
   const selectWorkspace = useCallback(
     (workspace: Workspace) => {
       if (scopeLocked) return;
       setScope(workspaceScope(workspace));
       setNotice(null);
+      if (userId) {
+        writeSelectedWorkspaceId(userId, workspace.workspaceId);
+        markResolved(userId);
+      }
     },
-    [scopeLocked]
+    [scopeLocked, userId, markResolved]
   );
 
   const reportWorkspaceUnavailable = useCallback(() => {
@@ -162,6 +228,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<WorkspaceContextValue>(
     () => ({
       scope,
+      scopeReady,
       selectPersonal,
       selectWorkspace,
       workspaces,
@@ -180,7 +247,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       lockScope,
     }),
     [
-      scope, selectPersonal, selectWorkspace, workspaces, workspacesError, refreshWorkspaces, invitations,
+      scope, scopeReady, selectPersonal, selectWorkspace, workspaces, workspacesError, refreshWorkspaces, invitations,
       invitationsError, refreshInvitations, reportWorkspaceUnavailable, notice, panel, scopeLocked, lockScope,
     ]
   );

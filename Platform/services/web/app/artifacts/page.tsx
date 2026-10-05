@@ -41,7 +41,10 @@ function formatDate(value: string | null | undefined): string {
 }
 
 export default function ArtifactsPage() {
-  const { scope } = useWorkspace();
+  const { scope, scopeReady } = useWorkspace();
+  // Until the saved workspace is restored, nothing scoped mounts, so no
+  // Personal requests go out first.
+  if (!scopeReady) return <p className="text-sm text-slate-400">Loading workspace…</p>;
   // Keyed on the scope: switching remounts the view, so filters, pagination,
   // selection and staged uploads reset, and a late response for the previous
   // scope lands in the unmounted view instead of this one.
