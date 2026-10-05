@@ -2,11 +2,13 @@
 #
 #   POST  /cves                 -> cves-api  (record a CVE; workspaceId? in the body)
 #   GET   /cves                 -> cves-api  (personal CVEs, or ?workspaceId= for a workspace's)
-#   GET   /cves/{cveRecordId}   -> cves-api
-#   PATCH /cves/{cveRecordId}   -> cves-api  (mutable fields only)
+#   GET    /cves/{cveRecordId}   -> cves-api
+#   PATCH  /cves/{cveRecordId}   -> cves-api  (mutable fields only)
+#   DELETE /cves/{cveRecordId}   -> cves-api  (with its claim and device links)
+#   PUT    /cves/{cveRecordId}/devices/{deviceId} -> cves-api  (link a device)
+#   DELETE /cves/{cveRecordId}/devices/{deviceId} -> cves-api  (unlink it)
 #
-# Access checks come from the shared layer (shared.tf). Device links and
-# DELETE come in Stage 3B.2.
+# Access checks come from the shared layer (shared.tf).
 
 module "cves_api_fn" {
   source        = "../../modules/lambda"
@@ -26,11 +28,12 @@ module "cves_api_fn" {
 
 # Writes are all TransactWriteItems, authorized by the actions inside them
 # (see the create-device note in main.tf): Put (create: METADATA, scope links
-# and the CVEID# claim), Update (PATCH of METADATA) and ConditionCheck (the
-# workspace record, the caller's membership or ownership). Reads: the
-# authorization and claim GetItems, the USER# and WORKSPACE# queries, and
-# BatchGetItem of CVE#/METADATA. No Scan and, until DELETE exists, no
-# DeleteItem.
+# and the CVEID# claim; link: the two device link rows), Update (PATCH, and
+# deviceIds/version on link and unlink), Delete (unlink: the two device link
+# rows; DELETE: every row of the CVE) and ConditionCheck (the workspace
+# record, the caller's membership or ownership, the device's scope). Reads:
+# the authorization, link and claim GetItems, the USER#, WORKSPACE# and CVE#
+# queries, and BatchGetItem of CVE#/METADATA. No Scan.
 resource "aws_iam_policy" "cves_api" {
   name = "${var.name}-lambda-cves-api"
 
@@ -40,7 +43,7 @@ resource "aws_iam_policy" "cves_api" {
       Effect = "Allow"
       Action = [
         "dynamodb:GetItem", "dynamodb:Query", "dynamodb:BatchGetItem",
-        "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:ConditionCheckItem",
+        "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:ConditionCheckItem",
       ]
       Resource = module.metadata_table.table_arn
     }]
@@ -66,6 +69,19 @@ resource "aws_api_gateway_resource" "cves_record_id" {
   path_part   = "{cveRecordId}"
 }
 
+# Path segment only: /cves/{cveRecordId}/devices has no methods of its own.
+resource "aws_api_gateway_resource" "cves_record_id_devices" {
+  rest_api_id = module.api.rest_api_id
+  parent_id   = aws_api_gateway_resource.cves_record_id.id
+  path_part   = "devices"
+}
+
+resource "aws_api_gateway_resource" "cves_record_id_devices_device_id" {
+  rest_api_id = module.api.rest_api_id
+  parent_id   = aws_api_gateway_resource.cves_record_id_devices.id
+  path_part   = "{deviceId}"
+}
+
 locals {
   # Keys double as the Lambda permission statement suffix, so they must be unique.
   cves_routes = {
@@ -88,6 +104,21 @@ locals {
       resource_id = aws_api_gateway_resource.cves_record_id.id
       method      = "PATCH"
       path        = "cves/*"
+    }
+    "cves-id-DELETE" = {
+      resource_id = aws_api_gateway_resource.cves_record_id.id
+      method      = "DELETE"
+      path        = "cves/*"
+    }
+    "cves-id-devices-id-PUT" = {
+      resource_id = aws_api_gateway_resource.cves_record_id_devices_device_id.id
+      method      = "PUT"
+      path        = "cves/*/devices/*"
+    }
+    "cves-id-devices-id-DELETE" = {
+      resource_id = aws_api_gateway_resource.cves_record_id_devices_device_id.id
+      method      = "DELETE"
+      path        = "cves/*/devices/*"
     }
   }
 
@@ -124,6 +155,14 @@ module "cves_preflight" {
   rest_api_id     = module.api.rest_api_id
   resource_id     = each.value.resource_id
   allowed_methods = each.value.methods
+}
+
+# A preflight is keyed by the first route on its path, which became
+# "cves-id-DELETE" when DELETE was added (Stage 3B.2). Moving the existing
+# instance updates the OPTIONS method in place instead of replacing it.
+moved {
+  from = module.cves_preflight["cves-id-GET"]
+  to   = module.cves_preflight["cves-id-DELETE"]
 }
 
 locals {

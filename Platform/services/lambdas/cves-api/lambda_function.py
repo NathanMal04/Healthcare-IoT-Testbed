@@ -5,6 +5,9 @@
   GET   /cves?workspaceId=...   the CVEs of a workspace the caller belongs to
   GET   /cves/{cveRecordId}     one CVE, with description and references
   PATCH /cves/{cveRecordId}     change its mutable fields
+  DELETE /cves/{cveRecordId}    delete it, with its claim and every device link
+  PUT    /cves/{cveRecordId}/devices/{deviceId}   link a device of the CVE's scope
+  DELETE /cves/{cveRecordId}/devices/{deviceId}   unlink it
 
 A CVE record has its own id (cveRecordId, a UUIDv7) separate from the public
 identifier (cveId, "CVE-2021-37584"): the same public CVE can be recorded once
@@ -17,7 +20,11 @@ links instead of ownership links. A USER#{uid} / CVEID#{cveId} or
 WORKSPACE#{wid} / CVEID#{cveId} claim row, written in the same transaction,
 keeps cveId unique per scope.
 
-Device links (CVE#/DEVICE# rows) come in Stage 3B.2.
+A CVE links to devices of its own scope through DEVICE#{did} / CVE#{rid} and
+CVE#{rid} / DEVICE#{did} rows, mirrored in the deviceIds String Set on its
+METADATA (absent when no device is linked, never an empty set). Every link,
+unlink and PATCH bumps the METADATA version, which DELETE is conditional on,
+so a CVE can't be deleted while its links change underneath.
 """
 import json
 import os
@@ -62,7 +69,13 @@ IMMUTABLE_FIELDS = {"cveRecordId", "cveId", "workspaceId", "createdBy", "created
 CLEARABLE_FIELDS = MUTABLE_FIELDS - {"severity"}
 # GET /cves leaves out the long text fields; GET /cves/{id} has everything.
 LIST_ATTRIBUTES = ("pk", "cveRecordId", "cveId", "severity", "cvssScore", "cvssVersion", "affectedChipsets",
-                   "workspaceId", "createdBy", "createdAt", "updatedAt", "version")
+                   "deviceIds", "workspaceId", "createdBy", "createdAt", "updatedAt", "version")
+
+# DELETE removes a CVE in one transaction: METADATA, its two scope rows, the
+# claim, a membership check and two rows per device, at most 100 items. 40
+# keeps it within the limit (5 + 2 * 40 = 85) with room to spare.
+MAX_DEVICES_PER_CVE = 40
+MAX_TRANSACTION_ITEMS = 100
 
 BATCH_GET_MAX_KEYS = 100
 
@@ -102,14 +115,25 @@ def handler(event, context):
             return _create_cve(table, user_id, _json_body(event))
         if route == ("GET", "/cves"):
             return _list_cves(table, user_id, event.get("queryStringParameters") or {})
-        if resource != "/cves/{cveRecordId}":
+        if resource not in ("/cves/{cveRecordId}", "/cves/{cveRecordId}/devices/{deviceId}"):
             return _resp(404, {"error": "Unknown route"})
 
-        record_id = _uuid((event.get("pathParameters") or {}).get("cveRecordId"), "cveRecordId")
+        path = event.get("pathParameters") or {}
+        record_id = _uuid(path.get("cveRecordId"), "cveRecordId")
+        if resource == "/cves/{cveRecordId}/devices/{deviceId}":
+            device_id = _uuid(path.get("deviceId"), "deviceId")
+            if method == "PUT":
+                return _link_device(table, user_id, record_id, device_id)
+            if method == "DELETE":
+                return _unlink_device(table, user_id, record_id, device_id)
+            return _resp(404, {"error": "Unknown route"})
+
         if method == "GET":
             return _resp(200, {"cve": _public_cve(_authorized_cve(table, user_id, record_id))})
         if method == "PATCH":
             return _update_cve(table, user_id, record_id, _json_body(event))
+        if method == "DELETE":
+            return _delete_cve(table, user_id, record_id)
     except RequestError as e:
         return _resp(e.status, {"error": e.message, **e.extra})
 
@@ -295,6 +319,216 @@ def _update_cve(table, user_id, record_id, body):
         if field not in fields:
             updated.pop(field, None)
     return _resp(200, {"cve": _public_cve(updated)})
+
+
+# --- PUT /cves/{cveRecordId}/devices/{deviceId} ---------------------------------------
+
+def _link_device(table, user_id, record_id, device_id):
+    cve = _authorized_cve(table, user_id, record_id)
+    workspace_id = cve.get("workspaceId")
+
+    # The device endpoints' rule: the owner of a personal device, or any member
+    # of a workspace device's workspace (never a leftover USER#/DEVICE# row).
+    # 404 either way, so device ids aren't revealed.
+    try:
+        device = testbed_authz.require_resource(table, user_id, "DEVICE", device_id, legacy_roles=("owner",))
+    except testbed_authz.AuthorizationError:
+        raise RequestError(404, "Device not found")
+    # The caller may use both, so naming the mismatch reveals nothing new.
+    if device.get("workspaceId") != workspace_id:
+        raise RequestError(400, "Device belongs to a different scope than the CVE")
+
+    # Idempotent: linking a linked device changes nothing.
+    if _link_exists(table, record_id, device_id):
+        return _resp(200, {"cve": _public_cve(cve), "changed": False})
+
+    now = _iso(_utcnow())
+    names = {"#version": "version", "#updatedAt": "updatedAt", "#deviceIds": "deviceIds"}
+    # ADD of a one-element set: deviceIds is created non-empty, never empty.
+    values = {":one": 1, ":now": now, ":device": {device_id}, ":max": MAX_DEVICES_PER_CVE}
+    # No version condition: adding to a set commutes, so concurrent links of
+    # different devices both succeed. The version still moves, which is what
+    # makes a concurrent DELETE fail rather than leave this link behind.
+    condition = (f"attribute_exists(pk) AND {_scope_condition(workspace_id, names, values)}"
+                 " AND (attribute_not_exists(#deviceIds) OR size(#deviceIds) < :max)")
+    update = _update(record_id, "SET #updatedAt = :now, #version = #version + :one ADD #deviceIds :device",
+                     condition, names, values)
+
+    device_cve = {"pk": f"DEVICE#{device_id}", "sk": f"CVE#{record_id}", "entity": "device-cve",
+                  "cveId": cve["cveId"], "createdBy": user_id, "createdAt": now}
+    cve_device = {"pk": f"CVE#{record_id}", "sk": f"DEVICE#{device_id}", "entity": "cve-device",
+                  "deviceName": device.get("name"), "createdBy": user_id, "createdAt": now}
+
+    # The device must still be in the CVE's scope, and the caller still allowed,
+    # when the links are written; either may change after the reads above.
+    if workspace_id is not None:
+        device_check = _condition_check(f"DEVICE#{device_id}", "METADATA", "#workspaceId = :workspaceId",
+                                        names={"#workspaceId": "workspaceId"},
+                                        values={":workspaceId": workspace_id})
+    else:
+        device_check = _condition_check(f"DEVICE#{device_id}", "METADATA",
+                                        "attribute_exists(pk) AND attribute_not_exists(#workspaceId)",
+                                        names={"#workspaceId": "workspaceId"})
+    items = [update, _put(device_cve), _put(cve_device), device_check, _caller_check(user_id, record_id, workspace_id)]
+    if workspace_id is None:
+        items.append(_condition_check(f"USER#{user_id}", f"DEVICE#{device_id}", "#role = :owner",
+                                      names={"#role": "role"}, values={":owner": "owner"}))
+
+    failed = _transact(items, "link_device", record_id)
+    if 3 in failed or 5 in failed:
+        raise RequestError(404, "Device not found")
+    if 4 in failed:
+        raise RequestError(404, "CVE not found")
+    if 0 in failed:
+        current = _reload(table, record_id)
+        if current is None or current.get("workspaceId") != workspace_id:
+            raise RequestError(404, "CVE not found")
+        if len(current.get("deviceIds") or ()) >= MAX_DEVICES_PER_CVE:
+            raise RequestError(409, f"A CVE can be linked to at most {MAX_DEVICES_PER_CVE} devices")
+        raise RequestError(409, "This CVE was changed by another request; reload it and try again")
+    if failed:
+        # A link row appeared after the check above: linked concurrently.
+        if _link_exists(table, record_id, device_id):
+            return _resp(200, {"cve": _public_cve(_reload(table, record_id) or cve), "changed": False})
+        raise RequestError(409, "This CVE was changed by another request; reload it and try again")
+
+    return _resp(200, {"cve": _public_cve(_reload_or_404(table, record_id)), "changed": True})
+
+
+# --- DELETE /cves/{cveRecordId}/devices/{deviceId} ------------------------------------
+
+def _unlink_device(table, user_id, record_id, device_id):
+    cve = _authorized_cve(table, user_id, record_id)
+    workspace_id = cve.get("workspaceId")
+
+    # No device authorization: a link only ever joins a device of the CVE's
+    # own scope, and unlinking must still work once a device is gone. The
+    # device is never read, so nothing about it is revealed either.
+    linked = set(cve.get("deviceIds") or ())
+    row_exists = _link_exists(table, record_id, device_id)
+    # Idempotent: unlinking a device that isn't linked changes nothing. A
+    # device listed in deviceIds without its row (never expected) is still
+    # removed, so unlink can always clean up.
+    if not row_exists and device_id not in linked:
+        return _resp(200, {"cve": _public_cve(cve), "changed": False})
+
+    now = _iso(_utcnow())
+    names = {"#version": "version", "#updatedAt": "updatedAt"}
+    values = {":one": 1, ":now": now, ":expected": cve["version"]}
+    # The version check pins deviceIds to what was read, so the branch chosen
+    # below is the right one when the write happens; the size/contains
+    # conditions state each branch's assumption explicitly as well.
+    condition = f"attribute_exists(pk) AND #version = :expected AND {_scope_condition(workspace_id, names, values)}"
+    expression = "SET #updatedAt = :now, #version = #version + :one"
+    if linked == {device_id}:
+        # The last device: REMOVE the attribute. An empty set is never stored.
+        names["#deviceIds"] = "deviceIds"
+        values[":deviceId"] = device_id
+        expression += " REMOVE #deviceIds"
+        condition += " AND size(#deviceIds) = :one AND contains(#deviceIds, :deviceId)"
+    elif device_id in linked:
+        names["#deviceIds"] = "deviceIds"
+        values.update({":deviceId": device_id, ":device": {device_id}})
+        expression += " DELETE #deviceIds :device"
+        condition += " AND size(#deviceIds) > :one AND contains(#deviceIds, :deviceId)"
+    # Otherwise the rows exist without their copy in deviceIds; removing the
+    # rows is all that is needed, and deviceIds stays as it is.
+
+    items = [
+        _update(record_id, expression, condition, names, values),
+        # Conditional on one side only: a concurrent unlink makes it fail, and
+        # a missing mirror row (never expected) doesn't block the cleanup.
+        _delete(f"CVE#{record_id}", f"DEVICE#{device_id}", "attribute_exists(pk)" if row_exists else None),
+        _delete(f"DEVICE#{device_id}", f"CVE#{record_id}"),
+        _caller_check(user_id, record_id, workspace_id),
+    ]
+    failed = _transact(items, "unlink_device", record_id)
+    if 3 in failed:
+        raise RequestError(404, "CVE not found")
+    if 1 in failed and not _link_exists(table, record_id, device_id):
+        # Unlinked concurrently.
+        current = _reload(table, record_id)
+        if current is None:
+            raise RequestError(404, "CVE not found")
+        return _resp(200, {"cve": _public_cve(current), "changed": False})
+    if failed:
+        if _reload(table, record_id) is None:
+            raise RequestError(404, "CVE not found")
+        raise RequestError(409, "This CVE was changed by another request; reload it and try again")
+
+    return _resp(200, {"cve": _public_cve(_reload_or_404(table, record_id)), "changed": True})
+
+
+# --- DELETE /cves/{cveRecordId} -----------------------------------------------------
+
+def _delete_cve(table, user_id, record_id):
+    # Any member may delete a workspace CVE, as they may change it; the owner
+    # deletes a personal one.
+    cve = _authorized_cve(table, user_id, record_id)
+    workspace_id = cve.get("workspaceId")
+    scope_pk = f"WORKSPACE#{workspace_id}" if workspace_id is not None else f"USER#{user_id}"
+
+    # Every row in the CVE's partition other than METADATA is one side of a
+    # two-way link ({kind}#{id}), whose other side is {kind}#{id} / CVE#{rid}.
+    rows = _query_partition(table, f"CVE#{record_id}")
+    link_sks = {row["sk"] for row in rows if row["sk"] != "METADATA"}
+    # The record's own scope rows and every device in deviceIds are removed
+    # even if a row of the pair is missing.
+    link_sks.add(scope_pk)
+    link_sks |= {f"DEVICE#{did}" for did in (cve.get("deviceIds") or ()) if UUID_PATTERN.fullmatch(did)}
+    device_count = len([sk for sk in link_sks if sk.startswith("DEVICE#")])
+    if device_count > MAX_DEVICES_PER_CVE:
+        _log_refusal("delete_cve_too_many_devices", record_id, deviceCount=device_count)
+        raise RequestError(409, f"This CVE has more than {MAX_DEVICES_PER_CVE} linked devices; unlink some first")
+
+    names = {"#version": "version"}
+    values = {":expected": cve["version"]}
+    # The version check makes any link, unlink or PATCH since the reads above
+    # cancel the delete, so no link row it didn't see can be left behind.
+    condition = f"attribute_exists(pk) AND #version = :expected AND {_scope_condition(workspace_id, names, values)}"
+    items = [_delete(f"CVE#{record_id}", "METADATA", condition, names, values)]
+    for sk in sorted(link_sks):
+        items.append(_delete(f"CVE#{record_id}", sk))
+        kind, _, ident = sk.partition("#")
+        if not ident or "#" in ident:
+            continue  # never build a key from a malformed row
+        if sk == f"USER#{user_id}" and workspace_id is None:
+            # The caller's ownership link: deleting it re-checks ownership.
+            items.append(_delete(sk, f"CVE#{record_id}", "#role = :owner",
+                                 {"#role": "role"}, {":owner": "owner"}))
+        else:
+            items.append(_delete(sk, f"CVE#{record_id}"))
+    owner_index = next((i for i, item in enumerate(items)
+                        if workspace_id is None and _item_key(item) == (f"USER#{user_id}", f"CVE#{record_id}")), None)
+
+    # The claim is deleted only if it is this record's: one that names another
+    # record (never expected) or is already gone is left alone.
+    claim_key = {"pk": scope_pk, "sk": f"CVEID#{cve['cveId']}"}
+    claim = table.get_item(Key=claim_key, ConsistentRead=True).get("Item")
+    if claim is not None and claim.get("cveRecordId") == record_id:
+        items.append(_delete(claim_key["pk"], claim_key["sk"], "#cveRecordId = :rid",
+                             {"#cveRecordId": "cveRecordId"}, {":rid": record_id}))
+    elif claim is not None:
+        _log_refusal("delete_cve_claim_not_ours", record_id, claimRecordId=claim.get("cveRecordId"))
+
+    member_index = None
+    if workspace_id is not None:
+        member_index = len(items)
+        items.append(_membership_check(user_id, workspace_id))
+
+    if len(items) > MAX_TRANSACTION_ITEMS:
+        _log_refusal("delete_cve_too_many_rows", record_id, items=len(items))
+        raise RequestError(409, "This CVE has too many linked rows to delete in one step")
+
+    failed = _transact(items, "delete_cve", record_id)
+    if failed & {owner_index, member_index}:
+        raise RequestError(404, "CVE not found")
+    if 0 in failed and _reload(table, record_id) is None:
+        raise RequestError(404, "CVE not found")
+    if failed:
+        raise RequestError(409, "This CVE was changed by another request; reload it and try again")
+
+    return _resp(200, {"deleted": {"cveRecordId": record_id, "cveId": cve["cveId"], "deviceCount": device_count}})
 
 
 # --- Validation -------------------------------------------------------------------
@@ -487,6 +721,8 @@ def _public_cve(item, full=True):
         "cvssScore": float(item["cvssScore"]) if "cvssScore" in item else None,
         "cvssVersion": item.get("cvssVersion"),
         "affectedChipsets": list(item.get("affectedChipsets") or []),
+        # A String Set, absent when no device is linked: always a sorted list here.
+        "deviceIds": sorted(item.get("deviceIds") or ()),
         "createdBy": item.get("createdBy"),
         "createdAt": item.get("createdAt"),
         "updatedAt": item.get("updatedAt"),
@@ -513,6 +749,33 @@ def _query_all(table, pk, prefix):
         if not page.get("LastEvaluatedKey"):
             return items
         kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+
+def _query_partition(table, pk):
+    # Every row of the partition, read consistently: DELETE must see every link.
+    items, kwargs = [], {"KeyConditionExpression": Key("pk").eq(pk), "ConsistentRead": True}
+    while True:
+        page = table.query(**kwargs)
+        items.extend(page.get("Items", []))
+        if not page.get("LastEvaluatedKey"):
+            return items
+        kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+
+def _link_exists(table, record_id, device_id):
+    key = {"pk": f"CVE#{record_id}", "sk": f"DEVICE#{device_id}"}
+    return table.get_item(Key=key, ConsistentRead=True).get("Item") is not None
+
+
+def _reload(table, record_id):
+    return table.get_item(Key={"pk": f"CVE#{record_id}", "sk": "METADATA"}, ConsistentRead=True).get("Item")
+
+
+def _reload_or_404(table, record_id):
+    item = _reload(table, record_id)
+    if item is None:
+        raise RequestError(404, "CVE not found")
+    return item
 
 
 def _batch_get_metadata(record_ids):
@@ -570,6 +833,56 @@ def _condition_check(pk, sk, condition, names=None, values=None):
     if values:
         check["ExpressionAttributeValues"] = _values(values)
     return {"ConditionCheck": check}
+
+
+def _update(record_id, expression, condition, names, values):
+    return {"Update": {
+        "TableName": TABLE,
+        "Key": _key(f"CVE#{record_id}", "METADATA"),
+        "UpdateExpression": expression,
+        "ConditionExpression": condition,
+        "ExpressionAttributeNames": names,
+        "ExpressionAttributeValues": _values(values),
+    }}
+
+
+def _delete(pk, sk, condition=None, names=None, values=None):
+    spec = {"TableName": TABLE, "Key": _key(pk, sk)}
+    if condition:
+        spec["ConditionExpression"] = condition
+    if names:
+        spec["ExpressionAttributeNames"] = names
+    if values:
+        spec["ExpressionAttributeValues"] = _values(values)
+    return {"Delete": spec}
+
+
+def _item_key(item):
+    (spec,) = item.values()
+    return spec["Key"]["pk"]["S"], spec["Key"]["sk"]["S"]
+
+
+def _scope_condition(workspace_id, names, values):
+    """The condition that METADATA is still in the scope it was authorized in;
+    adds what it needs to names and values."""
+    names["#workspaceId"] = "workspaceId"
+    if workspace_id is None:
+        return "attribute_not_exists(#workspaceId)"
+    values[":workspaceId"] = workspace_id
+    return "#workspaceId = :workspaceId"
+
+
+def _caller_check(user_id, record_id, workspace_id):
+    """Re-checks inside a transaction that the caller may still change the CVE:
+    still a member of its workspace, or still its owner."""
+    if workspace_id is not None:
+        return _membership_check(user_id, workspace_id)
+    return _condition_check(f"USER#{user_id}", f"CVE#{record_id}", "#role = :owner",
+                            names={"#role": "role"}, values={":owner": "owner"})
+
+
+def _log_refusal(event, record_id, **details):
+    print(json.dumps({"event": event, "cveRecordId": record_id, **details}))
 
 
 def _membership_check(user_id, workspace_id):
