@@ -39,8 +39,10 @@ import {
   type Severity,
 } from "@/lib/cves";
 import {
+  Alert,
   Dialog,
   SeverityBadge,
+  dangerButton,
   formatDate,
   inputClass,
   labelClass,
@@ -49,9 +51,7 @@ import {
 } from "@/app/components/ui";
 
 const UNKNOWN_DEVICE = "Unknown device";
-const dangerButton =
-  "text-sm bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-medium transition-colors";
-const linkButton = "text-xs text-blue-600 hover:text-blue-700 disabled:opacity-50";
+const linkButton = "text-xs font-medium text-brand-600 hover:text-brand-700 disabled:opacity-50";
 
 function scopeLabel(scope: Scope): string {
   return scope.kind === "workspace" ? scope.name : "Personal";
@@ -221,7 +221,7 @@ function CveFormFields({
         {values.affectedChipsets.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-2">
             {values.affectedChipsets.map((chipset) => (
-              <span key={chipset} className="text-xs bg-slate-100 text-slate-700 pl-2 pr-1 py-0.5 rounded flex items-center gap-1">
+              <span key={chipset} className="text-xs bg-surface-sunken text-slate-700 pl-2 pr-1 py-0.5 rounded flex items-center gap-1">
                 {chipset}
                 <button
                   type="button"
@@ -313,7 +313,7 @@ function CveFormFields({
                   aria-label="Find a device"
                 />
               )}
-              <div className="border border-slate-200 rounded-lg max-h-48 overflow-y-auto divide-y divide-slate-100">
+              <div className="border border-line rounded-lg max-h-48 overflow-y-auto divide-y divide-line">
                 {shownDevices.map((device) => (
                   <label key={device.deviceId} className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700">
                     <input
@@ -479,14 +479,18 @@ export function AddCveDialog({
           disabled={saving}
         />
         {error && (
-          <div className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg flex items-center gap-3">
-            <span>{error}</span>
-            {existingId && (
-              <button type="button" onClick={() => onOpenExisting(existingId)} className="font-medium underline ml-auto">
-                Open existing
-              </button>
-            )}
-          </div>
+          <Alert
+            tone="error"
+            action={
+              existingId && (
+                <button type="button" onClick={() => onOpenExisting(existingId)} className="shrink-0 font-semibold underline">
+                  Open existing
+                </button>
+              )
+            }
+          >
+            {error}
+          </Alert>
         )}
         {progress && progress.total > 0 && (
           <p className="text-xs text-slate-500">
@@ -714,7 +718,7 @@ export function CveDetailsDialog({
             )}
           </p>
           <p className="text-slate-500">The devices themselves are not changed or deleted.</p>
-          {actionError && <p className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg">{actionError}</p>}
+          {actionError && <Alert tone="error">{actionError}</Alert>}
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={() => setMode("view")} disabled={busy !== null} className={secondaryButton}>
               Cancel
@@ -739,7 +743,7 @@ export function CveDetailsDialog({
             mode="edit"
             disabled={busy !== null}
           />
-          {actionError && <p className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg">{actionError}</p>}
+          {actionError && <Alert tone="error">{actionError}</Alert>}
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={() => setMode("view")} disabled={busy !== null} className={secondaryButton}>
               Cancel
@@ -779,7 +783,7 @@ export function CveDetailsDialog({
           {shown.affectedChipsets.length ? (
             <div className="flex flex-wrap gap-1.5">
               {shown.affectedChipsets.map((c) => (
-                <span key={c} className="text-xs bg-slate-100 text-slate-700 px-2 py-0.5 rounded">
+                <span key={c} className="text-xs bg-surface-sunken text-slate-700 px-2 py-0.5 rounded">
                   {c}
                 </span>
               ))}
@@ -797,7 +801,7 @@ export function CveDetailsDialog({
             <ul className="space-y-1">
               {cve.references.map((r) => (
                 <li key={r}>
-                  <a href={r} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700 break-all">
+                  <a href={r} target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:text-brand-700 break-all">
                     {r}
                   </a>
                 </li>
@@ -813,7 +817,7 @@ export function CveDetailsDialog({
             Linked devices ({deviceCount}/{MAX_DEVICES_PER_CVE})
           </h3>
           {linkedIds.length ? (
-            <ul className="divide-y divide-slate-100 border border-slate-100 rounded-lg mb-3">
+            <ul className="divide-y divide-line border border-line rounded-lg mb-3">
               {[...linkedIds]
                 .sort((a, b) => deviceName(deviceNames, a).localeCompare(deviceName(deviceNames, b)))
                 .map((id) => (
@@ -871,9 +875,9 @@ export function CveDetailsDialog({
           )}
         </section>
 
-        {actionError && <p className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg">{actionError}</p>}
+        {actionError && <Alert tone="error">{actionError}</Alert>}
 
-        <div className="flex flex-wrap justify-between gap-3 pt-2 border-t border-slate-100">
+        <div className="flex flex-wrap justify-between gap-3 pt-2 border-t border-line">
           <button
             type="button"
             onClick={() => {

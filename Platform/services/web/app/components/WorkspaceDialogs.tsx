@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Inbox, UserPlus } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import {
@@ -16,9 +17,21 @@ import {
   type WorkspaceRole,
 } from "@/lib/workspaces";
 import { ApiError } from "@/lib/api";
-import { Dialog, formatDate, inputClass, labelClass, primaryButton, secondaryButton } from "@/app/components/ui";
+import {
+  Alert,
+  Badge,
+  Dialog,
+  EmptyState,
+  LoadingState,
+  formatDate,
+  initials,
+  inputClass,
+  labelClass,
+  primaryButton,
+  secondaryButton,
+} from "@/app/components/ui";
 
-/** The workspace dialogs, opened from the nav bar and the dashboard. */
+/** The workspace dialogs, opened from the top bar, the dashboard and the Workspaces page. */
 export default function WorkspaceDialogs() {
   const { panel, scope } = useWorkspace();
   if (panel === "create") return <CreateWorkspaceDialog />;
@@ -34,12 +47,9 @@ export function WorkspaceNotice() {
   const { notice, dismissNotice } = useWorkspace();
   if (!notice) return null;
   return (
-    <div className="mb-6 text-sm bg-amber-50 text-amber-800 px-4 py-2 rounded-lg flex items-center justify-between gap-4">
-      <span>{notice}</span>
-      <button type="button" onClick={dismissNotice} aria-label="Dismiss" className="text-amber-700 hover:text-amber-900">
-        ✕
-      </button>
-    </div>
+    <Alert tone="warning" onDismiss={dismissNotice} className="mb-6 text-sm">
+      {notice}
+    </Alert>
   );
 }
 
@@ -73,7 +83,7 @@ function CreateWorkspaceDialog() {
   }
 
   return (
-    <Dialog title="Create Workspace" subtitle="A shared space for your team's devices and firmware" onClose={close}>
+    <Dialog title="Create workspace" subtitle="A shared space for your team's devices and firmware" onClose={close}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className={labelClass} htmlFor="workspace-name">
@@ -87,17 +97,17 @@ function CreateWorkspaceDialog() {
             disabled={submitting}
             maxLength={100}
             className={inputClass}
-            placeholder="Healthcare IoT Testbed"
+            placeholder="Infusion pump research"
             autoFocus
           />
         </div>
-        {error && <p className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
+        {error && <Alert tone="error">{error}</Alert>}
         <div className="flex items-center gap-3 pt-2">
           <button type="button" onClick={close} disabled={submitting} className={`${secondaryButton} flex-1`}>
             Cancel
           </button>
           <button type="submit" disabled={submitting || !name.trim()} className={`${primaryButton} flex-1`}>
-            {submitting ? "Creating…" : "Create Workspace"}
+            {submitting ? "Creating…" : "Create workspace"}
           </button>
         </div>
       </form>
@@ -107,9 +117,12 @@ function CreateWorkspaceDialog() {
 
 // --- Members -------------------------------------------------------------------
 
-function MembersDialog({ workspaceId }: { workspaceId: string }) {
-  const { user } = useAuth();
-  const { closePanel, reportWorkspaceUnavailable } = useWorkspace();
+/**
+ * A workspace with its members (and, for owners, pending invitations), plus
+ * invite. Used by the members dialog and the Workspaces page.
+ */
+export function useWorkspaceDetail(workspaceId: string) {
+  const { reportWorkspaceUnavailable } = useWorkspace();
   const [detail, setDetail] = useState<WorkspaceDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const loadIdRef = useRef(0);
@@ -134,36 +147,51 @@ function MembersDialog({ workspaceId }: { workspaceId: string }) {
 
   useEffect(() => {
     void load();
-    // Invalidates the in-flight load when the dialog closes or reloads.
+    // Invalidates the in-flight load when the view closes or reloads.
     const loadIds = loadIdRef;
     return () => {
       loadIds.current++;
     };
   }, [load]);
 
-  async function invite(email: string): Promise<WorkspaceInvite> {
-    const created = await inviteWorkspaceMember(workspaceId, email);
-    await load();
-    return created;
-  }
+  const invite = useCallback(
+    async (email: string): Promise<WorkspaceInvite> => {
+      const created = await inviteWorkspaceMember(workspaceId, email);
+      await load();
+      return created;
+    },
+    [workspaceId, load]
+  );
+
+  return { detail, error, invite };
+}
+
+function MembersDialog({ workspaceId }: { workspaceId: string }) {
+  const { user } = useAuth();
+  const { closePanel } = useWorkspace();
+  const { detail, error, invite } = useWorkspaceDetail(workspaceId);
 
   return (
     <Dialog title={detail?.workspace.name ?? "Workspace"} subtitle="Members and invitations" onClose={closePanel} wide>
-      {error && <p className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg mb-4">{error}</p>}
+      {error && <Alert tone="error" className="mb-4">{error}</Alert>}
       {detail ? (
         <MembersPanel detail={detail} currentUserId={user?.userId ?? null} onInvite={invite} />
       ) : (
-        !error && <p className="text-sm text-slate-400">Loading…</p>
+        !error && <LoadingState />
       )}
     </Dialog>
   );
 }
 
-function RoleBadge({ role }: { role: WorkspaceRole }) {
-  return role === "owner" ? (
-    <span className="text-xs font-medium text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">Owner</span>
-  ) : (
-    <span className="text-xs font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">Member</span>
+export function RoleBadge({ role }: { role: WorkspaceRole }) {
+  return role === "owner" ? <Badge tone="brand">Owner</Badge> : <Badge tone="neutral">Member</Badge>;
+}
+
+function Avatar({ email }: { email: string | null }) {
+  return (
+    <span className="h-8 w-8 shrink-0 rounded-full bg-navy-800 text-white text-xs font-semibold flex items-center justify-center">
+      {initials(email)}
+    </span>
   );
 }
 
@@ -212,18 +240,21 @@ export function MembersPanel({
   return (
     <div className="space-y-6">
       <section>
-        <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
           Members ({detail.members.length})
         </h3>
-        <ul className="divide-y divide-slate-100 border border-slate-100 rounded-lg">
+        <ul className="divide-y divide-line border border-line rounded-lg">
           {detail.members.map((member) => (
             <li key={member.userId} className="px-3 py-2.5 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm text-slate-800 truncate">
-                  {member.email ?? <span className="text-slate-400">Email not verified</span>}
-                  {member.userId === currentUserId && <span className="text-slate-400"> (you)</span>}
-                </p>
-                {member.joinedAt && <p className="text-xs text-slate-400">Joined {formatDate(member.joinedAt)}</p>}
+              <div className="flex items-center gap-3 min-w-0">
+                <Avatar email={member.email} />
+                <div className="min-w-0">
+                  <p className="text-sm text-slate-800 truncate">
+                    {member.email ?? <span className="text-slate-400">Email not verified</span>}
+                    {member.userId === currentUserId && <span className="text-slate-400"> (you)</span>}
+                  </p>
+                  {member.joinedAt && <p className="text-xs text-slate-500">Joined {formatDate(member.joinedAt)}</p>}
+                </div>
               </div>
               <RoleBadge role={member.role} />
             </li>
@@ -234,8 +265,8 @@ export function MembersPanel({
       {isOwner ? (
         <>
           <section>
-            <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">Invite a member</h3>
-            <form onSubmit={handleInvite} className="flex gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Invite a member</h3>
+            <form onSubmit={handleInvite} className="flex flex-col sm:flex-row gap-2">
               <input
                 type="email"
                 value={email}
@@ -245,42 +276,43 @@ export function MembersPanel({
                 aria-label="Email address to invite"
                 className={inputClass}
               />
-              <button type="submit" disabled={inviting || !email.trim()} className={`${primaryButton} whitespace-nowrap`}>
-                {inviting ? "Inviting…" : "Invite Member"}
+              <button type="submit" disabled={inviting || !email.trim()} className={primaryButton}>
+                <UserPlus className="h-4 w-4" aria-hidden="true" />
+                {inviting ? "Inviting…" : "Invite member"}
               </button>
             </form>
-            <p className="text-xs text-slate-400 mt-1.5">
+            <p className="text-xs text-slate-500 mt-1.5">
               Invitations are shown in the app; no email is sent. They join as a member.
             </p>
-            {inviteDone && <p className="text-xs text-emerald-700 bg-emerald-50 px-3 py-2 rounded-lg mt-2">{inviteDone}</p>}
-            {inviteError && <p className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg mt-2">{inviteError}</p>}
+            {inviteDone && <Alert tone="success" className="mt-2">{inviteDone}</Alert>}
+            {inviteError && <Alert tone="error" className="mt-2">{inviteError}</Alert>}
           </section>
 
           <section>
-            <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">Pending invitations</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Pending invitations</h3>
             {detail.invites && detail.invites.length > 0 ? (
-              <ul className="divide-y divide-slate-100 border border-slate-100 rounded-lg">
+              <ul className="divide-y divide-line border border-line rounded-lg">
                 {detail.invites.map((invite) => (
                   <li key={invite.email} className="px-3 py-2.5 flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-sm text-slate-800 truncate">{invite.email}</p>
-                      <p className="text-xs text-slate-400">
+                      <p className="text-xs text-slate-500">
                         Expires {formatDate(invite.expiresAt)}
                         {" · invited by "}
                         {invite.invitedByEmail ?? emailsById.get(invite.invitedBy) ?? "an owner"}
                       </p>
                     </div>
-                    <RoleBadge role={invite.role} />
+                    <Badge tone="warning">Pending</Badge>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="text-sm text-slate-400">No pending invitations.</p>
+              <p className="text-sm text-slate-500">No pending invitations.</p>
             )}
           </section>
         </>
       ) : (
-        <p className="text-sm text-slate-400">Only workspace owners can invite members.</p>
+        <p className="text-sm text-slate-500">Only workspace owners can invite members.</p>
       )}
     </div>
   );
@@ -288,14 +320,18 @@ export function MembersPanel({
 
 // --- Invitations for the signed-in user -------------------------------------------
 
-function InvitationsDialog() {
+/**
+ * Invitations addressed to the signed-in user, with Accept and Decline.
+ * Accepting switches to the workspace (unless a write is running) and calls
+ * onAccepted. Used by the invitations dialog and the Workspaces page.
+ */
+export function InvitationsList({ onAccepted }: { onAccepted?: () => void }) {
   const {
     invitations,
     invitationsError,
     refreshInvitations,
     refreshWorkspaces,
     selectWorkspace,
-    closePanel,
     scopeLocked,
   } = useWorkspace();
   const [busy, setBusy] = useState<string | null>(null);
@@ -325,7 +361,7 @@ function InvitationsDialog() {
         await Promise.all([refreshInvitations(), refreshWorkspaces()]);
         if (!scopeLocked) {
           selectWorkspace(workspace);
-          closePanel();
+          onAccepted?.();
         }
       } else {
         await declineWorkspaceInvitation(workspaceId);
@@ -349,20 +385,20 @@ function InvitationsDialog() {
   const shown = (invitations ?? []).filter((i) => !hidden.has(i.workspaceId));
 
   return (
-    <Dialog title="Invitations" subtitle="Workspaces you've been invited to join" onClose={closePanel} wide>
-      {invitationsError && <p className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg mb-4">{invitationsError}</p>}
+    <>
+      {invitationsError && <Alert tone="error" className="mb-4">{invitationsError}</Alert>}
       {invitations === null ? (
-        !invitationsError && <p className="text-sm text-slate-400">Loading…</p>
+        !invitationsError && <LoadingState />
       ) : shown.length === 0 ? (
-        <p className="text-sm text-slate-400">No pending invitations.</p>
+        <EmptyState icon={Inbox} title="No pending invitations" className="py-8" />
       ) : (
-        <ul className="divide-y divide-slate-100 border border-slate-100 rounded-lg">
+        <ul className="divide-y divide-line border border-line rounded-lg">
           {shown.map((invitation) => (
             <li key={invitation.workspaceId} className="px-3 py-3">
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-slate-800 truncate">{invitation.workspaceName}</p>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-slate-500">
                     Invited by {invitation.invitedByEmail ?? "a workspace owner"} · Expires{" "}
                     {formatDate(invitation.expiresAt)}
                   </p>
@@ -387,12 +423,21 @@ function InvitationsDialog() {
                 </div>
               </div>
               {errors[invitation.workspaceId] && (
-                <p className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg mt-2">{errors[invitation.workspaceId]}</p>
+                <Alert tone="error" className="mt-2">{errors[invitation.workspaceId]}</Alert>
               )}
             </li>
           ))}
         </ul>
       )}
+    </>
+  );
+}
+
+function InvitationsDialog() {
+  const { closePanel } = useWorkspace();
+  return (
+    <Dialog title="Invitations" subtitle="Workspaces you've been invited to join" onClose={closePanel} wide>
+      <InvitationsList onAccepted={closePanel} />
     </Dialog>
   );
 }

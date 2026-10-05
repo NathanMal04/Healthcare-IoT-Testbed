@@ -3,16 +3,16 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
-import NavBar from "@/components/NavBar";
-import WorkspaceDialogs, { WorkspaceNotice } from "@/app/components/WorkspaceDialogs";
 
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Healthcare IoT Testbed",
-  description: "IoT device vulnerability analysis platform",
+  title: "Vzoniq · Healthcare IoT Vulnerability Testbed",
+  description: "Healthcare IoT vulnerability research: devices, firmware, artifacts and CVEs.",
 };
 
+// Providers only. The signed-in frame lives in app/(app)/layout.tsx and the
+// sign-in screens' frame in app/(auth)/layout.tsx; route groups don't change URLs.
 export default function RootLayout({
   children,
 }: {
@@ -20,16 +20,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={`${inter.className} bg-slate-50 min-h-screen`}>
+      <body className={`${inter.className} min-h-screen`}>
         <AuthProvider>
-          <WorkspaceProvider>
-            <NavBar />
-            <main className="max-w-6xl mx-auto px-6 py-8">
-              <WorkspaceNotice />
-              {children}
-            </main>
-            <WorkspaceDialogs />
-          </WorkspaceProvider>
+          <WorkspaceProvider>{children}</WorkspaceProvider>
         </AuthProvider>
       </body>
     </html>

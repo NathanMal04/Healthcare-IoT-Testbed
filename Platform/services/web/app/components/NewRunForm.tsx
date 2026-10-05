@@ -230,7 +230,7 @@ export default function NewRunForm({ prefill, onCancel }: { prefill: NewRunPrefi
               key={value}
               type="button"
               onClick={() => setSource(value)}
-              className={`text-sm px-3 py-1.5 rounded-lg border ${source === value ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600"}`}
+              className={`text-sm px-3 py-1.5 rounded-lg border ${source === value ? "border-brand-500 bg-brand-50 text-brand-700" : "border-line text-slate-600"}`}
             >
               {label}
             </button>
@@ -313,7 +313,7 @@ export default function NewRunForm({ prefill, onCancel }: { prefill: NewRunPrefi
               key={value}
               type="button"
               onClick={() => setMode(value)}
-              className={`text-sm px-3 py-2 rounded-lg border text-left ${mode === value ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600"}`}
+              className={`text-sm px-3 py-2 rounded-lg border text-left ${mode === value ? "border-brand-500 bg-brand-50 text-brand-700" : "border-line text-slate-600"}`}
             >
               {label}
             </button>
@@ -321,7 +321,7 @@ export default function NewRunForm({ prefill, onCancel }: { prefill: NewRunPrefi
         </div>
 
         {mode === "groupBy" && (
-          <div className="space-y-3 border border-slate-100 rounded-lg p-4">
+          <div className="space-y-3 border border-line rounded-lg p-4">
             <div className="grid md:grid-cols-2 gap-3">
               <div>
                 <label className={labelClass}>Group by</label>
@@ -426,7 +426,7 @@ export default function NewRunForm({ prefill, onCancel }: { prefill: NewRunPrefi
         </div>
       </section>
 
-      <section className="bg-slate-50 rounded-lg p-4 text-sm space-y-2">
+      <section className="bg-surface-muted rounded-lg p-4 text-sm space-y-2">
         {estimating && <p className="text-slate-400">Estimating…</p>}
         {error && <p className="text-red-600">{error}</p>}
         {!estimating && !error && !estimate && <p className="text-slate-400">Choose a script and inputs to see a preview.</p>}

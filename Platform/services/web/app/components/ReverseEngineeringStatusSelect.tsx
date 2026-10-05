@@ -28,7 +28,7 @@ export default function ReverseEngineeringStatusSelect({
         onChange={(e) => onChange(e.target.value as ReverseEngineeringStatus)}
         disabled={saving}
         aria-label={ariaLabel}
-        className={`text-xs font-medium border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 ${REVERSE_ENGINEERING_STATUS_STYLES[value]}`}
+        className={`text-xs font-medium border border-line rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-50 ${REVERSE_ENGINEERING_STATUS_STYLES[value]}`}
       >
         {REVERSE_ENGINEERING_STATUSES.map((status) => (
           <option key={status} value={status}>
