@@ -8,6 +8,7 @@ import WorkspaceSwitcher from "@/app/components/WorkspaceSwitcher";
 const LINKS = [
   { href: "/", label: "Dashboard" },
   { href: "/artifacts", label: "Artifacts" },
+  { href: "/database", label: "Database" },
   { href: "/scripts", label: "Scripts" },
   { href: "/environments", label: "Environments" },
   { href: "/runs", label: "Runs" },
