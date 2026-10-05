@@ -463,10 +463,19 @@ resource "aws_iam_policy" "runs_api" {
         )
       },
       {
-        # Tags go on at submit time (userId, runId) for cost allocation.
         Effect   = "Allow"
-        Action   = ["batch:TerminateJob", "batch:TagResource"]
+        Action   = "batch:TerminateJob"
         Resource = "arn:aws:batch:${var.aws_region}:${local.account_id}:job/*"
+      },
+      {
+        # Tags go on at submit time (userId, runId) for cost allocation.
+        # Batch checks TagResource on the job definition as well as the job.
+        Effect = "Allow"
+        Action = "batch:TagResource"
+        Resource = [
+          "arn:aws:batch:${var.aws_region}:${local.account_id}:job/*",
+          "arn:aws:batch:${var.aws_region}:${local.account_id}:job-definition/${var.name}-mod-*",
+        ]
       },
       {
         Effect   = "Allow"
