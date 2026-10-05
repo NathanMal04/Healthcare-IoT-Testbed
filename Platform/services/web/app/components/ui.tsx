@@ -43,6 +43,73 @@ export function StatusBadge({ status, title }: { status: string; title?: string 
   );
 }
 
+const SEVERITY_STYLES: Record<string, string> = {
+  critical: "text-red-700 bg-red-50",
+  high: "text-orange-700 bg-orange-50",
+  medium: "text-amber-700 bg-amber-50",
+  low: "text-slate-600 bg-slate-100",
+};
+
+/** A CVE severity, styled like StatusBadge. */
+export function SeverityBadge({ severity }: { severity: string }) {
+  return (
+    <span
+      className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap capitalize ${
+        SEVERITY_STYLES[severity] ?? "text-slate-600 bg-slate-100"
+      }`}
+    >
+      {severity}
+    </span>
+  );
+}
+
+const DIALOG_WIDTHS = { sm: "max-w-sm", lg: "max-w-lg", xl: "max-w-2xl" } as const;
+
+/**
+ * A modal with a title and a close button; clicking the backdrop closes it.
+ * `wide` is the same as size "lg"; "xl" fits longer forms.
+ */
+export function Dialog({
+  title,
+  subtitle,
+  onClose,
+  wide,
+  size,
+  children,
+}: {
+  title: React.ReactNode;
+  subtitle?: React.ReactNode;
+  onClose: () => void;
+  wide?: boolean;
+  size?: keyof typeof DIALOG_WIDTHS;
+  children: React.ReactNode;
+}) {
+  const width = DIALOG_WIDTHS[size ?? (wide ? "lg" : "sm")];
+  return (
+    <div
+      className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 px-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        className={`w-full ${width} bg-white rounded-2xl border border-slate-100 shadow-sm p-8 max-h-[90vh] overflow-y-auto`}
+      >
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-bold text-slate-800 tracking-tight">{title}</h2>
+            {subtitle && <p className="text-slate-400 text-sm mt-1">{subtitle}</p>}
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="text-slate-400 hover:text-slate-600">
+            ✕
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export function formatDate(value?: string | null): string {
   if (!value) return "—";
   const date = new Date(value);

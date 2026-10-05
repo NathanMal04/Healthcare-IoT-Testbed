@@ -2,11 +2,14 @@ import { fetchAuthSession } from "aws-amplify/auth";
 
 export class ApiError extends Error {
   readonly status: number;
+  /** The parsed JSON error body, when there was one (e.g. a 409's cveRecordId). */
+  readonly details: Record<string, unknown>;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, details: Record<string, unknown> = {}) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.details = details;
   }
 }
 
@@ -29,8 +32,10 @@ export async function getIdToken(): Promise<string> {
 
 export async function throwApiError(response: Response, fallback: string): Promise<never> {
   let message = fallback;
+  let details: Record<string, unknown> = {};
   try {
     const errorBody = await response.json();
+    if (errorBody && typeof errorBody === "object" && !Array.isArray(errorBody)) details = errorBody;
     if (typeof errorBody?.error === "string") {
       message = errorBody.error;
     } else if (typeof errorBody?.message === "string") {
@@ -40,7 +45,7 @@ export async function throwApiError(response: Response, fallback: string): Promi
   } catch {
     // response body wasn't JSON; keep the fallback message
   }
-  throw new ApiError(message, response.status);
+  throw new ApiError(message, response.status, details);
 }
 
 /**
@@ -48,7 +53,7 @@ export async function throwApiError(response: Response, fallback: string): Promi
  * and `query` values that are undefined or empty are left out.
  */
 export async function apiRequest<T>(
-  method: "GET" | "POST" | "PATCH",
+  method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE",
   path: string,
   options: { body?: unknown; query?: Record<string, string | number | undefined> } = {}
 ): Promise<T> {

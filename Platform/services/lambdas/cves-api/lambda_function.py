@@ -67,9 +67,10 @@ IMMUTABLE_FIELDS = {"cveRecordId", "cveId", "workspaceId", "createdBy", "created
                     "deviceIds"}
 # Optional fields a PATCH can clear with null (or an empty value).
 CLEARABLE_FIELDS = MUTABLE_FIELDS - {"severity"}
-# GET /cves leaves out the long text fields; GET /cves/{id} has everything.
-LIST_ATTRIBUTES = ("pk", "cveRecordId", "cveId", "severity", "cvssScore", "cvssVersion", "affectedChipsets",
-                   "deviceIds", "workspaceId", "createdBy", "createdAt", "updatedAt", "version")
+# GET /cves includes the description, which the web app searches, but leaves
+# out references; GET /cves/{id} has everything.
+LIST_ATTRIBUTES = ("pk", "cveRecordId", "cveId", "severity", "cvssScore", "cvssVersion", "description",
+                   "affectedChipsets", "deviceIds", "workspaceId", "createdBy", "createdAt", "updatedAt", "version")
 
 # DELETE removes a CVE in one transaction: METADATA, its two scope rows, the
 # claim, a membership check and two rows per device, at most 100 items. 40
@@ -728,8 +729,8 @@ def _public_cve(item, full=True):
         "updatedAt": item.get("updatedAt"),
         "version": int(item["version"]) if "version" in item else None,
     }
+    view["description"] = item.get("description")
     if full:
-        view["description"] = item.get("description")
         view["references"] = list(item.get("references") or [])
     if item.get("workspaceId"):
         # Only on workspace CVEs, as for devices and artifacts.

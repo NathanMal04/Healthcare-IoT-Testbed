@@ -16,7 +16,7 @@ import {
   type WorkspaceRole,
 } from "@/lib/workspaces";
 import { ApiError } from "@/lib/api";
-import { formatDate, inputClass, labelClass, primaryButton, secondaryButton } from "@/app/components/ui";
+import { Dialog, formatDate, inputClass, labelClass, primaryButton, secondaryButton } from "@/app/components/ui";
 
 /** The workspace dialogs, opened from the nav bar and the dashboard. */
 export default function WorkspaceDialogs() {
@@ -39,44 +39,6 @@ export function WorkspaceNotice() {
       <button type="button" onClick={dismissNotice} aria-label="Dismiss" className="text-amber-700 hover:text-amber-900">
         ✕
       </button>
-    </div>
-  );
-}
-
-function Dialog({
-  title,
-  subtitle,
-  onClose,
-  wide,
-  children,
-}: {
-  title: string;
-  subtitle?: string;
-  onClose: () => void;
-  wide?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 px-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        className={`w-full ${wide ? "max-w-lg" : "max-w-sm"} bg-white rounded-2xl border border-slate-100 shadow-sm p-8 max-h-[90vh] overflow-y-auto`}
-      >
-        <div className="mb-6 flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-bold text-slate-800 tracking-tight">{title}</h2>
-            {subtitle && <p className="text-slate-400 text-sm mt-1">{subtitle}</p>}
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-slate-400 hover:text-slate-600">
-            ✕
-          </button>
-        </div>
-        {children}
-      </div>
     </div>
   );
 }

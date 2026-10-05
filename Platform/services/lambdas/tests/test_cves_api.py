@@ -902,17 +902,20 @@ class ListCvesTests(ApiTestCase):
             "cveRecordId": CVE_P, "cveId": "CVE-2020-26652", "severity": "high", "cvssScore": 7.5,
             "cvssVersion": None, "affectedChipsets": [], "deviceIds": [], "createdBy": USER,
             "createdAt": "2026-10-02T00:00:00.000000+00:00", "updatedAt": "2026-10-02T00:00:00.000000+00:00",
-            "version": 1,
+            "version": 1, "description": "long text",
         }]})
         self.assertIn((f"USER#{USER}", "CVE#"), self.table.queries)
 
-    def test_list_omits_long_fields_and_projects_them_out(self):
-        for cve in response_body(self.list())["cves"] + response_body(self.list(workspace_id=WS_A))["cves"]:
-            self.assertNotIn("description", cve)
+    def test_list_includes_description_but_not_references(self):
+        # The web app searches descriptions client-side; references stay detail-only.
+        personal = response_body(self.list())["cves"]
+        workspace = response_body(self.list(workspace_id=WS_A))["cves"]
+        self.assertEqual([c["description"] for c in personal + workspace], ["long text", "long text"])
+        for cve in personal + workspace:
             self.assertNotIn("references", cve)
         for request in self.resource.batch_requests:
             projected = set(request["ExpressionAttributeNames"].values())
-            self.assertNotIn("description", projected)
+            self.assertIn("description", projected)
             self.assertNotIn("references", projected)
             self.assertIn("affectedChipsets", projected)
             self.assertIn("deviceIds", projected)

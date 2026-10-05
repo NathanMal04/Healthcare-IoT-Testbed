@@ -295,7 +295,7 @@ A known, public vulnerability (CVE) recorded against the devices under research,
 | `createdBy` | S | The caller's Cognito `sub` (never taken from the request). Provenance, not ownership |
 | `createdAt`, `updatedAt` | S | Timestamps (with microseconds) |
 
-Optional fields that are empty are left out rather than stored empty. `GET /cves` returns everything except `description` and `references`; `GET /cves/{cveRecordId}` returns everything.
+Optional fields that are empty are left out rather than stored empty. `GET /cves` returns everything except `references` (it includes `description`, which the web app searches); `GET /cves/{cveRecordId}` returns everything.
 
 **Canonical `cveId`.** Before validation and before the uniqueness claim: surrounding whitespace is trimmed, the Unicode hyphens U+2010–U+2015 and U+2212 (common in ids pasted from documents) become `-`, and letters are uppercased. The result must match `CVE-([0-9]{4})-([0-9]{4,19})` exactly, with ASCII digits only, and a year from 1999 to the current UTC year + 1. Only the canonical form is stored, so `cve-2021-37584` and `CVE–2021–37584` are the same id.
 
