@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useAuth } from "@/context/AuthContext";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { getDevices, type Device } from "@/lib/devices";
+import { cveHref } from "@/lib/routes";
 import { isWorkspaceUnavailable, scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
 import {
   EMPTY_FILTERS,
@@ -19,7 +21,7 @@ import {
   type CveSummary,
   type Severity,
 } from "@/lib/cves";
-import { AddCveDialog, CveDetailsDialog } from "@/app/components/CveDialogs";
+import { AddCveDialog } from "@/app/components/CveDialogs";
 import { Plus, RefreshCw, ShieldAlert } from "lucide-react";
 import {
   Alert,
@@ -55,7 +57,7 @@ export default function VulnerabilitiesPage() {
 
 function VulnerabilitiesView() {
   const ready = useRequireUser();
-  const { user } = useAuth();
+  const router = useRouter();
   const { scope, reportWorkspaceUnavailable } = useWorkspace();
   const workspaceId = scopeWorkspaceId(scope);
 
@@ -65,9 +67,7 @@ function VulnerabilitiesView() {
   const [devicesError, setDevicesError] = useState<string | null>(null);
   const [listLoading, setListLoading] = useState(false);
   const [filters, setFilters] = useState<CveFilters>(EMPTY_FILTERS);
-  const [openCve, setOpenCve] = useState<{ id: string; initial?: CveSummary } | null>(null);
   const [adding, setAdding] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
 
   const isMountedRef = useRef(true);
   useEffect(() => {
@@ -129,22 +129,9 @@ function VulnerabilitiesView() {
     });
   }, []);
 
-  const removeRow = useCallback((cveRecordId: string) => {
-    setCves((current) => current?.filter((c) => c.cveRecordId !== cveRecordId) ?? current);
-    setOpenCve(null);
-  }, []);
-
-  const onGone = useCallback(
-    (cveRecordId: string, message: string) => {
-      removeRow(cveRecordId);
-      setNotice(message);
-    },
-    [removeRow]
-  );
-
+  // Each CVE opens on its own page.
   function openRow(cve: CveSummary) {
-    setNotice(null);
-    setOpenCve({ id: cve.cveRecordId, initial: cve });
+    router.push(cveHref(cve.cveRecordId));
   }
 
   if (!ready) return null;
@@ -156,16 +143,13 @@ function VulnerabilitiesView() {
       header: "CVE ID",
       className: "whitespace-nowrap",
       cell: (cve) => (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            openRow(cve);
-          }}
+        <Link
+          href={cveHref(cve.cveRecordId)}
+          onClick={(e) => e.stopPropagation()}
           className="font-mono text-[13px] font-medium text-brand-700 hover:text-brand-800 hover:underline"
         >
           {cve.cveId}
-        </button>
+        </Link>
       ),
     },
     { key: "severity", header: "Severity", cell: (cve) => <SeverityBadge severity={cve.severity} /> },
@@ -216,23 +200,11 @@ function VulnerabilitiesView() {
         description="Known vulnerabilities recorded against your devices"
         scope={scope}
         actions={
-          <Button
-            icon={Plus}
-            onClick={() => {
-              setNotice(null);
-              setAdding(true);
-            }}
-          >
+          <Button icon={Plus} onClick={() => setAdding(true)}>
             Add CVE
           </Button>
         }
       />
-
-      {notice && (
-        <Alert tone="warning" onDismiss={() => setNotice(null)} className="mb-4 text-sm">
-          {notice}
-        </Alert>
-      )}
 
       <Card className="overflow-hidden">
         <Toolbar>
@@ -341,28 +313,10 @@ function VulnerabilitiesView() {
           deviceNames={deviceNames}
           onClose={() => setAdding(false)}
           onSaved={upsert}
-          onOpenExisting={(id) => {
-            setAdding(false);
-            setOpenCve({ id, initial: cves?.find((c) => c.cveRecordId === id) });
-          }}
+          onOpenExisting={(id) => router.push(cveHref(id))}
         />
       )}
 
-      {openCve && (
-        <CveDetailsDialog
-          key={openCve.id}
-          cveRecordId={openCve.id}
-          initial={openCve.initial}
-          scope={scope}
-          devices={devices}
-          deviceNames={deviceNames}
-          currentUserId={user?.userId}
-          onClose={() => setOpenCve(null)}
-          onChanged={upsert}
-          onDeleted={removeRow}
-          onGone={onGone}
-        />
-      )}
     </div>
   );
 }

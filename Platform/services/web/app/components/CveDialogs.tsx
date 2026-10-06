@@ -67,7 +67,7 @@ function formatScore(cve: Pick<CveSummary, "cvssScore" | "cvssVersion">): string
 }
 
 /** A 409 because another request changed the CVE at the same moment (not the 40-device limit). */
-function isConcurrentChange(err: unknown): boolean {
+export function isConcurrentChange(err: unknown): boolean {
   return err instanceof ApiError && err.status === 409 && /changed by another request|in progress/i.test(err.message);
 }
 
@@ -77,7 +77,7 @@ function FieldError({ message }: { message?: string }) {
 
 // --- Form fields (add and edit) ----------------------------------------------------
 
-function CveFormFields({
+export function CveFormFields({
   values,
   onChange,
   errors,
