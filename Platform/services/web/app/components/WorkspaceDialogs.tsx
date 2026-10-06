@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Inbox, UserPlus } from "lucide-react";
+import { Building2, FolderOpen, Inbox, Info, Mail, ShieldCheck, UserPlus, Users } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import {
@@ -14,12 +14,14 @@ import {
   isWorkspaceUnavailable,
   type WorkspaceDetail,
   type WorkspaceInvite,
+  type WorkspaceMember,
   type WorkspaceRole,
 } from "@/lib/workspaces";
 import { ApiError } from "@/lib/api";
 import {
   Alert,
   Badge,
+  DataTable,
   Dialog,
   EmptyState,
   LoadingState,
@@ -29,6 +31,7 @@ import {
   labelClass,
   primaryButton,
   secondaryButton,
+  type Column,
 } from "@/app/components/ui";
 
 /** The workspace dialogs, opened from the top bar, the dashboard and the Workspaces page. */
@@ -83,11 +86,17 @@ function CreateWorkspaceDialog() {
   }
 
   return (
-    <Dialog title="Create workspace" subtitle="A shared space for your team's devices and firmware" onClose={close}>
-      <form onSubmit={handleSubmit} className="space-y-4">
+    <Dialog
+      title="Create a new workspace"
+      subtitle="A shared space for your team's devices, firmware and CVEs"
+      onClose={close}
+      size="xl"
+      aside={<CreateWorkspaceAside />}
+    >
+      <form onSubmit={handleSubmit} className="space-y-5">
         <div>
           <label className={labelClass} htmlFor="workspace-name">
-            Workspace name
+            Workspace name <span className="text-red-500" aria-hidden="true">*</span>
           </label>
           <input
             id="workspace-name"
@@ -97,21 +106,67 @@ function CreateWorkspaceDialog() {
             disabled={submitting}
             maxLength={100}
             className={inputClass}
-            placeholder="Infusion pump research"
+            placeholder="e.g. Infusion pump research"
             autoFocus
+            required
           />
+          <p className="text-2xs text-slate-400 mt-1 text-right tabular-nums">{name.length}/100</p>
+        </div>
+        <div className="flex items-start gap-3 rounded-lg border border-line bg-surface-muted px-3 py-3">
+          <span className="h-8 w-8 shrink-0 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center">
+            <Users className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <div className="text-xs text-slate-600">
+            <p className="font-medium text-slate-800">Visible to members you invite</p>
+            <p className="mt-0.5">
+              You&apos;ll be the owner and can invite teammates. For work only you can see, use your Personal workspace.
+            </p>
+          </div>
         </div>
         {error && <Alert tone="error">{error}</Alert>}
-        <div className="flex items-center gap-3 pt-2">
-          <button type="button" onClick={close} disabled={submitting} className={`${secondaryButton} flex-1`}>
+        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-1">
+          <button type="button" onClick={close} disabled={submitting} className={secondaryButton}>
             Cancel
           </button>
-          <button type="submit" disabled={submitting || !name.trim()} className={`${primaryButton} flex-1`}>
+          <button type="submit" disabled={submitting || !name.trim()} className={primaryButton}>
             {submitting ? "Creating…" : "Create workspace"}
           </button>
         </div>
       </form>
     </Dialog>
+  );
+}
+
+const CREATE_POINTS = [
+  { icon: FolderOpen, title: "Share devices & firmware", text: "Work together on uploaded files and research data." },
+  { icon: UserPlus, title: "Invite team members", text: "Owners invite teammates by their verified email." },
+  { icon: ShieldCheck, title: "Track vulnerabilities", text: "Keep CVEs and linked devices in one place." },
+];
+
+function CreateWorkspaceAside() {
+  return (
+    <>
+      <span className="h-12 w-12 rounded-xl bg-white/10 ring-1 ring-white/15 flex items-center justify-center">
+        <Building2 className="h-6 w-6 text-brand-200" aria-hidden="true" />
+      </span>
+      <p className="mt-4 text-lg font-semibold tracking-tight">Create a workspace</p>
+      <p className="mt-1 text-sm text-navy-200">
+        Collaborate with your team on device analysis, firmware research and vulnerability tracking.
+      </p>
+      <ul className="mt-6 space-y-4">
+        {CREATE_POINTS.map(({ icon: Icon, title, text }) => (
+          <li key={title} className="flex gap-3">
+            <span className="h-8 w-8 shrink-0 rounded-lg bg-white/10 flex items-center justify-center">
+              <Icon className="h-4 w-4 text-brand-200" aria-hidden="true" />
+            </span>
+            <div>
+              <p className="text-sm font-medium">{title}</p>
+              <p className="text-xs text-navy-300 mt-0.5">{text}</p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 
@@ -187,31 +242,56 @@ export function RoleBadge({ role }: { role: WorkspaceRole }) {
   return role === "owner" ? <Badge tone="brand">Owner</Badge> : <Badge tone="neutral">Member</Badge>;
 }
 
-function Avatar({ email }: { email: string | null }) {
+export function Avatar({ email, size = "md" }: { email: string | null; size?: "sm" | "md" }) {
+  const box = size === "sm" ? "h-7 w-7 text-2xs" : "h-8 w-8 text-xs";
   return (
-    <span className="h-8 w-8 shrink-0 rounded-full bg-navy-800 text-white text-xs font-semibold flex items-center justify-center">
+    <span
+      className={`${box} shrink-0 rounded-full bg-navy-800 text-white font-semibold flex items-center justify-center ring-2 ring-white`}
+      title={email ?? undefined}
+    >
       {initials(email)}
     </span>
   );
 }
 
-/**
- * Members, and for owners the invite form and pending invitations. Whether
- * the user is an owner comes from the workspace the backend returned, which
- * also re-checks it on every invitation.
- */
-export function MembersPanel({
-  detail,
-  currentUserId,
-  onInvite,
-}: {
-  detail: WorkspaceDetail;
-  currentUserId: string | null;
-  onInvite: (email: string) => Promise<WorkspaceInvite>;
-}) {
-  const isOwner = detail.workspace.role === "owner";
-  const emailsById = new Map(detail.members.map((m) => [m.userId, m.email]));
+/** A workspace's members: who they are, their role and when they joined. */
+export function MembersTable({ members, currentUserId }: { members: WorkspaceMember[]; currentUserId: string | null }) {
+  const columns: Column<WorkspaceMember>[] = [
+    {
+      key: "member",
+      header: "Member",
+      cell: (member) => (
+        <div className="flex items-center gap-3 min-w-0">
+          <Avatar email={member.email} />
+          <p className="text-sm text-slate-800 truncate">
+            {member.email ?? <span className="text-slate-400">Email not verified</span>}
+            {member.userId === currentUserId && <span className="text-slate-400"> (you)</span>}
+          </p>
+        </div>
+      ),
+      className: "align-middle",
+    },
+    { key: "role", header: "Role", cell: (member) => <RoleBadge role={member.role} />, className: "align-middle" },
+    {
+      key: "joined",
+      header: "Joined",
+      cell: (member) => <span className="text-slate-600">{member.joinedAt ? formatDate(member.joinedAt) : "—"}</span>,
+      hideBelow: "sm",
+      className: "align-middle whitespace-nowrap",
+    },
+  ];
+  return (
+    <div className="border border-line rounded-lg overflow-hidden">
+      <DataTable columns={columns} rows={members} rowKey={(m) => m.userId} minWidth="28rem" />
+    </div>
+  );
+}
 
+/**
+ * The owner's invite form. The backend re-checks ownership on every
+ * invitation; onInvite reloads the workspace so pending invitations update.
+ */
+export function InviteMemberForm({ onInvite }: { onInvite: (email: string) => Promise<WorkspaceInvite> }) {
   const [email, setEmail] = useState("");
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
@@ -238,77 +318,120 @@ export function MembersPanel({
   }
 
   return (
+    <div>
+      <form onSubmit={handleInvite} className="flex flex-col sm:flex-row gap-2">
+        <div className="relative flex-1">
+          <Mail className="h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" aria-hidden="true" />
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={inviting}
+            placeholder="teammate@example.com"
+            aria-label="Email address to invite"
+            className={`${inputClass} pl-9`}
+          />
+        </div>
+        <button type="submit" disabled={inviting || !email.trim()} className={primaryButton}>
+          <UserPlus className="h-4 w-4" aria-hidden="true" />
+          {inviting ? "Inviting…" : "Invite member"}
+        </button>
+      </form>
+      <p className="text-xs text-slate-500 mt-1.5 flex items-center gap-1">
+        <Info className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        Invitations are shown in the app; no email is sent. They join as a member.
+      </p>
+      {inviteDone && <Alert tone="success" className="mt-2">{inviteDone}</Alert>}
+      {inviteError && <Alert tone="error" className="mt-2">{inviteError}</Alert>}
+    </div>
+  );
+}
+
+/** Invitations the workspace has sent that haven't been answered (owners only). */
+export function PendingInvitesTable({ detail }: { detail: WorkspaceDetail }) {
+  const emailsById = new Map(detail.members.map((m) => [m.userId, m.email]));
+  const invites = detail.invites ?? [];
+  if (invites.length === 0) {
+    return (
+      <EmptyState
+        icon={Inbox}
+        title="No pending invitations"
+        description="Invitations you send appear here until they're accepted or declined."
+        className="py-10 border border-dashed border-line rounded-lg"
+      />
+    );
+  }
+  const columns: Column<WorkspaceInvite>[] = [
+    {
+      key: "email",
+      header: "Invited",
+      cell: (invite) => (
+        <div className="flex items-center gap-3 min-w-0">
+          <Avatar email={invite.email} />
+          <span className="text-sm text-slate-800 truncate">{invite.email}</span>
+        </div>
+      ),
+      className: "align-middle",
+    },
+    {
+      key: "by",
+      header: "Invited by",
+      cell: (invite) => (
+        <span className="text-slate-600">{invite.invitedByEmail ?? emailsById.get(invite.invitedBy) ?? "an owner"}</span>
+      ),
+      hideBelow: "md",
+      className: "align-middle",
+    },
+    {
+      key: "expires",
+      header: "Expires",
+      cell: (invite) => <span className="text-slate-600">{formatDate(invite.expiresAt)}</span>,
+      hideBelow: "sm",
+      className: "align-middle whitespace-nowrap",
+    },
+    { key: "status", header: "Status", cell: () => <Badge tone="warning" dot>Pending</Badge>, className: "align-middle" },
+  ];
+  return (
+    <div className="border border-line rounded-lg overflow-hidden">
+      <DataTable columns={columns} rows={invites} rowKey={(i) => i.email} minWidth="28rem" />
+    </div>
+  );
+}
+
+/**
+ * Members, and for owners the invite form and pending invitations. Whether
+ * the user is an owner comes from the workspace the backend returned, which
+ * also re-checks it on every invitation. Used by the members dialog.
+ */
+export function MembersPanel({
+  detail,
+  currentUserId,
+  onInvite,
+}: {
+  detail: WorkspaceDetail;
+  currentUserId: string | null;
+  onInvite: (email: string) => Promise<WorkspaceInvite>;
+}) {
+  const isOwner = detail.workspace.role === "owner";
+  return (
     <div className="space-y-6">
       <section>
         <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
           Members ({detail.members.length})
         </h3>
-        <ul className="divide-y divide-line border border-line rounded-lg">
-          {detail.members.map((member) => (
-            <li key={member.userId} className="px-3 py-2.5 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <Avatar email={member.email} />
-                <div className="min-w-0">
-                  <p className="text-sm text-slate-800 truncate">
-                    {member.email ?? <span className="text-slate-400">Email not verified</span>}
-                    {member.userId === currentUserId && <span className="text-slate-400"> (you)</span>}
-                  </p>
-                  {member.joinedAt && <p className="text-xs text-slate-500">Joined {formatDate(member.joinedAt)}</p>}
-                </div>
-              </div>
-              <RoleBadge role={member.role} />
-            </li>
-          ))}
-        </ul>
+        <MembersTable members={detail.members} currentUserId={currentUserId} />
       </section>
 
       {isOwner ? (
         <>
           <section>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Invite a member</h3>
-            <form onSubmit={handleInvite} className="flex flex-col sm:flex-row gap-2">
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                disabled={inviting}
-                placeholder="teammate@example.com"
-                aria-label="Email address to invite"
-                className={inputClass}
-              />
-              <button type="submit" disabled={inviting || !email.trim()} className={primaryButton}>
-                <UserPlus className="h-4 w-4" aria-hidden="true" />
-                {inviting ? "Inviting…" : "Invite member"}
-              </button>
-            </form>
-            <p className="text-xs text-slate-500 mt-1.5">
-              Invitations are shown in the app; no email is sent. They join as a member.
-            </p>
-            {inviteDone && <Alert tone="success" className="mt-2">{inviteDone}</Alert>}
-            {inviteError && <Alert tone="error" className="mt-2">{inviteError}</Alert>}
+            <InviteMemberForm onInvite={onInvite} />
           </section>
 
           <section>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Pending invitations</h3>
-            {detail.invites && detail.invites.length > 0 ? (
-              <ul className="divide-y divide-line border border-line rounded-lg">
-                {detail.invites.map((invite) => (
-                  <li key={invite.email} className="px-3 py-2.5 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm text-slate-800 truncate">{invite.email}</p>
-                      <p className="text-xs text-slate-500">
-                        Expires {formatDate(invite.expiresAt)}
-                        {" · invited by "}
-                        {invite.invitedByEmail ?? emailsById.get(invite.invitedBy) ?? "an owner"}
-                      </p>
-                    </div>
-                    <Badge tone="warning">Pending</Badge>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-sm text-slate-500">No pending invitations.</p>
-            )}
+            <PendingInvitesTable detail={detail} />
           </section>
         </>
       ) : (
@@ -390,18 +513,28 @@ export function InvitationsList({ onAccepted }: { onAccepted?: () => void }) {
       {invitations === null ? (
         !invitationsError && <LoadingState />
       ) : shown.length === 0 ? (
-        <EmptyState icon={Inbox} title="No pending invitations" className="py-8" />
+        <EmptyState
+          icon={Inbox}
+          title="No pending invitations"
+          description="When someone invites you to a workspace, it will appear here."
+          className="py-10"
+        />
       ) : (
         <ul className="divide-y divide-line border border-line rounded-lg">
           {shown.map((invitation) => (
-            <li key={invitation.workspaceId} className="px-3 py-3">
-              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-slate-800 truncate">{invitation.workspaceName}</p>
-                  <p className="text-xs text-slate-500">
-                    Invited by {invitation.invitedByEmail ?? "a workspace owner"} · Expires{" "}
-                    {formatDate(invitation.expiresAt)}
-                  </p>
+            <li key={invitation.workspaceId} className="px-4 py-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="h-9 w-9 shrink-0 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center">
+                    <Building2 className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-800 truncate">{invitation.workspaceName}</p>
+                    <p className="text-xs text-slate-500">
+                      Invited by {invitation.invitedByEmail ?? "a workspace owner"} · Expires{" "}
+                      {formatDate(invitation.expiresAt)}
+                    </p>
+                  </div>
                 </div>
                 <div className="flex gap-2 shrink-0">
                   <button

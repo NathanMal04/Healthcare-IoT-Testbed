@@ -10,7 +10,8 @@ const DIALOG_WIDTHS = { sm: "sm:max-w-sm", lg: "sm:max-w-lg", xl: "sm:max-w-2xl"
 /**
  * A modal with a title and a close button. Clicking the backdrop or pressing
  * Escape calls onClose, which callers guard while work is in progress.
- * `wide` is the same as size "lg".
+ * `wide` is the same as size "lg". `aside` adds a dark side panel on the left
+ * (hidden on small screens).
  */
 export function Dialog({
   title,
@@ -18,6 +19,7 @@ export function Dialog({
   onClose,
   wide,
   size,
+  aside,
   children,
 }: {
   title: React.ReactNode;
@@ -25,6 +27,7 @@ export function Dialog({
   onClose: () => void;
   wide?: boolean;
   size?: keyof typeof DIALOG_WIDTHS;
+  aside?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const width = DIALOG_WIDTHS[size ?? (wide ? "lg" : "sm")];
@@ -37,6 +40,26 @@ export function Dialog({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  const body = (
+    <>
+      <div className="mb-5 flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold text-slate-900 tracking-tight break-words">{title}</h2>
+          {subtitle && <p className="text-slate-500 text-sm mt-1">{subtitle}</p>}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="shrink-0 -mr-1 p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-surface-sunken"
+        >
+          <X className="h-5 w-5" aria-hidden="true" />
+        </button>
+      </div>
+      {children}
+    </>
+  );
+
   return (
     <div
       className="fixed inset-0 bg-navy-950/60 backdrop-blur-[1px] flex items-end sm:items-center justify-center z-50 sm:px-4"
@@ -47,23 +70,20 @@ export function Dialog({
       <div
         role="dialog"
         aria-modal="true"
-        className={`w-full ${width} bg-white rounded-t-2xl sm:rounded-xl border border-line shadow-pop p-5 sm:p-6 max-h-[90vh] overflow-y-auto`}
+        className={`w-full ${width} bg-white rounded-t-2xl sm:rounded-xl border border-line shadow-pop max-h-[90vh] overflow-y-auto ${
+          aside ? "md:flex" : "p-5 sm:p-6"
+        }`}
       >
-        <div className="mb-5 flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <h2 className="text-lg font-semibold text-slate-900 tracking-tight break-words">{title}</h2>
-            {subtitle && <p className="text-slate-500 text-sm mt-1">{subtitle}</p>}
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="shrink-0 -mr-1 p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-surface-sunken"
-          >
-            <X className="h-5 w-5" aria-hidden="true" />
-          </button>
-        </div>
-        {children}
+        {aside ? (
+          <>
+            <aside className="hidden md:flex md:w-64 shrink-0 flex-col bg-navy-900 text-white p-6 sm:rounded-l-xl">
+              {aside}
+            </aside>
+            <div className="flex-1 min-w-0 p-5 sm:p-6">{body}</div>
+          </>
+        ) : (
+          body
+        )}
       </div>
     </div>
   );
