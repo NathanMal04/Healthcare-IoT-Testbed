@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronRight, Cpu, Plus, RefreshCw, Upload } from "lucide-react";
+import { Cpu, Eye, Microchip, Plus, RefreshCw, ShieldAlert, Upload } from "lucide-react";
 import { getDevices, updateDeviceReverseEngineeringStatus, type Device, type ReverseEngineeringStatus } from "@/lib/devices";
 import { REVERSE_ENGINEERING_STATUSES, REVERSE_ENGINEERING_STATUS_LABELS } from "@/lib/reverseEngineering";
 import { filterDevices } from "@/lib/dashboard";
@@ -22,6 +22,7 @@ import {
   FilterSelect,
   LoadingState,
   PageHeader,
+  RowActionsMenu,
   SearchInput,
   Toolbar,
   type Column,
@@ -163,24 +164,19 @@ function DevicesView() {
     },
     {
       key: "actions",
-      header: <span className="sr-only">Actions</span>,
-      className: "text-right whitespace-nowrap",
+      header: "Actions",
+      headerClassName: "text-right",
+      className: "text-right",
       cell: (device) => (
-        <div className="flex items-center justify-end gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={Upload}
-            onClick={(e) => {
-              e.stopPropagation();
-              setUploadDevice(device);
-            }}
-          >
-            <span className="hidden md:inline">Upload firmware</span>
-            <span className="md:hidden">Firmware</span>
-          </Button>
-          <ChevronRight className="h-4 w-4 text-slate-300" aria-hidden="true" />
-        </div>
+        <RowActionsMenu
+          label={`Actions for ${device.name}`}
+          actions={[
+            { label: "View details", icon: Eye, href: deviceHref(device.deviceId) },
+            { label: "View firmware", icon: Microchip, href: deviceHref(device.deviceId, "firmware") },
+            { label: "View CVEs", icon: ShieldAlert, href: deviceHref(device.deviceId, "cves") },
+            { label: "Upload firmware", icon: Upload, onSelect: () => setUploadDevice(device) },
+          ]}
+        />
       ),
     },
   ];

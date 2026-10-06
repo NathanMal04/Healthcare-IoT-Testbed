@@ -30,6 +30,7 @@ import {
   FilterSelect,
   LoadingState,
   PageHeader,
+  RowActionsMenu,
   StatusBadge,
   Toolbar,
   formatDate,
@@ -172,9 +173,9 @@ function ArtifactsView() {
     });
   }
 
-  function runOnSelected() {
+  function runOn(artifactIds: string[]) {
     try {
-      sessionStorage.setItem(RUN_SELECTION_KEY, JSON.stringify(Array.from(selectedIds)));
+      sessionStorage.setItem(RUN_SELECTION_KEY, JSON.stringify(artifactIds));
     } catch {
       setDownloadError("Your browser blocked session storage, so the selection can't be passed on");
       return;
@@ -279,27 +280,28 @@ function ArtifactsView() {
     },
     {
       key: "actions",
-      header: <span className="sr-only">Actions</span>,
-      className: "text-right whitespace-nowrap",
+      header: "Actions",
+      headerClassName: "text-right",
+      className: "text-right",
       cell: (artifact) => (
-        <div className="flex items-center justify-end gap-1">
-          {artifact.uploadBatchId && artifact.uploadBatchId !== filters.batchId && (
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={Layers}
-              onClick={() => setFilters({ type: "", tag: "", batchId: artifact.uploadBatchId! })}
-              title="Show this upload batch"
-            >
-              Batch
-            </Button>
-          )}
-          {artifact.status === "ready" && (
-            <Button variant="ghost" size="sm" icon={Download} onClick={() => void download(artifact)}>
-              Download
-            </Button>
-          )}
-        </div>
+        <RowActionsMenu
+          label={`Actions for ${artifact.name}`}
+          actions={[
+            artifact.status === "ready" && { label: "Download", icon: Download, onSelect: () => void download(artifact) },
+            runsAvailable &&
+              artifact.status === "ready" && {
+                label: "Run a script",
+                icon: Play,
+                onSelect: () => runOn([artifact.artifactId]),
+              },
+            !!artifact.uploadBatchId &&
+              artifact.uploadBatchId !== filters.batchId && {
+                label: "Show upload batch",
+                icon: Layers,
+                onSelect: () => setFilters({ type: "", tag: "", batchId: artifact.uploadBatchId! }),
+              },
+          ]}
+        />
       ),
     },
   ];
@@ -331,7 +333,7 @@ function ArtifactsView() {
           actions={
             runsAvailable && selectedIds.size > 0 ? (
               <div className="flex items-center gap-2">
-                <Button size="sm" icon={Play} onClick={runOnSelected}>
+                <Button size="sm" icon={Play} onClick={() => runOn(Array.from(selectedIds))}>
                   Run a script on selected ({selectedIds.size})
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>

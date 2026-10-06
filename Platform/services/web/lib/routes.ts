@@ -7,8 +7,10 @@ export function deviceHref(deviceId: string, tab?: string): string {
   return `/devices/view?${params.toString()}`;
 }
 
-export function cveHref(cveRecordId: string, tab?: string): string {
+/** `edit` opens the page with its edit dialog showing. */
+export function cveHref(cveRecordId: string, tab?: string, options: { edit?: boolean } = {}): string {
   const params = new URLSearchParams({ id: cveRecordId });
   if (tab) params.set("tab", tab);
+  if (options.edit) params.set("edit", "1");
   return `/vulnerabilities/view?${params.toString()}`;
 }

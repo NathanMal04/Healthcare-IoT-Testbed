@@ -39,3 +39,4 @@ export { DataTable, type Column } from "./DataTable";
 export { FilterSelect, SearchInput, Toolbar } from "./Toolbar";
 export { TabPanel, Tabs, type TabItem } from "./Tabs";
 export { ConfirmDialog, Dialog, TextModal } from "./Dialog";
+export { RowActionsMenu, type RowAction } from "./RowActionsMenu";

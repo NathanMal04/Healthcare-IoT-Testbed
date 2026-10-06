@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Cpu, Download, FolderArchive, Link2, Microchip, ShieldAlert, Unlink, Upload } from "lucide-react";
+import { Cpu, Download, Eye, FolderArchive, Link2, Microchip, ShieldAlert, Unlink, Upload } from "lucide-react";
 import { getDevices, updateDeviceReverseEngineeringStatus, type Device, type ReverseEngineeringStatus } from "@/lib/devices";
 import {
   formatBytes,
@@ -43,6 +43,7 @@ import {
   ErrorState,
   LoadingState,
   PageHeader,
+  RowActionsMenu,
   ScopeLabel,
   SeverityBadge,
   StatusBadge,
@@ -535,14 +536,15 @@ function ArtifactsTab({ device }: { device: Device }) {
     },
     {
       key: "actions",
-      header: <span className="sr-only">Actions</span>,
-      className: "text-right whitespace-nowrap",
-      cell: (a) =>
-        a.status === "ready" ? (
-          <Button variant="ghost" size="sm" icon={Download} onClick={() => void download(a)}>
-            Download
-          </Button>
-        ) : null,
+      header: "Actions",
+      headerClassName: "text-right",
+      className: "text-right",
+      cell: (a) => (
+        <RowActionsMenu
+          label={`Actions for ${a.name}`}
+          actions={[a.status === "ready" && { label: "Download", icon: Download, onSelect: () => void download(a) }]}
+        />
+      ),
     },
   ];
 
@@ -675,22 +677,22 @@ function CvesTab({
     },
     {
       key: "actions",
-      header: <span className="sr-only">Actions</span>,
+      header: "Actions",
+      headerClassName: "text-right",
       className: "text-right whitespace-nowrap",
-      cell: (cve) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={Unlink}
-          disabled={busy !== null}
-          onClick={(e) => {
-            e.stopPropagation();
-            void unlink(cve);
-          }}
-        >
-          {busy === `unlink:${cve.cveRecordId}` ? "Unlinking…" : "Unlink"}
-        </Button>
-      ),
+      cell: (cve) =>
+        busy === `unlink:${cve.cveRecordId}` ? (
+          <span className="text-xs text-slate-500">Unlinking…</span>
+        ) : (
+          <RowActionsMenu
+            label={`Actions for ${cve.cveId}`}
+            disabled={busy !== null}
+            actions={[
+              { label: "View details", icon: Eye, href: cveHref(cve.cveRecordId) },
+              { label: "Unlink from device", icon: Unlink, onSelect: () => void unlink(cve) },
+            ]}
+          />
+        ),
     },
   ];
 

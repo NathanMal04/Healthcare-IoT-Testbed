@@ -16,7 +16,9 @@ import {
   addChipsets,
   createCveWithDevices,
   cveErrorMessage,
+  deleteCve,
   duplicateCveRecordId,
+  getCve,
   isNotFound,
   linkDevices,
   normalizeCveId,
@@ -25,12 +27,14 @@ import {
   type Cve,
   type CveFormErrors,
   type CveFormValues,
+  type CveSummary,
   type CvssVersion,
   type LinkFailure,
   type Severity,
 } from "@/lib/cves";
 import {
   Alert,
+  ConfirmDialog,
   Dialog,
   inputClass,
   labelClass,
@@ -490,5 +494,97 @@ export function AddCveDialog({
         </div>
       </form>
     </Dialog>
+  );
+}
+
+// --- Delete CVE --------------------------------------------------------------------
+
+/**
+ * Confirms and deletes one CVE, from its row or its page. If its links
+ * changed meanwhile (409), the current device count is shown and the user is
+ * asked again.
+ */
+export function DeleteCveDialog({
+  cve,
+  scope,
+  onCancel,
+  onDeleted,
+  onGone,
+  onRefreshed,
+}: {
+  cve: CveSummary;
+  scope: Scope;
+  onCancel: () => void;
+  onDeleted: (cveRecordId: string) => void;
+  /** The CVE (or access to it) was already gone. */
+  onGone: (cveRecordId: string, message: string) => void;
+  /** Called with the current CVE when it changed during the delete. */
+  onRefreshed?: (cve: Cve) => void;
+}) {
+  const [current, setCurrent] = useState<CveSummary>(cve);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useScopeLock(busy);
+
+  const id = cve.cveRecordId;
+  const alreadyDeleted = `${cve.cveId} was already deleted.`;
+  const deviceCount = current.deviceIds.length;
+
+  async function remove() {
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteCve(id);
+      onDeleted(id);
+    } catch (err) {
+      if (isNotFound(err)) {
+        onGone(id, alreadyDeleted);
+      } else if (isConcurrentChange(err)) {
+        try {
+          const fresh = await getCve(id);
+          setCurrent(fresh);
+          onRefreshed?.(fresh);
+        } catch (refreshErr) {
+          if (isNotFound(refreshErr)) {
+            onGone(id, alreadyDeleted);
+            return;
+          }
+        }
+        setError("This CVE changed while you were deleting it. Check the details and confirm again.");
+      } else {
+        setError(cveErrorMessage(err, "Couldn't delete the CVE"));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ConfirmDialog
+      title={`Delete ${cve.cveId}?`}
+      confirmLabel="Delete CVE"
+      busyLabel="Deleting…"
+      busy={busy}
+      error={error}
+      onConfirm={() => void remove()}
+      onCancel={onCancel}
+    >
+      <p>
+        This removes the CVE record from <span className="font-medium">{scopeLabel(scope)}</span>
+        {deviceCount > 0 ? (
+          <>
+            {" "}and its links to{" "}
+            <span className="font-medium">
+              {deviceCount} device{deviceCount === 1 ? "" : "s"}
+            </span>
+            .
+          </>
+        ) : (
+          "."
+        )}
+      </p>
+      <p className="text-slate-500">The devices themselves are not changed or deleted.</p>
+    </ConfirmDialog>
   );
 }

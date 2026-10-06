@@ -1,9 +1,9 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, ChevronRight, Cpu, Ellipsis, ExternalLink, FileText, Link2, Pencil, ShieldAlert, Trash2, Unlink } from "lucide-react";
+import { ArrowLeft, ChevronRight, Cpu, Eye, ExternalLink, FileText, Link2, Pencil, ShieldAlert, Trash2, Unlink } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useScopeLock, useWorkspace } from "@/context/WorkspaceContext";
 import { getDevices, type Device } from "@/lib/devices";
@@ -15,7 +15,6 @@ import {
   cveChanges,
   cveErrorMessage,
   cveFormValues,
-  deleteCve,
   getCve,
   isNotFound,
   linkCveDevice,
@@ -26,20 +25,20 @@ import {
   type CveFormValues,
   type Severity,
 } from "@/lib/cves";
-import { CveFormFields, isConcurrentChange } from "@/app/components/CveDialogs";
+import { CveFormFields, DeleteCveDialog, isConcurrentChange } from "@/app/components/CveDialogs";
 import {
   Alert,
   Button,
   ButtonLink,
   Card,
   CardHeader,
-  ConfirmDialog,
   DataTable,
   Dialog,
   EmptyState,
   ErrorState,
   LoadingState,
   ReStatusBadge,
+  RowActionsMenu,
   ScopeLabel,
   SeverityBadge,
   TabPanel,
@@ -80,6 +79,7 @@ function CveViewRoute() {
   const cveRecordId = searchParams.get("id") ?? "";
   const tabParam = searchParams.get("tab");
   const initialTab: TabId = TABS.includes(tabParam as TabId) ? (tabParam as TabId) : "description";
+  const initialEdit = searchParams.get("edit") === "1";
 
   if (!scopeReady) return <LoadingState label="Loading workspace…" />;
   if (!cveRecordId) {
@@ -93,7 +93,14 @@ function CveViewRoute() {
   }
   // Keyed on the scope and CVE: switching workspace remounts the view, so
   // nothing from the previous scope carries over.
-  return <CveView key={`${scopeKey(scope)}:${cveRecordId}`} cveRecordId={cveRecordId} initialTab={initialTab} />;
+  return (
+    <CveView
+      key={`${scopeKey(scope)}:${cveRecordId}`}
+      cveRecordId={cveRecordId}
+      initialTab={initialTab}
+      initialEdit={initialEdit}
+    />
+  );
 }
 
 function BackToListButton() {
@@ -135,7 +142,16 @@ function CveFrame({ cveId, children }: { cveId?: string; children: React.ReactNo
   );
 }
 
-function CveView({ cveRecordId, initialTab }: { cveRecordId: string; initialTab: TabId }) {
+function CveView({
+  cveRecordId,
+  initialTab,
+  initialEdit,
+}: {
+  cveRecordId: string;
+  initialTab: TabId;
+  /** Opened from a row's "Edit CVE" action. */
+  initialEdit: boolean;
+}) {
   const ready = useRequireUser();
   const router = useRouter();
   const { user } = useAuth();
@@ -150,7 +166,7 @@ function CveView({ cveRecordId, initialTab }: { cveRecordId: string; initialTab:
   const [tab, setTab] = useState<TabId>(initialTab);
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(initialEdit);
   const [deleting, setDeleting] = useState(false);
 
   // A write belongs to this scope; keep it from changing mid-request.
@@ -180,6 +196,11 @@ function CveView({ cveRecordId, initialTab }: { cveRecordId: string; initialTab:
       active = false;
     };
   }, [ready, cveRecordId, workspaceId, reportWorkspaceUnavailable]);
+
+  // The edit dialog opens once; drop ?edit=1 so a reload or Back doesn't reopen it.
+  useEffect(() => {
+    if (initialEdit) router.replace(cveHref(cveRecordId, initialTab === "description" ? undefined : initialTab), { scroll: false });
+  }, [initialEdit, initialTab, cveRecordId, router]);
 
   const deviceNames = useMemo(() => new Map((devices ?? []).map((d) => [d.deviceId, d.name])), [devices]);
   const devicesById = useMemo(() => new Map((devices ?? []).map((d) => [d.deviceId, d])), [devices]);
@@ -260,32 +281,6 @@ function CveView({ cveRecordId, initialTab }: { cveRecordId: string; initialTab:
     );
   }
 
-  async function remove() {
-    setBusy("delete");
-    setActionError(null);
-    try {
-      await deleteCve(cveRecordId);
-      router.push("/vulnerabilities");
-    } catch (err) {
-      if (isNotFound(err)) {
-        setDeleting(false);
-        setGone(`${cve?.cveId ?? "This CVE"} was already deleted.`);
-      } else if (isConcurrentChange(err)) {
-        // Its links changed meanwhile: show the current count and ask again.
-        if (await stillExists()) {
-          setActionError("This CVE changed while you were deleting it. Check the details and confirm again.");
-        } else {
-          setDeleting(false);
-          setGone(`${cve?.cveId ?? "This CVE"} was already deleted.`);
-        }
-      } else {
-        setActionError(cveErrorMessage(err, "Couldn't delete the CVE"));
-      }
-    } finally {
-      setBusy(null);
-    }
-  }
-
   if (!ready) return null;
 
   const scopeName = scope.kind === "workspace" ? scope.name : "Personal";
@@ -364,12 +359,21 @@ function CveView({ cveRecordId, initialTab }: { cveRecordId: string; initialTab:
           <Button variant="secondary" icon={Pencil} onClick={openEdit} disabled={busy !== null}>
             Edit
           </Button>
-          <MoreMenu
+          <RowActionsMenu
+            trigger="button"
+            label={`More actions for ${cve.cveId}`}
             disabled={busy !== null}
-            onDelete={() => {
-              setActionError(null);
-              setDeleting(true);
-            }}
+            actions={[
+              {
+                label: "Delete CVE",
+                icon: Trash2,
+                danger: true,
+                onSelect: () => {
+                  setActionError(null);
+                  setDeleting(true);
+                },
+              },
+            ]}
           />
         </div>
       </div>
@@ -545,34 +549,17 @@ function CveView({ cveRecordId, initialTab }: { cveRecordId: string; initialTab:
       )}
 
       {deleting && (
-        <ConfirmDialog
-          title={`Delete ${cve.cveId}?`}
-          confirmLabel="Delete CVE"
-          busyLabel="Deleting…"
-          busy={busy === "delete"}
-          error={actionError}
-          onConfirm={() => void remove()}
-          onCancel={() => {
-            setActionError(null);
+        <DeleteCveDialog
+          cve={cve}
+          scope={scope}
+          onCancel={() => setDeleting(false)}
+          onDeleted={() => router.push("/vulnerabilities")}
+          onGone={(_, message) => {
             setDeleting(false);
+            setGone(message);
           }}
-        >
-          <p>
-            This removes the CVE record from <span className="font-medium">{scopeName}</span>
-            {deviceCount > 0 ? (
-              <>
-                {" "}and its links to{" "}
-                <span className="font-medium">
-                  {deviceCount} device{deviceCount === 1 ? "" : "s"}
-                </span>
-                .
-              </>
-            ) : (
-              "."
-            )}
-          </p>
-          <p className="text-slate-500">The devices themselves are not changed or deleted.</p>
-        </ConfirmDialog>
+          onRefreshed={setCve}
+        />
       )}
     </CveFrame>
   );
@@ -648,60 +635,6 @@ function hostname(url: string): string {
 }
 
 // --- Actions --------------------------------------------------------------------
-
-/** Secondary actions, so Delete isn't next to Edit. */
-function MoreMenu({ onDelete, disabled }: { onDelete: () => void; disabled: boolean }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onPointer(e: MouseEvent) {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", onPointer);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onPointer);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  return (
-    <div ref={rootRef} className="relative">
-      <Button
-        variant="secondary"
-        onClick={() => setOpen((value) => !value)}
-        disabled={disabled}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="More actions"
-        className="px-2.5"
-      >
-        <Ellipsis className="h-4 w-4" aria-hidden="true" />
-      </Button>
-      {open && (
-        <div role="menu" className="absolute right-0 mt-2 w-44 bg-white border border-line rounded-xl shadow-pop py-1.5 z-30">
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              onDelete();
-            }}
-            className="w-full flex items-center gap-2 px-3.5 py-2 text-sm text-red-600 hover:bg-red-50"
-          >
-            <Trash2 className="h-4 w-4" aria-hidden="true" />
-            Delete CVE
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
 
 function EditCveDialog({
   cve,
@@ -803,13 +736,22 @@ function LinkedDevicesTab({
     },
     {
       key: "actions",
-      header: <span className="sr-only">Actions</span>,
+      header: "Actions",
+      headerClassName: "text-right",
       className: "text-right whitespace-nowrap",
-      cell: (row) => (
-        <Button variant="ghost" size="sm" icon={Unlink} disabled={busy !== null} onClick={() => onUnlink(row.id)}>
-          {busy === `unlink:${row.id}` ? "Unlinking…" : "Unlink"}
-        </Button>
-      ),
+      cell: (row) =>
+        busy === `unlink:${row.id}` ? (
+          <span className="text-xs text-slate-500">Unlinking…</span>
+        ) : (
+          <RowActionsMenu
+            label={`Actions for ${row.device?.name ?? UNKNOWN_DEVICE}`}
+            disabled={busy !== null}
+            actions={[
+              row.device && { label: "View device", icon: Eye, href: deviceHref(row.id) },
+              { label: "Unlink from CVE", icon: Unlink, onSelect: () => onUnlink(row.id) },
+            ]}
+          />
+        ),
     },
   ];
 

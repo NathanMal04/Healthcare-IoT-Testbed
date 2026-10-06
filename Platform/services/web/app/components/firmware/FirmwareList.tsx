@@ -5,10 +5,11 @@
 // is the former FirmwareListModal's, unchanged; only its presentation moved.
 
 import { useState } from "react";
-import { RotateCcw } from "lucide-react";
+import { Download, Eye, RotateCcw } from "lucide-react";
 import {
   firmwareReverseEngineeringStatus,
   formatBytes,
+  getArtifactDownloadUrl,
   listDeviceArtifacts,
   retryArtifactUpload,
   updateFirmwareReverseEngineeringStatus,
@@ -17,8 +18,9 @@ import {
 } from "@/lib/artifacts";
 import type { ReverseEngineeringStatus } from "@/lib/reverseEngineering";
 import { useScopeLock } from "@/context/WorkspaceContext";
+import { deviceHref } from "@/lib/routes";
 import ReverseEngineeringStatusSelect from "@/app/components/ReverseEngineeringStatusSelect";
-import { Alert, Button, DataTable, Dialog, StatusBadge, formatDate, type Column } from "@/app/components/ui";
+import { Alert, Button, DataTable, Dialog, RowActionsMenu, StatusBadge, formatDate, type Column } from "@/app/components/ui";
 
 type RetryStage = SingleUploadStage | "checking" | "complete";
 
@@ -114,6 +116,17 @@ export function FirmwareTable({
   onReStatusChange: (firmware: Artifact, next: ReverseEngineeringStatus) => void;
   onRetry: (firmware: Artifact) => void;
 }) {
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  async function download(f: Artifact) {
+    setDownloadError(null);
+    try {
+      window.location.assign(await getArtifactDownloadUrl(f.artifactId));
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : "Download failed");
+    }
+  }
+
   const columns: Column<Artifact>[] = [
     {
       key: "version",
@@ -185,18 +198,39 @@ export function FirmwareTable({
     },
     {
       key: "actions",
-      header: <span className="sr-only">Actions</span>,
-      className: "text-right whitespace-nowrap",
-      cell: (f) =>
-        isRetryable(f) ? (
-          <Button variant="ghost" size="sm" icon={RotateCcw} onClick={() => onRetry(f)}>
-            Retry
-          </Button>
-        ) : null,
+      header: "Actions",
+      headerClassName: "text-right",
+      className: "text-right",
+      cell: (f) => (
+        <RowActionsMenu
+          label={`Actions for firmware ${f.version ?? f.name}`}
+          actions={[
+            // On the scope-wide list, a link to the firmware's device.
+            deviceNames &&
+              f.deviceIds.length === 1 &&
+              deviceNames.has(f.deviceIds[0]) && {
+                label: "View device",
+                icon: Eye,
+                href: deviceHref(f.deviceIds[0], "firmware"),
+              },
+            f.status === "ready" && { label: "Download", icon: Download, onSelect: () => void download(f) },
+            isRetryable(f) && { label: "Retry upload", icon: RotateCcw, onSelect: () => onRetry(f) },
+          ]}
+        />
+      ),
     },
   ];
 
-  return <DataTable columns={columns} rows={firmware} rowKey={(f) => f.artifactId} minWidth={deviceNames ? "48rem" : "40rem"} />;
+  return (
+    <>
+      {downloadError && (
+        <Alert tone="error" className="mx-5 mt-3" onDismiss={() => setDownloadError(null)}>
+          Couldn&apos;t download: {downloadError}
+        </Alert>
+      )}
+      <DataTable columns={columns} rows={firmware} rowKey={(f) => f.artifactId} minWidth={deviceNames ? "48rem" : "40rem"} />
+    </>
+  );
 }
 
 /**

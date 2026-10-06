@@ -21,8 +21,8 @@ import {
   type CveSummary,
   type Severity,
 } from "@/lib/cves";
-import { AddCveDialog } from "@/app/components/CveDialogs";
-import { Plus, RefreshCw, ShieldAlert } from "lucide-react";
+import { AddCveDialog, DeleteCveDialog } from "@/app/components/CveDialogs";
+import { Eye, Link2, Pencil, Plus, RefreshCw, ShieldAlert, Trash2 } from "lucide-react";
 import {
   Alert,
   Button,
@@ -33,6 +33,7 @@ import {
   FilterSelect,
   LoadingState,
   PageHeader,
+  RowActionsMenu,
   SearchInput,
   SeverityBadge,
   Toolbar,
@@ -68,6 +69,8 @@ function VulnerabilitiesView() {
   const [listLoading, setListLoading] = useState(false);
   const [filters, setFilters] = useState<CveFilters>(EMPTY_FILTERS);
   const [adding, setAdding] = useState(false);
+  const [deleting, setDeleting] = useState<CveSummary | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const isMountedRef = useRef(true);
   useEffect(() => {
@@ -127,6 +130,11 @@ function VulnerabilitiesView() {
         ? current.map((c) => (c.cveRecordId === cve.cveRecordId ? cve : c))
         : [cve, ...current];
     });
+  }, []);
+
+  const removeRow = useCallback((cveRecordId: string) => {
+    setCves((current) => current?.filter((c) => c.cveRecordId !== cveRecordId) ?? current);
+    setDeleting(null);
   }, []);
 
   // Each CVE opens on its own page.
@@ -191,6 +199,31 @@ function VulnerabilitiesView() {
       className: "whitespace-nowrap text-slate-500",
       cell: (cve) => formatDay(cve.updatedAt),
     },
+    {
+      key: "actions",
+      header: "Actions",
+      headerClassName: "text-right",
+      className: "text-right",
+      cell: (cve) => (
+        <RowActionsMenu
+          label={`Actions for ${cve.cveId}`}
+          actions={[
+            { label: "View details", icon: Eye, href: cveHref(cve.cveRecordId) },
+            { label: "Edit CVE", icon: Pencil, href: cveHref(cve.cveRecordId, undefined, { edit: true }) },
+            { label: "Link devices", icon: Link2, href: cveHref(cve.cveRecordId, "devices") },
+            {
+              label: "Delete CVE",
+              icon: Trash2,
+              danger: true,
+              onSelect: () => {
+                setNotice(null);
+                setDeleting(cve);
+              },
+            },
+          ]}
+        />
+      ),
+    },
   ];
 
   return (
@@ -205,6 +238,12 @@ function VulnerabilitiesView() {
           </Button>
         }
       />
+
+      {notice && (
+        <Alert tone="warning" onDismiss={() => setNotice(null)} className="mb-4">
+          {notice}
+        </Alert>
+      )}
 
       <Card className="overflow-hidden">
         <Toolbar>
@@ -314,6 +353,20 @@ function VulnerabilitiesView() {
           onClose={() => setAdding(false)}
           onSaved={upsert}
           onOpenExisting={(id) => router.push(cveHref(id))}
+        />
+      )}
+
+      {deleting && (
+        <DeleteCveDialog
+          cve={deleting}
+          scope={scope}
+          onCancel={() => setDeleting(null)}
+          onDeleted={removeRow}
+          onGone={(id, message) => {
+            removeRow(id);
+            setNotice(message);
+          }}
+          onRefreshed={upsert}
         />
       )}
 
