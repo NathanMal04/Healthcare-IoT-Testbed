@@ -13,6 +13,7 @@ import {
   SEVERITIES,
   SEVERITY_LABELS,
   cveErrorMessage,
+  descriptionPreview,
   filterCves,
   hasActiveFilters,
   listCves,
@@ -149,15 +150,17 @@ function VulnerabilitiesView() {
     {
       key: "cve",
       header: "CVE ID",
-      className: "whitespace-nowrap",
       cell: (cve) => (
-        <Link
-          href={cveHref(cve.cveRecordId)}
-          onClick={(e) => e.stopPropagation()}
-          className="font-mono text-[13px] font-medium text-brand-700 hover:text-brand-800 hover:underline"
-        >
-          {cve.cveId}
-        </Link>
+        <div className="min-w-0 max-w-[16rem] sm:max-w-xs lg:max-w-sm">
+          <Link
+            href={cveHref(cve.cveRecordId)}
+            onClick={(e) => e.stopPropagation()}
+            className="font-mono text-[13px] font-medium text-brand-700 hover:text-brand-800 hover:underline whitespace-nowrap"
+          >
+            {cve.cveId}
+          </Link>
+          <DescriptionLine description={cve.description} query={filters.text} />
+        </div>
       ),
     },
     { key: "severity", header: "Severity", cell: (cve) => <SeverityBadge severity={cve.severity} /> },
@@ -390,5 +393,30 @@ function Chips({ values, max, className }: { values: string[]; max: number; clas
         </span>
       )}
     </div>
+  );
+}
+
+/**
+ * One muted line under the CVE ID: the start of the description, or an
+ * excerpt around the search text with the matches highlighted. The detail
+ * page has the full description.
+ */
+function DescriptionLine({ description, query }: { description: string | null; query: string }) {
+  const preview = descriptionPreview(description, query);
+  if (!preview) return <p className="text-xs text-slate-400 italic mt-0.5">No description</p>;
+  return (
+    <p className="text-xs text-slate-500 mt-0.5 truncate">
+      {preview.leading && "…"}
+      {preview.parts.map((part, i) =>
+        part.match ? (
+          <mark key={i} className="bg-amber-100 text-slate-800 rounded-sm px-px">
+            {part.text}
+          </mark>
+        ) : (
+          <span key={i}>{part.text}</span>
+        )
+      )}
+      {preview.trailing && "…"}
+    </p>
   );
 }

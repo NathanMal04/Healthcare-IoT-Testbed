@@ -391,6 +391,102 @@ export function filterCves<T extends CveSummary>(
   });
 }
 
+// --- Description preview --------------------------------------------------------------
+
+/** A short excerpt of a description, split into plain and highlighted parts. */
+export interface DescriptionPreview {
+  parts: { text: string; match: boolean }[];
+  /** Text was cut before / after the excerpt. */
+  leading: boolean;
+  trailing: boolean;
+}
+
+// How much of the description a list row shows, and how much text is kept
+// before a match so it reads in context. The row also truncates with CSS.
+const PREVIEW_LENGTH = 140;
+const PREVIEW_CONTEXT = 28;
+
+/**
+ * Folds text the way the search does, one character at a time, so every
+ * folded position maps back to a position in the original.
+ */
+function foldWithMap(text: string): { folded: string; origin: number[] } {
+  let folded = "";
+  const origin: number[] = [];
+  let index = 0;
+  for (const char of text) {
+    const f = fold(char);
+    folded += f;
+    for (let i = 0; i < f.length; i++) origin.push(index);
+    index += char.length;
+  }
+  origin.push(index);
+  return { folded, origin };
+}
+
+/**
+ * The start of the description, or, when the search text occurs in it, an
+ * excerpt around the first occurrence (the whole query if present, else its
+ * earliest word) with every query word highlighted. Matching folds case and
+ * hyphens like filterCves. Null when there is no description.
+ */
+export function descriptionPreview(description: string | null, query: string): DescriptionPreview | null {
+  const text = (description ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return null;
+
+  const { folded, origin } = foldWithMap(text);
+  const words = fold(query).split(/\s+/).filter(Boolean);
+  const phrase = words.join(" ");
+
+  // Where the excerpt is anchored: the whole query, else the earliest word.
+  let anchor = words.length > 1 ? folded.indexOf(phrase) : -1;
+  if (anchor < 0) {
+    for (const word of words) {
+      const at = folded.indexOf(word);
+      if (at >= 0 && (anchor < 0 || at < anchor)) anchor = at;
+    }
+  }
+
+  let start = 0;
+  if (anchor >= 0 && origin[anchor] > PREVIEW_CONTEXT) {
+    start = origin[anchor] - PREVIEW_CONTEXT;
+    // Begin at a word boundary when one is close, rather than mid-word.
+    const space = text.indexOf(" ", start);
+    if (space >= 0 && space < origin[anchor]) start = space + 1;
+  }
+  const end = Math.min(text.length, start + PREVIEW_LENGTH);
+
+  // Every occurrence of the phrase and of each word, merged, within the excerpt.
+  const ranges: [number, number][] = [];
+  if (anchor >= 0) {
+    for (const needle of words.length > 1 ? [phrase, ...words] : words) {
+      for (let at = folded.indexOf(needle); at >= 0; at = folded.indexOf(needle, at + 1)) {
+        const from = Math.max(origin[at], start);
+        const to = Math.min(origin[at + needle.length], end);
+        if (from < to) ranges.push([from, to]);
+      }
+    }
+  }
+  ranges.sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [];
+  for (const range of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]);
+    else merged.push([...range]);
+  }
+
+  const parts: DescriptionPreview["parts"] = [];
+  let at = start;
+  for (const [from, to] of merged) {
+    if (from > at) parts.push({ text: text.slice(at, from), match: false });
+    parts.push({ text: text.slice(from, to), match: true });
+    at = to;
+  }
+  if (at < end) parts.push({ text: text.slice(at, end), match: false });
+
+  return { parts, leading: start > 0, trailing: end < text.length };
+}
+
 // --- Create, then link ------------------------------------------------------------
 
 export interface LinkFailure {

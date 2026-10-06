@@ -25,6 +25,7 @@ import {
   cveChanges,
   cveFormValues,
   cveIdError,
+  descriptionPreview,
   duplicateCveRecordId,
   filterCves,
   isWebUrl,
@@ -253,6 +254,52 @@ describe("filterCves", () => {
 });
 
 // --- createCveWithDevices ------------------------------------------------------------
+
+describe("descriptionPreview", () => {
+  const long =
+    "This vulnerability exists in the RTL8811AU driver where specially crafted packets may cause a Buffer Overflow " +
+    "in the wireless stack, allowing remote attackers to execute code. " +
+    "Further details describe the affected firmware versions and mitigations in considerable length.";
+  const render = (p: ReturnType<typeof descriptionPreview>) =>
+    p && (p.leading ? "…" : "") + p.parts.map((x) => (x.match ? `[${x.text}]` : x.text)).join("") + (p.trailing ? "…" : "");
+
+  it("is null without a description", () => {
+    expect(descriptionPreview(null, "")).toBeNull();
+    expect(descriptionPreview("   ", "x")).toBeNull();
+  });
+
+  it("shows the start, collapsing whitespace, when there is no search", () => {
+    const p = descriptionPreview("Short\n\n  text", "");
+    expect(render(p)).toBe("Short text");
+    expect(descriptionPreview(long, "")!.leading).toBe(false);
+    expect(descriptionPreview(long, "")!.trailing).toBe(true);
+  });
+
+  it("centres on a match deep in the text and highlights it, ignoring case", () => {
+    const out = render(descriptionPreview(long, "buffer overflow"))!;
+    expect(out.startsWith("…")).toBe(true);
+    expect(out).toContain("[Buffer Overflow]");
+    expect(out.endsWith("…")).toBe(true);
+    // Starts on a word boundary close before the match.
+    expect(out).toMatch(/^…[A-Za-z]/);
+    expect(out.indexOf("[Buffer")).toBeLessThan(40);
+  });
+
+  it("highlights each word when the whole phrase isn't there", () => {
+    const out = render(descriptionPreview("Remote attackers send crafted packets", "packets remote"))!;
+    expect(out).toBe("[Remote] attackers send crafted [packets]");
+  });
+
+  it("keeps the normal start when the query matches elsewhere (CVE ID, chipset, device)", () => {
+    const p = descriptionPreview(long, "CVE-2025-8302");
+    expect(p!.leading).toBe(false);
+    expect(p!.parts.every((x) => !x.match)).toBe(true);
+  });
+
+  it("matches hyphen variants the way the search does", () => {
+    expect(render(descriptionPreview("A use‑after‑free bug", "use-after-free"))).toBe("A [use‑after‑free] bug");
+  });
+});
 
 describe("createCveWithDevices", () => {
   const input: NewCve = { cveId: "CVE-2021-37584", severity: "high" };
