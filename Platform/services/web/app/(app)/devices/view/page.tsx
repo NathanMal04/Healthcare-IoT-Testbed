@@ -21,8 +21,7 @@ import {
   type CveSummary,
 } from "@/lib/cves";
 import { countLabel, cvesForDevice } from "@/lib/dashboard";
-import { deviceHref } from "@/lib/routes";
-import { useAuth } from "@/context/AuthContext";
+import { cveHref, deviceHref } from "@/lib/routes";
 import { useScopeLock, useWorkspace } from "@/context/WorkspaceContext";
 import { isWorkspaceUnavailable, scopeKey, scopeWorkspaceId, type Scope } from "@/lib/workspaces";
 import ReverseEngineeringStatusSelect from "@/app/components/ReverseEngineeringStatusSelect";
@@ -33,7 +32,6 @@ import {
   loadDeviceFirmware,
   useFirmwareReStatus,
 } from "@/app/components/firmware/FirmwareList";
-import { CveDetailsDialog } from "@/app/components/CveDialogs";
 import {
   Alert,
   Button,
@@ -100,7 +98,6 @@ function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: Ta
   const workspaceId = scopeWorkspaceId(scope);
 
   const [device, setDevice] = useState<Device | null>(null);
-  const [devices, setDevices] = useState<Device[] | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [cves, setCves] = useState<CveSummary[] | null>(null);
@@ -124,7 +121,6 @@ function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: Ta
     Promise.allSettled([getDevices(workspaceId), listCves(workspaceId)]).then(([deviceResult, cveResult]) => {
       if (!active) return;
       if (deviceResult.status === "fulfilled") {
-        setDevices(deviceResult.value);
         const found = deviceResult.value.find((d) => d.deviceId === deviceId) ?? null;
         setDevice(found);
         setNotFound(!found);
@@ -163,7 +159,6 @@ function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: Ta
   }
 
   const deviceCves = useMemo(() => cvesForDevice(cves ?? [], deviceId), [cves, deviceId]);
-  const deviceNames = useMemo(() => new Map((devices ?? []).map((d) => [d.deviceId, d.name])), [devices]);
 
   const upsertCve = useCallback((cve: Cve) => {
     setCves((current) => current?.map((c) => (c.cveRecordId === cve.cveRecordId ? cve : c)) ?? current);
@@ -256,8 +251,6 @@ function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: Ta
             allCves={cves}
             deviceCves={deviceCves}
             error={cveError}
-            devices={devices}
-            deviceNames={deviceNames}
             onChanged={upsertCve}
             onRemoved={removeCve}
           />
@@ -597,8 +590,6 @@ function CvesTab({
   allCves,
   deviceCves,
   error,
-  devices,
-  deviceNames,
   onChanged,
   onRemoved,
 }: {
@@ -607,37 +598,16 @@ function CvesTab({
   allCves: CveSummary[] | null;
   deviceCves: CveSummary[];
   error: string | null;
-  devices: Device[] | null;
-  deviceNames: ReadonlyMap<string, string>;
   onChanged: (cve: Cve) => void;
   onRemoved: (cveRecordId: string) => void;
 }) {
-  const { user } = useAuth();
+  const router = useRouter();
   const [toLink, setToLink] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [openCve, setOpenCve] = useState<CveSummary | null>(null);
 
   // A link change belongs to this scope; keep it from changing mid-request.
   useScopeLock(busy !== null);
-
-  // Stable callbacks: CveDetailsDialog reloads the CVE when onGone changes.
-  const closeDetails = useCallback(() => setOpenCve(null), []);
-  const handleDeleted = useCallback(
-    (id: string) => {
-      onRemoved(id);
-      setOpenCve(null);
-    },
-    [onRemoved]
-  );
-  const handleGone = useCallback(
-    (id: string, message: string) => {
-      onRemoved(id);
-      setOpenCve(null);
-      setActionError(message);
-    },
-    [onRemoved]
-  );
 
   const linkable = (allCves ?? [])
     .filter((c) => !c.deviceIds.includes(device.deviceId))
@@ -781,25 +751,9 @@ function CvesTab({
           columns={columns}
           rows={deviceCves}
           rowKey={(cve) => cve.cveRecordId}
-          onRowClick={setOpenCve}
+          onRowClick={(cve) => router.push(cveHref(cve.cveRecordId))}
           rowLabel={(cve) => `Open ${cve.cveId}`}
           minWidth="30rem"
-        />
-      )}
-
-      {openCve && (
-        <CveDetailsDialog
-          key={openCve.cveRecordId}
-          cveRecordId={openCve.cveRecordId}
-          initial={openCve}
-          scope={scope}
-          devices={devices}
-          deviceNames={deviceNames}
-          currentUserId={user?.userId}
-          onClose={closeDetails}
-          onChanged={onChanged}
-          onDeleted={handleDeleted}
-          onGone={handleGone}
         />
       )}
     </Card>

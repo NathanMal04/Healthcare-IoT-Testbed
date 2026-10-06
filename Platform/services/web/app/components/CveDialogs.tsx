@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useScopeLock, useWorkspace } from "@/context/WorkspaceContext";
 import type { Device } from "@/lib/devices";
 import type { Scope } from "@/lib/workspaces";
@@ -10,30 +10,21 @@ import {
   CVSS_VERSIONS,
   DESCRIPTION_MAX_LENGTH,
   EMPTY_CVE_FORM,
-  MAX_DEVICES_PER_CVE,
   REFERENCES_MAX,
   SEVERITIES,
   SEVERITY_LABELS,
   addChipsets,
   createCveWithDevices,
-  cveChanges,
   cveErrorMessage,
-  cveFormValues,
-  deleteCve,
   duplicateCveRecordId,
-  getCve,
   isNotFound,
-  linkCveDevice,
   linkDevices,
   normalizeCveId,
   toNewCve,
-  unlinkCveDevice,
-  updateCve,
   validateCveForm,
   type Cve,
   type CveFormErrors,
   type CveFormValues,
-  type CveSummary,
   type CvssVersion,
   type LinkFailure,
   type Severity,
@@ -41,9 +32,6 @@ import {
 import {
   Alert,
   Dialog,
-  SeverityBadge,
-  dangerButton,
-  formatDate,
   inputClass,
   labelClass,
   primaryButton,
@@ -59,11 +47,6 @@ function scopeLabel(scope: Scope): string {
 
 function deviceName(names: ReadonlyMap<string, string>, deviceId: string): string {
   return names.get(deviceId) ?? UNKNOWN_DEVICE;
-}
-
-function formatScore(cve: Pick<CveSummary, "cvssScore" | "cvssVersion">): string {
-  if (cve.cvssScore === null) return "—";
-  return cve.cvssVersion ? `${cve.cvssScore} (CVSS v${cve.cvssVersion})` : String(cve.cvssScore);
 }
 
 /** A 409 because another request changed the CVE at the same moment (not the 40-device limit). */
@@ -506,399 +489,6 @@ export function AddCveDialog({
           </button>
         </div>
       </form>
-    </Dialog>
-  );
-}
-
-// --- Details, edit, links, delete ----------------------------------------------------
-
-type Mode = "view" | "edit" | "delete";
-
-/**
- * One CVE: shown at once from its list summary, then completed from
- * GET /cves/{id} (references). Edits, device links and deletion happen here;
- * every successful write is passed up so the table stays in step.
- */
-export function CveDetailsDialog({
-  cveRecordId,
-  initial,
-  scope,
-  devices,
-  deviceNames,
-  currentUserId,
-  onClose,
-  onChanged,
-  onDeleted,
-  onGone,
-}: {
-  cveRecordId: string;
-  initial?: CveSummary;
-  scope: Scope;
-  devices: Device[] | null;
-  deviceNames: ReadonlyMap<string, string>;
-  currentUserId?: string;
-  onClose: () => void;
-  onChanged: (cve: Cve) => void;
-  onDeleted: (cveRecordId: string) => void;
-  onGone: (cveRecordId: string, message: string) => void;
-}) {
-  const [cve, setCve] = useState<Cve | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [mode, setMode] = useState<Mode>("view");
-  const [values, setValues] = useState<CveFormValues>(EMPTY_CVE_FORM);
-  const [showErrors, setShowErrors] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [deviceToLink, setDeviceToLink] = useState("");
-
-  useScopeLock(busy !== null);
-
-  // The dialog is keyed on cveRecordId, so a late response always belongs to it.
-  useEffect(() => {
-    let active = true;
-    getCve(cveRecordId)
-      .then((full) => {
-        if (active) setCve(full);
-      })
-      .catch((err) => {
-        if (!active) return;
-        if (isNotFound(err)) onGone(cveRecordId, "This CVE no longer exists, or you no longer have access to it.");
-        else setLoadError(cveErrorMessage(err, "Couldn't load the full CVE"));
-      });
-    return () => {
-      active = false;
-    };
-  }, [cveRecordId, onGone]);
-
-  const shown: CveSummary | null = cve ?? initial ?? null;
-  const errors = useMemo(() => validateCveForm(values, { mode: "edit" }), [values]);
-
-  function close() {
-    if (!busy) onClose();
-  }
-
-  function apply(updated: Cve) {
-    setCve(updated);
-    onChanged(updated);
-  }
-
-  /**
-   * Runs one write. A 404 means the CVE (or access to it) is gone, unless the
-   * CVE can still be read: then it was the target (e.g. the device) that went.
-   */
-  async function run(label: string, action: () => Promise<void>, fallback: string, targetGone?: string) {
-    setBusy(label);
-    setActionError(null);
-    try {
-      await action();
-    } catch (err) {
-      if (isNotFound(err)) {
-        if (await stillExists()) setActionError(targetGone ?? cveErrorMessage(err, fallback));
-        else onGone(cveRecordId, "This CVE no longer exists, or you no longer have access to it.");
-      } else if (isConcurrentChange(err)) {
-        setActionError("This CVE was changed at the same time by another request. Please try again.");
-      } else {
-        setActionError(cveErrorMessage(err, fallback));
-      }
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function stillExists(): Promise<boolean> {
-    try {
-      setCve(await getCve(cveRecordId));
-      return true;
-    } catch (err) {
-      return !isNotFound(err);
-    }
-  }
-
-  function startEdit() {
-    if (!cve) return;
-    setValues(cveFormValues(cve));
-    setShowErrors(false);
-    setActionError(null);
-    setMode("edit");
-  }
-
-  async function save(e: React.FormEvent) {
-    e.preventDefault();
-    if (!cve) return;
-    setShowErrors(true);
-    if (Object.keys(errors).length) return;
-    const changes = cveChanges(cve, values);
-    if (!Object.keys(changes).length) {
-      setMode("view");
-      return;
-    }
-    await run(
-      "save",
-      async () => {
-        apply(await updateCve(cveRecordId, changes));
-        setMode("view");
-      },
-      "Couldn't save the CVE"
-    );
-  }
-
-  async function link() {
-    const deviceId = deviceToLink;
-    if (!deviceId) return;
-    await run(
-      "link",
-      async () => {
-        apply((await linkCveDevice(cveRecordId, deviceId)).cve);
-        setDeviceToLink("");
-      },
-      "Couldn't link the device",
-      "That device is no longer available in this scope."
-    );
-  }
-
-  async function unlink(deviceId: string) {
-    await run(
-      `unlink:${deviceId}`,
-      async () => apply((await unlinkCveDevice(cveRecordId, deviceId)).cve),
-      "Couldn't remove the device"
-    );
-  }
-
-  async function remove() {
-    setBusy("delete");
-    setActionError(null);
-    try {
-      await deleteCve(cveRecordId);
-      onDeleted(cveRecordId);
-    } catch (err) {
-      if (isNotFound(err)) {
-        onGone(cveRecordId, `${shown?.cveId ?? "This CVE"} was already deleted.`);
-      } else if (isConcurrentChange(err)) {
-        // Its links changed meanwhile: show the current count and ask again.
-        if (await stillExists()) {
-          setActionError("This CVE changed while you were deleting it. Check the details below and confirm again.");
-        } else {
-          onGone(cveRecordId, `${shown?.cveId ?? "This CVE"} was already deleted.`);
-        }
-      } else {
-        setActionError(cveErrorMessage(err, "Couldn't delete the CVE"));
-      }
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  if (!shown) {
-    return (
-      <Dialog title="CVE" size="xl" onClose={close}>
-        <p className="text-sm text-slate-400">{loadError ?? "Loading…"}</p>
-      </Dialog>
-    );
-  }
-
-  const linkedIds = shown.deviceIds;
-  const linkable = (devices ?? [])
-    .filter((d) => !linkedIds.includes(d.deviceId))
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const atLimit = linkedIds.length >= MAX_DEVICES_PER_CVE;
-  const deviceCount = linkedIds.length;
-
-  if (mode === "delete") {
-    return (
-      <Dialog title={`Delete ${shown.cveId}?`} onClose={close} wide>
-        <div className="space-y-4 text-sm text-slate-700">
-          <p>
-            This removes the CVE record from <span className="font-medium">{scopeLabel(scope)}</span>
-            {deviceCount > 0 ? (
-              <>
-                {" "}and its links to <span className="font-medium">{deviceCount} device{deviceCount === 1 ? "" : "s"}</span>.
-              </>
-            ) : (
-              "."
-            )}
-          </p>
-          <p className="text-slate-500">The devices themselves are not changed or deleted.</p>
-          {actionError && <Alert tone="error">{actionError}</Alert>}
-          <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={() => setMode("view")} disabled={busy !== null} className={secondaryButton}>
-              Cancel
-            </button>
-            <button type="button" onClick={() => void remove()} disabled={busy !== null} className={dangerButton}>
-              {busy === "delete" ? "Deleting…" : "Delete CVE"}
-            </button>
-          </div>
-        </div>
-      </Dialog>
-    );
-  }
-
-  if (mode === "edit" && cve) {
-    return (
-      <Dialog title={`Edit ${cve.cveId}`} size="xl" onClose={close}>
-        <form onSubmit={save} className="space-y-4" noValidate>
-          <CveFormFields
-            values={values}
-            onChange={setValues}
-            errors={showErrors ? errors : {}}
-            mode="edit"
-            disabled={busy !== null}
-          />
-          {actionError && <Alert tone="error">{actionError}</Alert>}
-          <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={() => setMode("view")} disabled={busy !== null} className={secondaryButton}>
-              Cancel
-            </button>
-            <button type="submit" disabled={busy !== null} className={primaryButton}>
-              {busy === "save" ? "Saving…" : "Save changes"}
-            </button>
-          </div>
-        </form>
-      </Dialog>
-    );
-  }
-
-  const createdBy = currentUserId && shown.createdBy === currentUserId ? "by you" : "by another member";
-  return (
-    <Dialog
-      title={<span className="font-mono">{shown.cveId}</span>}
-      subtitle={`Created ${formatDate(shown.createdAt)} ${createdBy} · Updated ${formatDate(shown.updatedAt)}`}
-      size="xl"
-      onClose={close}
-    >
-      <div className="space-y-5 text-sm">
-        <div className="flex flex-wrap items-center gap-4">
-          <SeverityBadge severity={shown.severity} />
-          <span className="text-slate-600">CVSS: {formatScore(shown)}</span>
-        </div>
-
-        <section>
-          <h3 className={labelClass}>Description</h3>
-          <p className="text-slate-700 whitespace-pre-wrap break-words">
-            {shown.description || <span className="text-slate-400">No description</span>}
-          </p>
-        </section>
-
-        <section>
-          <h3 className={labelClass}>Affected chipsets</h3>
-          {shown.affectedChipsets.length ? (
-            <div className="flex flex-wrap gap-1.5">
-              {shown.affectedChipsets.map((c) => (
-                <span key={c} className="text-xs bg-surface-sunken text-slate-700 px-2 py-0.5 rounded">
-                  {c}
-                </span>
-              ))}
-            </div>
-          ) : (
-            <p className="text-slate-400">None recorded</p>
-          )}
-        </section>
-
-        <section>
-          <h3 className={labelClass}>References</h3>
-          {!cve ? (
-            <p className="text-slate-400">{loadError ?? "Loading…"}</p>
-          ) : cve.references.length ? (
-            <ul className="space-y-1">
-              {cve.references.map((r) => (
-                <li key={r}>
-                  <a href={r} target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:text-brand-700 break-all">
-                    {r}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-slate-400">None recorded</p>
-          )}
-        </section>
-
-        <section>
-          <h3 className={labelClass}>
-            Linked devices ({deviceCount}/{MAX_DEVICES_PER_CVE})
-          </h3>
-          {linkedIds.length ? (
-            <ul className="divide-y divide-line border border-line rounded-lg mb-3">
-              {[...linkedIds]
-                .sort((a, b) => deviceName(deviceNames, a).localeCompare(deviceName(deviceNames, b)))
-                .map((id) => (
-                  <li key={id} className="flex items-center justify-between px-3 py-2">
-                    <span className={deviceNames.has(id) ? "text-slate-700" : "text-slate-400 italic"}>
-                      {deviceName(deviceNames, id)}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => void unlink(id)}
-                      disabled={busy !== null || !cve}
-                      className="text-xs text-red-600 hover:text-red-700 disabled:opacity-50"
-                    >
-                      {busy === `unlink:${id}` ? "Removing…" : "Remove"}
-                    </button>
-                  </li>
-                ))}
-            </ul>
-          ) : (
-            <p className="text-slate-400 mb-3">No devices linked</p>
-          )}
-          {devices === null ? (
-            <p className="text-xs text-slate-400">Devices couldn&apos;t be loaded, so none can be linked right now.</p>
-          ) : atLimit ? (
-            <p className="text-xs text-slate-500">A CVE can be linked to at most {MAX_DEVICES_PER_CVE} devices.</p>
-          ) : linkable.length === 0 ? (
-            <p className="text-xs text-slate-400">
-              {devices.length ? "Every device in this scope is already linked." : "No devices in this scope yet."}
-            </p>
-          ) : (
-            <div className="flex gap-2">
-              <select
-                value={deviceToLink}
-                onChange={(e) => setDeviceToLink(e.target.value)}
-                disabled={busy !== null || !cve}
-                aria-label="Device to link"
-                className={inputClass}
-              >
-                <option value="">Link a device…</option>
-                {linkable.map((d) => (
-                  <option key={d.deviceId} value={d.deviceId}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => void link()}
-                disabled={!deviceToLink || busy !== null || !cve}
-                className={secondaryButton}
-              >
-                {busy === "link" ? "Linking…" : "Link"}
-              </button>
-            </div>
-          )}
-        </section>
-
-        {actionError && <Alert tone="error">{actionError}</Alert>}
-
-        <div className="flex flex-wrap justify-between gap-3 pt-2 border-t border-line">
-          <button
-            type="button"
-            onClick={() => {
-              setActionError(null);
-              setMode("delete");
-            }}
-            disabled={busy !== null || !cve}
-            className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50 pt-3"
-          >
-            Delete CVE
-          </button>
-          <div className="flex gap-3 pt-3">
-            <button type="button" onClick={close} disabled={busy !== null} className={secondaryButton}>
-              Close
-            </button>
-            <button type="button" onClick={startEdit} disabled={busy !== null || !cve} className={primaryButton}>
-              Edit
-            </button>
-          </div>
-        </div>
-      </div>
     </Dialog>
   );
 }
