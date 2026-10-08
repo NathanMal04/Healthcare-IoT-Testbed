@@ -18,3 +18,11 @@
     @apply outline-none ring-2 ring-brand-500 ring-offset-1;
   }
 }
+
+/* In-page links on the landing page glide to their section. Scoped to it so
+   the app's route changes keep jumping straight to the top. */
+@media (prefers-reduced-motion: no-preference) {
+  html:has([data-landing]) {
+    scroll-behavior: smooth;
+  }
+}

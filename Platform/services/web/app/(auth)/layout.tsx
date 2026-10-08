@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Cpu, Microchip, ShieldAlert, Users } from "lucide-react";
 import { BrandMark } from "@/app/components/shell/BrandMark";
 
@@ -13,7 +14,9 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
   return (
     <div className="min-h-screen grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] bg-white">
       <div className="flex flex-col px-6 sm:px-10 py-8">
-        <BrandMark tone="light" />
+        <Link href="/" className="self-start rounded-lg" aria-label="Vzoniq home">
+          <BrandMark tone="light" />
+        </Link>
         <div className="flex-1 flex items-center justify-center py-10">
           <div className="w-full max-w-sm">{children}</div>
         </div>

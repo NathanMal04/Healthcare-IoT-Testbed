@@ -47,6 +47,16 @@ const config: Config = {
         card: "0 1px 2px rgba(16, 34, 70, 0.04), 0 1px 3px rgba(16, 34, 70, 0.06)",
         pop: "0 12px 32px -8px rgba(5, 13, 28, 0.28)",
       },
+      // Entrance motion on the landing page; used with motion-safe:.
+      keyframes: {
+        "fade-up": {
+          from: { opacity: "0", transform: "translateY(8px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
+      },
+      animation: {
+        "fade-up": "fade-up 0.5s ease-out both",
+      },
     },
   },
   plugins: [],

@@ -27,7 +27,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "Research",
     items: [
-      { href: "/", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { href: "/devices", label: "Devices", icon: Cpu },
       { href: "/firmware", label: "Firmware", icon: Microchip },
       { href: "/artifacts", label: "Artifacts", icon: FolderArchive },

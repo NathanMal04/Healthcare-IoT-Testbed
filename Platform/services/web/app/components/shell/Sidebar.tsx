@@ -34,7 +34,7 @@ function SidebarContent({ onNavigate, onClose }: { onNavigate?: () => void; onCl
   return (
     <div className="flex flex-col h-full bg-navy-900 text-white">
       <div className="h-16 px-4 flex items-center justify-between border-b border-white/5">
-        <Link href="/" onClick={onNavigate} className="min-w-0" aria-label="Vzoniq dashboard">
+        <Link href="/dashboard" onClick={onNavigate} className="min-w-0" aria-label="Vzoniq dashboard">
           <BrandMark tone="dark" />
         </Link>
         {onClose && (

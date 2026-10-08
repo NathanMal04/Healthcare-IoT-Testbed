@@ -24,7 +24,7 @@ export default function LoginPage() {
     try {
       await signIn({ username: email, password });
       await refreshUser();
-      router.push("/");
+      router.push("/dashboard");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Sign in failed.");
     } finally {
