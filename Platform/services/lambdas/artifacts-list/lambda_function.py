@@ -24,8 +24,9 @@ def handler(event, context):
     """GET /artifacts, GET /devices/{deviceId}/artifacts and GET /artifacts/batches.
 
     Query parameters: type, tag, batchId, runId or workspaceId (GET /artifacts
-    only), limit, nextToken. With runId, only the run's outputs are listed;
-    with workspaceId, the artifacts of that workspace (members only).
+    only), limit, nextToken. With runId, only the run's outputs are listed
+    (in the run's scope); with workspaceId, the artifacts of that workspace
+    (members only). GET /artifacts/batches takes an optional workspaceId.
 
     Every listing has a scope, Personal or one workspace, and an artifact is
     only returned if the workspaceId on its METADATA matches it (none for
@@ -44,7 +45,14 @@ def handler(event, context):
     table = dynamodb.Table(TABLE)
 
     if event.get("resource") == "/artifacts/batches":
-        return _list_batches(table, user_id)
+        if "workspaceId" in params:
+            workspace_id = _validate_uuid(params["workspaceId"])
+            if workspace_id is None:
+                return _resp(400, {"error": "workspaceId is invalid"})
+            if not _is_workspace_member(table, user_id, workspace_id):
+                return _resp(404, {"error": "Workspace not found"})
+            return _list_batches(table, f"WORKSPACE#{workspace_id}", workspace_id)
+        return _list_batches(table, f"USER#{user_id}", None)
 
     artifact_type = params.get("type")
     if artifact_type is not None and artifact_type not in ARTIFACT_TYPES:
@@ -97,8 +105,13 @@ def handler(event, context):
         run_id = _validate_uuid(params["runId"])
         if run_id is None:
             return _resp(400, {"error": "runId is invalid"})
-        if table.get_item(Key={"pk": f"USER#{user_id}", "sk": f"RUN#{run_id}"}).get("Item") is None:
+        # The owner of a personal run, or any member of a workspace run's
+        # workspace; its outputs have the run's scope.
+        try:
+            run = testbed_authz.require_resource(table, user_id, "RUN", run_id, legacy_roles=testbed_authz.ANY_ROLE)
+        except testbed_authz.AuthorizationError:
             return _resp(404, {"error": "Run not found"})
+        scope = run.get("workspaceId")
         pk = f"RUN#{run_id}"
         prefix = "ARTIFACT#"
         relation = "output"
@@ -106,12 +119,7 @@ def handler(event, context):
         workspace_id = _validate_uuid(params["workspaceId"])
         if workspace_id is None:
             return _resp(400, {"error": "workspaceId is invalid"})
-        # A non-member gets the same 404 as a workspace that doesn't exist.
-        try:
-            testbed_authz.require_member(table, user_id, workspace_id)
-        except testbed_authz.AuthorizationError:
-            return _resp(404, {"error": "Workspace not found"})
-        if table.get_item(Key={"pk": f"WORKSPACE#{workspace_id}", "sk": "METADATA"}).get("Item") is None:
+        if not _is_workspace_member(table, user_id, workspace_id):
             return _resp(404, {"error": "Workspace not found"})
         scope = workspace_id
         extra["workspaceId"] = workspace_id
@@ -156,11 +164,22 @@ def handler(event, context):
     return _resp(200, body)
 
 
-def _list_batches(table, user_id):
-    """The caller's 50 most recent personal upload batches, for the run input
-    picker. Workspace batches aren't listed: runs can't use them yet."""
+def _is_workspace_member(table, user_id, workspace_id):
+    # A non-member gets the same answer as a workspace that doesn't exist.
+    try:
+        testbed_authz.require_member(table, user_id, workspace_id)
+    except testbed_authz.AuthorizationError:
+        return False
+    return table.get_item(Key={"pk": f"WORKSPACE#{workspace_id}", "sk": "METADATA"}).get("Item") is not None
+
+
+def _list_batches(table, pk, workspace_id):
+    """The 50 most recent upload batches of one scope, for the run input
+    picker: the caller's personal batches (pk USER#{uid}, workspace_id None)
+    or a workspace's (pk WORKSPACE#{wid}). As for artifacts, the link rows
+    only find candidates and the batch's METADATA decides its scope."""
     rows = table.query(
-        KeyConditionExpression=Key("pk").eq(f"USER#{user_id}") & Key("sk").begins_with("BATCH#"),
+        KeyConditionExpression=Key("pk").eq(pk) & Key("sk").begins_with("BATCH#"),
         ScanIndexForward=False, Limit=50,
     ).get("Items", [])
     keys = [{"pk": row["sk"], "sk": "METADATA"} for row in rows]
@@ -174,7 +193,7 @@ def _list_batches(table, user_id):
     batches = [{
         "uploadBatchId": i["uploadBatchId"], "fileCount": int(i.get("fileCount", 0)),
         "totalBytes": int(i.get("totalBytes", 0)), "createdAt": i.get("createdAt"),
-    } for i in items if "workspaceId" not in i]
+    } for i in items if i.get("workspaceId") == workspace_id]
     return _resp(200, {"batches": sorted(batches, key=lambda b: b["uploadBatchId"], reverse=True)})
 
 

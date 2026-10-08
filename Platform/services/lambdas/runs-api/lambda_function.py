@@ -2,10 +2,21 @@
 
   POST /runs/estimate                   preview a run: matched files, work units, cost, budget
   POST /runs                            start it
-  GET  /runs                            the caller's runs, newest first
+  GET  /runs[?workspaceId=]             the caller's personal runs, or a workspace's runs, newest first
   GET  /runs/{runId}                    run + job summary + failed work units
   GET  /runs/{runId}/children/{index}/log   a job's log (last 1000 lines)
-  POST /runs/{runId}/cancel
+  POST /runs/{runId}/cancel             by the run's creator, or a workspace owner for a workspace run
+
+A run is personal, or belongs to one workspace, decided only by whether its
+METADATA has a workspaceId (the same rule as devices, artifacts and CVEs):
+- Personal: USER#/RUN# ownership links, and only the caller's own personal
+  files as inputs.
+- Workspace: WORKSPACE#/RUN# listing links and no ownership links. Any member
+  may start, list and view it; its inputs must all belong to that workspace,
+  and its outputs become artifacts of that workspace. createdBy is provenance,
+  and whose budget pays.
+Either way the script is the caller's own: members see a run's results, never
+another member's script.
 
 Request body for estimate/start:
   {
@@ -19,7 +30,8 @@ Request body for estimate/start:
                 "requireTypes": ["log", "pcap"], "includeIncomplete": false},
     "unitsPerJob": 1,
     "class": "economy" | "standard" | "heavy", "size": "S" | "M" | "L" | "XL",
-    "timeoutMinutes": 30, "name": "optional run name"
+    "timeoutMinutes": 30, "name": "optional run name",
+    "workspaceId": "..."                                  # optional: run in this workspace
   }
 """
 import hashlib
@@ -30,14 +42,18 @@ import secrets
 import time
 import uuid
 import boto3
+import testbed_authz
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
 
 batch = boto3.client("batch")
 logs = boto3.client("logs")
 dynamodb = boto3.resource("dynamodb")
+client = boto3.client("dynamodb")
+serializer = TypeSerializer()
 
 TABLE = os.environ["METADATA_TABLE_NAME"]
 QUEUES = json.loads(os.environ["QUEUES"])  # {"economy": arn, "standard": arn, "heavy": arn?}
@@ -83,6 +99,7 @@ def handler(event, context):
     resource = event.get("resource", "")
     method = event.get("httpMethod", "GET")
     params = event.get("pathParameters") or {}
+    query = event.get("queryStringParameters") or {}
     table = dynamodb.Table(TABLE)
 
     try:
@@ -99,14 +116,17 @@ def handler(event, context):
         if (method, resource) == ("POST", "/runs"):
             return _start(table, user_id, body)
         if (method, resource) == ("GET", "/runs"):
+            if "workspaceId" in query:
+                workspace_id = _workspace_scope(table, user_id, query["workspaceId"])
+                return _resp(200, {"runs": _list_workspace_runs(table, workspace_id), "workspaceId": workspace_id})
             return _resp(200, {"runs": _list_runs(table, user_id)})
 
         run_id = _uuid(params.get("runId"), "runId")
-        run = _owned_run(table, user_id, run_id)
+        run = _authorized_run(table, user_id, run_id)
         if resource == "/runs/{runId}":
-            return _resp(200, _run_detail(table, run))
+            return _resp(200, _run_detail(table, user_id, run))
         if resource == "/runs/{runId}/cancel":
-            return _cancel(table, run)
+            return _cancel(table, user_id, run)
         if resource == "/runs/{runId}/children/{index}/log":
             return _child_log(table, run, params.get("index"))
     except RequestError as e:
@@ -118,7 +138,11 @@ def handler(event, context):
 # --- Planning (shared by estimate and start) --------------------------------------
 
 def _plan(table, user_id, body):
+    # Checked first, so a non-member learns nothing else about the request.
+    workspace_id = _workspace_scope(table, user_id, body["workspaceId"]) if "workspaceId" in body else None
     module_id = _uuid(body.get("moduleId"), "moduleId")
+    # Always the caller's own script, in either scope: a workspace never
+    # shares its members' scripts.
     if table.get_item(Key={"pk": f"USER#{user_id}", "sk": f"MODULE#{module_id}"}).get("Item") is None:
         raise RequestError(404, "Script not found")
     module = table.get_item(Key={"pk": f"MODULE#{module_id}", "sk": "METADATA"}).get("Item")
@@ -139,7 +163,7 @@ def _plan(table, user_id, body):
     if not _is_int(timeout) or not 1 <= timeout <= 360:
         raise RequestError(400, "timeoutMinutes must be between 1 and 360")
 
-    artifacts, source = _resolve_inputs(table, user_id, body.get("inputs"))
+    artifacts, source = _resolve_inputs(table, user_id, body.get("inputs"), workspace_id)
     ready = [a for a in artifacts if a.get("status") == "ready"]
     not_ready = [a for a in artifacts if a.get("status") != "ready"]
     if len(ready) > MAX_INPUTS:
@@ -161,6 +185,7 @@ def _plan(table, user_id, body):
     expected = _expected_cost(table, module_id, children, expected_rate)
 
     return {
+        "workspaceId": workspace_id,
         "module": module, "version": version, "source": source, "mode": body.get("mode", "map"),
         "grouping": grouping, "unitsPerJob": units_per_job, "class": run_class, "size": size,
         "vcpu": vcpu, "memory": memory, "timeoutSec": timeout_sec, "ready": ready, "notReady": not_ready,
@@ -187,9 +212,11 @@ def _module_version(table, module_id, requested):
     raise RequestError(409, "This script has no ready version yet")
 
 
-def _resolve_inputs(table, user_id, inputs):
-    """Returns (artifacts, source description). Only the caller's artifacts
-    are ever returned, whichever way they were selected."""
+def _resolve_inputs(table, user_id, inputs, workspace_id=None):
+    """Returns (artifacts, source description). Only artifacts of the run's
+    scope are ever returned, whichever way they were selected: for a personal
+    run (workspace_id None) the caller's own personal artifacts, for a
+    workspace run that workspace's artifacts."""
     if not isinstance(inputs, dict):
         raise RequestError(400, "inputs is required")
     sources = [k for k in ("batchId", "deviceId", "runId", "artifactIds") if inputs.get(k)]
@@ -202,18 +229,18 @@ def _resolve_inputs(table, user_id, inputs):
 
     if inputs.get("batchId"):
         batch_id = _uuid(inputs["batchId"], "batchId")
-        _require_link(table, user_id, f"BATCH#{batch_id}", "Upload batch not found")
+        _require_in_scope(table, user_id, "BATCH", batch_id, workspace_id, "Upload batch")
         ids = _link_ids(table, f"BATCH#{batch_id}", "ARTIFACT#")
         source = {"batchId": batch_id}
     elif inputs.get("deviceId"):
         device_id = _uuid(inputs["deviceId"], "deviceId")
-        _require_link(table, user_id, f"DEVICE#{device_id}", "Device not found")
+        _require_in_scope(table, user_id, "DEVICE", device_id, workspace_id, "Device")
         prefix = f"ARTIFACT#{artifact_type}#" if artifact_type else "ARTIFACT#"
         ids = _link_ids(table, f"DEVICE#{device_id}", prefix)
         source = {"deviceId": device_id, **({"type": artifact_type} if artifact_type else {})}
     elif inputs.get("runId"):
         run_id = _uuid(inputs["runId"], "runId")
-        _require_link(table, user_id, f"RUN#{run_id}", "Run not found")
+        _require_in_scope(table, user_id, "RUN", run_id, workspace_id, "Run")
         ids = _link_ids(table, f"RUN#{run_id}", "ARTIFACT#", relation="output")
         source = {"runId": run_id}
     elif inputs.get("artifactIds"):
@@ -223,14 +250,23 @@ def _resolve_inputs(table, user_id, inputs):
         ids = list(dict.fromkeys(_uuid(a, "artifactIds") for a in raw))
         source = {"artifactIds": len(ids)}
     else:
-        ids = _link_ids(table, f"USER#{user_id}", "ARTIFACT#", limit=MAX_FILTER_SCAN)
+        scope_pk = f"WORKSPACE#{workspace_id}" if workspace_id else f"USER#{user_id}"
+        ids = _link_ids(table, scope_pk, "ARTIFACT#", limit=MAX_FILTER_SCAN)
         source = {k: v for k, v in (("type", artifact_type), ("tag", tag)) if v} or {"all": True}
 
     items = _batch_get([{"pk": f"ARTIFACT#{a}", "sk": "METADATA"} for a in ids])
-    # Runs aren't workspace-aware yet: a workspace artifact is never an input,
-    # even one the caller uploaded (createdBy alone must not outlive their
-    # membership, and the manifest would hand out download URLs).
-    items = [i for i in items if i.get("createdBy") == user_id and "workspaceId" not in i]
+    # The workspaceId on METADATA decides an artifact's scope. Link rows
+    # (BATCH#, DEVICE#, RUN#, USER#, WORKSPACE#) only find candidates, and
+    # createdBy never makes a workspace artifact usable outside it.
+    if workspace_id:
+        in_scope = [i for i in items if i.get("workspaceId") == workspace_id]
+        if inputs.get("artifactIds") and len(in_scope) != len(ids):
+            # Hand-picked files that are missing, personal or in another
+            # workspace. Which ones isn't said, so ids aren't confirmed.
+            raise RequestError(400, f"{len(ids) - len(in_scope)} of the selected files aren't in this workspace")
+        items = in_scope
+    else:
+        items = [i for i in items if i.get("createdBy") == user_id and "workspaceId" not in i]
     if artifact_type:
         items = [i for i in items if i.get("type") == artifact_type]
     if tag:
@@ -238,6 +274,20 @@ def _resolve_inputs(table, user_id, inputs):
     order = {a: n for n, a in enumerate(ids)}
     items.sort(key=lambda i: (i.get("originalFilename") or i.get("name") or "", order.get(i["artifactId"], 0)))
     return items, source
+
+
+def _require_in_scope(table, user_id, kind, resource_id, workspace_id, label):
+    """An input source (batch, device or earlier run) the caller may use and
+    that has the run's scope. Not found (404) if they may not use it; a
+    source they may use but of another scope is refused with 400."""
+    try:
+        item = testbed_authz.require_resource(table, user_id, kind, resource_id,
+                                              legacy_roles=testbed_authz.ANY_ROLE)
+    except testbed_authz.AuthorizationError:
+        raise RequestError(404, f"{label} not found")
+    if item.get("workspaceId") != workspace_id:
+        raise RequestError(400, f"{label} belongs to a different workspace or to Personal")
+    return item
 
 
 def _make_units(artifacts, body):
@@ -422,6 +472,11 @@ def _start(table, user_id, body):
         "tokenHash": hashlib.sha256(token.encode()).hexdigest(),
         "status": "pending", "statusUpdatedAt": now, "createdBy": user_id, "createdAt": now, "updatedAt": now,
     }
+    workspace_id = plan["workspaceId"]
+    if workspace_id:
+        # Authoritative: a workspace run is authorized by membership of this
+        # workspace, never by USER#/RUN# links.
+        run["workspaceId"] = workspace_id
     if plan["expectedCost"] is not None:
         run["expectedCost"] = plan["expectedCost"]
     if plan["mode"] == "groupBy":
@@ -430,11 +485,14 @@ def _start(table, user_id, body):
         run["chunkSize"] = body.get("chunkSize", 10)
 
     try:
-        table.put_item(Item=run, ConditionExpression="attribute_not_exists(pk)")
+        _put_run(table, user_id, run, workspace_id)
+    except Exception:
+        _release(table, user_id, held)
+        _mark_failed(table, run_id)
+        raise
+
+    try:
         with table.batch_writer() as writer:
-            writer.put_item(Item={"pk": f"USER#{user_id}", "sk": f"RUN#{run_id}", "entity": "user-run",
-                                  "role": "owner", "name": plan["name"], "createdAt": now})
-            writer.put_item(Item={"pk": f"RUN#{run_id}", "sk": f"USER#{user_id}", "entity": "run-user", "role": "owner"})
             for index, units in enumerate(plan["children"]):
                 writer.put_item(Item={"pk": f"RUN#{run_id}", "sk": f"CHILD#{index:05d}", "entity": "run-child",
                                       "index": index, "units": units, "status": "queued", "statusRank": 1})
@@ -465,7 +523,7 @@ def _start(table, user_id, body):
                 ],
             },
             "timeout": {"attemptDurationSeconds": plan["timeoutSec"]},
-            "tags": {"userId": user_id, "runId": run_id},
+            "tags": {"userId": user_id, "runId": run_id, **({"workspaceId": workspace_id} if workspace_id else {})},
             "propagateTags": True,
         }
         if len(plan["children"]) > 1:
@@ -473,12 +531,7 @@ def _start(table, user_id, body):
         job_id = batch.submit_job(**submit)["jobId"]
     except Exception:
         _release(table, user_id, held)
-        table.update_item(
-            Key={"pk": f"RUN#{run_id}", "sk": "METADATA"},
-            UpdateExpression="SET #st = :f, statusReason = :r, held = :z, statusUpdatedAt = :now",
-            ExpressionAttributeNames={"#st": "status"},
-            ExpressionAttributeValues={":f": "failed", ":r": "The run could not be submitted", ":z": Decimal(0), ":now": _now()},
-        )
+        _mark_failed(table, run_id)
         raise
 
     table.put_item(Item={"pk": "ACTIVE#RUNS", "sk": f"RUN#{run_id}", "entity": "active-run",
@@ -492,6 +545,56 @@ def _start(table, user_id, body):
         ReturnValues="ALL_NEW",
     )["Attributes"]
     return _resp(201, {"run": _public_run(updated)})
+
+
+def _mark_failed(table, run_id):
+    # Conditional, so a run whose METADATA was never written (a refused
+    # workspace transaction) isn't created as a stub.
+    try:
+        table.update_item(
+            Key={"pk": f"RUN#{run_id}", "sk": "METADATA"},
+            UpdateExpression="SET #st = :f, statusReason = :r, held = :z, statusUpdatedAt = :now",
+            ConditionExpression="attribute_exists(pk)",
+            ExpressionAttributeNames={"#st": "status"},
+            ExpressionAttributeValues={":f": "failed", ":r": "The run could not be submitted", ":z": Decimal(0), ":now": _now()},
+        )
+    except ClientError as e:
+        if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+            raise
+
+
+def _put_run(table, user_id, run, workspace_id):
+    """Writes the run's METADATA with its scope rows: ownership links for a
+    personal run; for a workspace run, listing links only, in one transaction
+    that re-checks the workspace and the caller's membership, so a membership
+    removed after the check in _plan can't still start a run."""
+    run_id = run["runId"]
+    if not workspace_id:
+        table.put_item(Item=run, ConditionExpression="attribute_not_exists(pk)")
+        with table.batch_writer() as writer:
+            writer.put_item(Item={"pk": f"USER#{user_id}", "sk": f"RUN#{run_id}", "entity": "user-run",
+                                  "role": "owner", "name": run["name"], "createdAt": run["createdAt"]})
+            writer.put_item(Item={"pk": f"RUN#{run_id}", "sk": f"USER#{user_id}", "entity": "run-user", "role": "owner"})
+        return
+
+    roles = {f":role{i}": role for i, role in enumerate(testbed_authz.WORKSPACE_ROLES)}
+    try:
+        client.transact_write_items(TransactItems=[
+            _put(run),
+            _put({"pk": f"WORKSPACE#{workspace_id}", "sk": f"RUN#{run_id}", "entity": "workspace-run",
+                  "name": run["name"], "createdBy": user_id, "createdAt": run["createdAt"]}),
+            _put({"pk": f"RUN#{run_id}", "sk": f"WORKSPACE#{workspace_id}", "entity": "run-workspace",
+                  "createdAt": run["createdAt"]}),
+            _condition_check(f"WORKSPACE#{workspace_id}", "METADATA", "attribute_exists(pk)"),
+            _condition_check(f"USER#{user_id}", f"WORKSPACE#{workspace_id}", f"#role IN ({', '.join(roles)})",
+                             names={"#role": "role"}, values=roles),
+        ])
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "TransactionCanceledException":
+            reasons = e.response.get("CancellationReasons", [])
+            if any(r.get("Code") == "ConditionalCheckFailed" for r in reasons[3:]):
+                raise RequestError(404, "Workspace not found")
+        raise
 
 
 # --- Budget ---------------------------------------------------------------------------
@@ -558,10 +661,21 @@ def _release(table, user_id, amount):
 def _list_runs(table, user_id):
     ids = _link_ids(table, f"USER#{user_id}", "RUN#", limit=200)
     items = _batch_get([{"pk": f"RUN#{i}", "sk": "METADATA"} for i in ids])
+    # A run whose METADATA has a workspaceId is never personal, whatever
+    # USER#/RUN# rows remain.
+    items = [i for i in items if "workspaceId" not in i]
     return [_public_run(i) for i in sorted(items, key=lambda i: i["runId"], reverse=True)]
 
 
-def _run_detail(table, run):
+def _list_workspace_runs(table, workspace_id):
+    # WORKSPACE#/RUN# rows only find candidates; METADATA decides.
+    ids = _link_ids(table, f"WORKSPACE#{workspace_id}", "RUN#", limit=200)
+    items = _batch_get([{"pk": f"RUN#{i}", "sk": "METADATA"} for i in ids])
+    items = [i for i in items if i.get("workspaceId") == workspace_id]
+    return [_public_run(i) for i in sorted(items, key=lambda i: i["runId"], reverse=True)]
+
+
+def _run_detail(table, user_id, run):
     run_id = run["runId"]
     children = _query_all(table, f"RUN#{run_id}", "CHILD#")
     counts = {}
@@ -571,8 +685,17 @@ def _run_detail(table, run):
         {"unitId": r["sk"][len("RESULT#"):], "key": r.get("key"), "error": r.get("error"), "exitCode": r.get("exitCode")}
         for r in _query_all(table, f"RUN#{run_id}", "RESULT#") if r.get("status") == "failed"
     ][:200]
+    detail_run = _public_run(run)
+    if run.get("workspaceId"):
+        # The creator's email as a workspace member, so others can see who
+        # started it. Absent if they have left.
+        member = table.get_item(Key={"pk": f"WORKSPACE#{run['workspaceId']}",
+                                     "sk": f"USER#{run['createdBy']}"}).get("Item") or {}
+        if member.get("email"):
+            detail_run["createdByEmail"] = member["email"]
     return {
-        "run": _public_run(run),
+        "run": detail_run,
+        "canCancel": _can_cancel(table, user_id, run),
         "jobs": {"counts": counts, "items": [
             {"index": int(c["index"]), "status": c.get("status"), "attempts": int(c.get("attempts", 0)),
              "units": len(c.get("units", [])), "startedAt": c.get("startedAt"), "stoppedAt": c.get("stoppedAt"),
@@ -583,7 +706,20 @@ def _run_detail(table, run):
     }
 
 
-def _cancel(table, run):
+def _can_cancel(table, user_id, run):
+    """The creator of a run, or an owner of a workspace run's workspace. The
+    caller is already authorized to view the run."""
+    if run.get("createdBy") == user_id:
+        return True
+    if run.get("workspaceId"):
+        return testbed_authz.workspace_role(table, user_id, run["workspaceId"]) == "owner"
+    # A personal run is only visible to its owner (the USER#/RUN# link).
+    return True
+
+
+def _cancel(table, user_id, run):
+    if not _can_cancel(table, user_id, run):
+        raise RequestError(403, "Only the member who started this run or a workspace owner can cancel it")
     if run["status"] in TERMINAL:
         raise RequestError(409, f"The run is already {run['status']}")
     table.update_item(
@@ -616,18 +752,27 @@ def _child_log(table, run, raw_index):
 
 # --- Helpers ---------------------------------------------------------------------------
 
-def _owned_run(table, user_id, run_id):
-    _require_link(table, user_id, f"RUN#{run_id}", "Run not found")
-    run = table.get_item(Key={"pk": f"RUN#{run_id}", "sk": "METADATA"}).get("Item")
-    if run is None:
+def _authorized_run(table, user_id, run_id):
+    """The run's METADATA if the caller may view it: the USER#/RUN# link of a
+    personal run, or membership of a workspace run's workspace (a leftover
+    USER#/RUN# row grants nothing). 404 otherwise, so ids aren't revealed."""
+    try:
+        return testbed_authz.require_resource(table, user_id, "RUN", run_id, legacy_roles=testbed_authz.ANY_ROLE)
+    except testbed_authz.AuthorizationError:
         raise RequestError(404, "Run not found")
-    return run
 
 
-def _require_link(table, user_id, sk, message):
-    link = table.get_item(Key={"pk": f"USER#{user_id}", "sk": sk}).get("Item")
-    if link is None:
-        raise RequestError(404, message)
+def _workspace_scope(table, user_id, raw):
+    """A workspaceId the caller is a member of, of a workspace that exists. A
+    non-member gets the same 404 as a workspace that doesn't exist."""
+    workspace_id = _uuid(raw, "workspaceId")
+    try:
+        testbed_authz.require_member(table, user_id, workspace_id)
+    except testbed_authz.AuthorizationError:
+        raise RequestError(404, "Workspace not found")
+    if table.get_item(Key={"pk": f"WORKSPACE#{workspace_id}", "sk": "METADATA"}).get("Item") is None:
+        raise RequestError(404, "Workspace not found")
+    return workspace_id
 
 
 def _link_ids(table, pk, prefix, relation=None, limit=None):
@@ -678,6 +823,10 @@ def _public_run(item):
     for field in PUBLIC_RUN_FIELDS:
         if field in item:
             out[field] = _plain(item[field])
+    if item.get("workspaceId"):
+        # Only on workspace runs, so personal responses are unchanged.
+        out["workspaceId"] = item["workspaceId"]
+        out["createdBy"] = item.get("createdBy")
     return out
 
 
@@ -717,6 +866,21 @@ def _uuid7():
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def _put(item):
+    return {"Put": {"TableName": TABLE, "Item": {k: serializer.serialize(v) for k, v in item.items()},
+                    "ConditionExpression": "attribute_not_exists(pk)"}}
+
+
+def _condition_check(pk, sk, condition, names=None, values=None):
+    check = {"TableName": TABLE, "Key": {"pk": serializer.serialize(pk), "sk": serializer.serialize(sk)},
+             "ConditionExpression": condition}
+    if names:
+        check["ExpressionAttributeNames"] = names
+    if values:
+        check["ExpressionAttributeValues"] = {k: serializer.serialize(v) for k, v in values.items()}
+    return {"ConditionCheck": check}
 
 
 def _resp(status, body):

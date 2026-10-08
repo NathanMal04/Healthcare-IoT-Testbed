@@ -209,6 +209,11 @@ def _presign_outputs(table, run, child, body):
 
     inputs = unit["artifactIds"]
     owner = run["createdBy"]
+    # Outputs take the run's scope: a workspace run's outputs are artifacts
+    # of that workspace (any member may use them), a personal run's belong
+    # to its owner. The job has no user identity, so membership isn't
+    # re-checked here; it was when the run started.
+    workspace_id = run.get("workspaceId")
     presigned = []
     for spec in specs:
         artifact_id, attempt_id = _uuid7(), str(uuid.uuid4())
@@ -228,12 +233,22 @@ def _presign_outputs(table, run, child, body):
             # Same default as uploaded firmware (artifacts-presign), so every
             # firmware artifact carries reverse-engineering progress.
             item["reverseEngineeringStatus"] = "not_started"
-        client.transact_write_items(TransactItems=[
-            _put(item),
-            _put({"pk": f"USER#{owner}", "sk": f"ARTIFACT#{artifact_id}", "entity": "user-artifact",
-                  "role": "owner", "name": name, "type": item["type"], "createdAt": now}),
-            _put({"pk": f"ARTIFACT#{artifact_id}", "sk": f"USER#{owner}", "entity": "artifact-user", "role": "owner"}),
-        ])
+        if workspace_id:
+            # Listing links only, no ownership links (as artifacts-presign).
+            item["workspaceId"] = workspace_id
+            scope_items = [
+                _put({"pk": f"WORKSPACE#{workspace_id}", "sk": f"ARTIFACT#{artifact_id}", "entity": "workspace-artifact",
+                      "name": name, "type": item["type"], "createdBy": owner, "createdAt": now}),
+                _put({"pk": f"ARTIFACT#{artifact_id}", "sk": f"WORKSPACE#{workspace_id}", "entity": "artifact-workspace",
+                      "createdAt": now}),
+            ]
+        else:
+            scope_items = [
+                _put({"pk": f"USER#{owner}", "sk": f"ARTIFACT#{artifact_id}", "entity": "user-artifact",
+                      "role": "owner", "name": name, "type": item["type"], "createdAt": now}),
+                _put({"pk": f"ARTIFACT#{artifact_id}", "sk": f"USER#{owner}", "entity": "artifact-user", "role": "owner"}),
+            ]
+        client.transact_write_items(TransactItems=[_put(item), *scope_items])
         checksum = base64.b64encode(bytes.fromhex(spec["sha256"])).decode()
         post = s3.generate_presigned_post(
             Bucket=BUCKET, Key=s3_key,

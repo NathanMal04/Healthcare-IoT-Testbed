@@ -671,7 +671,8 @@ class LegacyFirmwareRouteTests(WorldTestCase):
 
 
 class RunsBoundaryTests(WorldTestCase):
-    def test_workspace_artifacts_are_never_run_inputs(self):
+    # Workspace runs are covered in test_workspace_runs.
+    def test_workspace_artifacts_are_never_personal_run_inputs(self):
         runs = self.lam("runs-api")
         f1 = self.upload(USER, [D1])
         personal = self.upload(USER, [DP])

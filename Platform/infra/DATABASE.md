@@ -19,7 +19,7 @@ The metadata table is single-table so that one `Query` on a partition returns a 
 - **Versions.** `VERSION#0001`, `VERSION#0002`, … are zero-padded so that they sort in order. Version numbers elsewhere (`moduleVersion`, `envVersion`, `latestVersion`) are plain numbers.
 - **`entity`.** Every row has an `entity` attribute naming its kind (`device`, `run-child`, `user-artifact`, …). Use it to tell rows apart when a query returns a mixed partition.
 - **Two-way links.** A relationship is written as two rows, one in each partition, so that it can be queried from either side. Both rows are written in the same `TransactWriteItems` call. The row in the `USER#` / `DEVICE#` / `BATCH#` partition repeats a few **immutable** display fields (`name`, `type`, `createdAt`). Anything that changes, such as `status`, is only stored on the base record: list endpoints query the link rows, then read the base records with `BatchGetItem`, so status is never stale.
-- **Ownership.** Every personal device and personal CVE, and every artifact, upload batch, module, environment, run and session, has `USER#{uid} / X#{id}` and `X#{id} / USER#{uid}` rows with `role = owner`. Their `entity` values are `user-x` / `x-user` (`user-device` / `device-user`, `user-artifact` / `artifact-user`, and likewise `batch`, `module`, `env`, `run`, `session`, `cve`). `owner` is currently the only role. The ownership check is a single `GetItem(USER#{uid}, X#{id})`.
+- **Ownership.** Every personal device, personal run and personal CVE, and every artifact, upload batch, module, environment and session, has `USER#{uid} / X#{id}` and `X#{id} / USER#{uid}` rows with `role = owner`. Their `entity` values are `user-x` / `x-user` (`user-device` / `device-user`, `user-artifact` / `artifact-user`, and likewise `batch`, `module`, `env`, `run`, `session`, `cve`). `owner` is currently the only role. The ownership check is a single `GetItem(USER#{uid}, X#{id})`.
 - **Money.** Costs, holds and limits are DynamoDB numbers (`N`, exact decimals; boto3 `Decimal`) in USD, so they can be added atomically and compared in conditions.
 - **Timestamps.** ISO-8601 UTC strings.
 
@@ -54,7 +54,7 @@ A device is either **personal** or belongs to exactly one **workspace**, decided
 - **The workspace/device rows are for listing only.** `GET /devices?workspaceId=` queries `WORKSPACE#{wid}`, then lists a device only if its `METADATA` has that `workspaceId`; a link row alone never makes a device part of a workspace. `GET /devices` (personal) leaves out any device whose `METADATA` has a `workspaceId`.
 - A workspace device's `METADATA`, both links, and `ConditionCheck`s that the workspace exists and the caller is still a member are written in one transaction.
 - **Existing devices are personal.** Nothing adds a `workspaceId` to them; moving a device into a workspace will be a separate, explicit operation.
-- **Artifacts and firmware** follow the device's scope: see [Artifact scope](#artifact-scope). The old `/devices/{id}/firmware` routes and runs still refuse workspace devices.
+- **Artifacts and firmware** follow the device's scope: see [Artifact scope](#artifact-scope). The old `/devices/{id}/firmware` routes still refuse workspace devices; a workspace device is a run input only for a run of its workspace (see [Run scope](#run-scope)).
 
 ### Artifact: `ARTIFACT#{id}` / `METADATA`
 
@@ -122,7 +122,7 @@ Each device is authorized by its own scope with `testbed_authz.require_resource`
 - A workspace artifact's rows are written in one transaction with a `ConditionCheck` that the caller is still a member.
 - **Firmware** is an ordinary `type = firmware` artifact in either scope: version required, `FWVER#` guard per device, `reverseEngineeringStatus`, same upload lifecycle.
 - **Device-less workspace artifacts** (e.g. a pcap not tied to a device) aren't possible yet: an upload with no devices is personal. Adding them later needs an explicit `workspaceId` on the request.
-- **Runs** aren't workspace-aware yet: `runs-api` never uses a workspace artifact as an input (even one the caller uploaded), and workspace devices and batches can't be input sources. Run outputs stay personal.
+- **Runs** follow the same scope: a workspace run takes only its workspace's artifacts (directly or through its devices, batches and earlier runs) and its outputs are artifacts of that workspace; a personal run never uses a workspace artifact, even one the caller uploaded. See [Run scope](#run-scope).
 
 ### Upload batch: `BATCH#{id}` / `METADATA`
 
@@ -136,7 +136,7 @@ The files sent together in one upload from the web app. A run can use a batch as
 
 - Members: `BATCH#{bid} / ARTIFACT#{aid}` (`batch-artifact`): `name`, `type`.
 - Ownership (personal batch): `USER#{uid} / BATCH#{bid}` (`user-batch`) and `BATCH#{bid} / USER#{uid}` (`batch-user`).
-- Workspace batch: `WORKSPACE#{wid} / BATCH#{bid}` (`workspace-batch`: `createdBy`, `createdAt`) and `BATCH#{bid} / WORKSPACE#{wid}` (`batch-workspace`), and no ownership links. A batch has its uploads' scope, and can only be reused (`uploadBatchId`) for uploads of the same scope (409 otherwise). Any member can add to it and list it (`GET /artifacts?batchId=`). `GET /artifacts/batches`, the run input picker, lists personal batches only.
+- Workspace batch: `WORKSPACE#{wid} / BATCH#{bid}` (`workspace-batch`: `createdBy`, `createdAt`) and `BATCH#{bid} / WORKSPACE#{wid}` (`batch-workspace`), and no ownership links. A batch has its uploads' scope, and can only be reused (`uploadBatchId`) for uploads of the same scope (409 otherwise). Any member can add to it and list it (`GET /artifacts?batchId=`). `GET /artifacts/batches`, the run input picker, lists the caller's personal batches, or with `?workspaceId={wid}` that workspace's (members only; same 404 for a non-member as for a missing workspace).
 
 ### Module: `MODULE#{id}` / `METADATA`
 
@@ -215,7 +215,9 @@ One cloud execution of a module version over a fixed set of input artifacts, run
 | `batchJobId` | S | The Batch (array) job |
 | `cancelRequested`, `stopReason` | BOOL, S | Set by cancel, and by the watchdog when it stops the run |
 | `status`, `statusReason`, `statusUpdatedAt` | S | See lifecycle below |
-| `startedAt`, `endedAt`, `createdBy`, `createdAt`, `updatedAt` | S | Timestamps |
+| `workspaceId` | S | **Workspace runs only.** The workspace the run belongs to. Authoritative for access (see [Run scope](#run-scope)). Set at start and never changed. |
+| `createdBy` | S | Who started it. Owner of a personal run; provenance on a workspace run. Either way, whose budget pays |
+| `startedAt`, `endedAt`, `createdAt`, `updatedAt` | S | Timestamps |
 
 Lifecycle: `pending` → `queued` → `running` → `completed`, `failed`, `cancelled` (by the user) or `stopped` (by the watchdog: cost cap or budget). `completed` means every job ran; individual units can still have failed (`unitsFailed`).
 
@@ -230,7 +232,33 @@ Other run rows:
 - `MODULE#{id} / RUN#{rid}` (`module-run`): `moduleVersion`, `status`, `class`, `size`, `childCount`, `unitCount`, `unitSeconds`. The run history per module; expected costs use seconds per unit from the last 20 runs.
 - `ACTIVE#RUNS / RUN#{rid}` (`active-run`): `userId`. Written at start and deleted when the run settles; the watchdog reads only this partition.
 
-Output artifacts are ordinary artifacts with `origin = run`, `derivedFromRun`, `derivedFromArtifacts` (the unit's inputs) and `runUnitId`, owned by the run's owner.
+Output artifacts are ordinary artifacts with `origin = run`, `derivedFromRun`, `derivedFromArtifacts` (the unit's inputs) and `runUnitId`, in the run's scope: for a personal run owned by its owner (`USER#/ARTIFACT#` links), for a workspace run artifacts of that workspace (`workspaceId`, `WORKSPACE#/ARTIFACT#` links, no ownership links, `createdBy` = the run's creator). `runs-manifest` writes them; the job has no user identity, so membership isn't re-checked there.
+
+#### Run scope
+
+A run is **personal** or belongs to exactly one **workspace**, decided only by whether its `METADATA` has a `workspaceId`, as for devices, artifacts and CVEs. `POST /runs` and `POST /runs/estimate` take an optional `workspaceId`; without one the run is personal, exactly as before.
+
+| | Personal run (no `workspaceId`) | Workspace run (`workspaceId` set) |
+|---|---|---|
+| Started by | The caller | Any member (`owner` or `member`) |
+| Script | The caller's own (`USER#{uid} / MODULE#{mid}`) | The caller's own; a workspace never shares its members' scripts |
+| Links | `USER#{uid} / RUN#{rid}` (`user-run`, `role = owner`, `name`, `createdAt`) and `RUN#{rid} / USER#{uid}` (`run-user`) | `WORKSPACE#{wid} / RUN#{rid}` (`workspace-run`: `name`, `createdBy`, `createdAt`) and `RUN#{rid} / WORKSPACE#{wid}` (`run-workspace`: `createdAt`). **No** ownership links. |
+| Inputs | The caller's own personal artifacts (`createdBy` = caller, no `workspaceId`) | Only artifacts whose `METADATA` has the run's `workspaceId` |
+| Outputs | Personal artifacts of the owner | Artifacts of the workspace |
+| Listed by | `GET /runs` | `GET /runs?workspaceId={wid}` (members only) |
+| Who may view it, its job logs and its outputs | The owner | Every member of the workspace, and nobody else |
+| Who may cancel it | The owner | Its creator, or an `owner` of the workspace (`member`s get 403) |
+| Budget | The owner's | The creator's (`USER#{createdBy} / BUDGET`); there is no workspace budget |
+
+- **`workspaceId` on `METADATA` is the authority.** Reads and cancel authorize with `testbed_authz.require_resource(..., "RUN", rid)`: with a `workspaceId` only the caller's membership counts and a leftover `USER#/RUN#` row grants nothing. A caller who may not view a run gets the same 404 as for one that doesn't exist. `GET /artifacts?runId=` uses the same check and lists the outputs in the run's scope.
+- **The workspace/run rows are for listing only.** `GET /runs?workspaceId=` queries `WORKSPACE#{wid}`, then keeps a run only if its `METADATA` has that `workspaceId`; `GET /runs` (personal) leaves out any run whose `METADATA` has a `workspaceId`.
+- **Inputs are checked against the run's scope.** A batch, device or earlier run used as the source is authorized with `require_resource` (404 if the caller may not use it) and must have the run's scope (400 otherwise). The artifacts its link rows find are then kept only if their `METADATA` has the run's scope; `createdBy` never makes a workspace artifact usable elsewhere. The type/tag filter reads `WORKSPACE#{wid}` instead of `USER#{uid}`. Hand-picked `artifactIds` that aren't all in the workspace refuse a workspace run (400, saying only how many); a personal run drops them, as before.
+- **Start** writes `METADATA` and both workspace rows in one `TransactWriteItems`, with `ConditionCheck`s that the workspace exists and the caller is still a member, so a membership removed after the first check can't start a run (the budget hold is released). The Batch job is tagged with `workspaceId` too.
+- **Membership is re-checked on every read and cancel**, so a member who leaves loses access to the workspace's runs, including ones they started. A run already going isn't stopped.
+- **Responses:** runs carry `workspaceId` and `createdBy` only when they are workspace runs, so personal responses are unchanged. `GET /runs/{rid}` adds `canCancel`, and for a workspace run `createdByEmail` (from the creator's `WORKSPACE#/USER#` row, while they are a member).
+- **Scripts stay private.** Members see a run's `moduleName`, `moduleVersion`, job logs and outputs; never the module, its versions, source or image (`imageUri` and `jobDefinitionArn` aren't returned).
+- **The execution side is unchanged.** Jobs reach their files only through the manifest service with the per-run token; `runs-events`, the watchdog and metering key on `RUN#` and `createdBy`.
+- **Existing runs are personal.** Nothing adds a `workspaceId` to them, and no migration is needed.
 
 ### Session: `SESSION#{id}` / `METADATA`
 
@@ -250,7 +278,7 @@ Output artifacts are ordinary artifacts with `origin = run`, `derivedFromRun`, `
 
 ### Workspace: `WORKSPACE#{id}` / `METADATA`
 
-A shared project. Its members will be able to use the workspace's resources (devices, artifacts, runs) once those become workspace-aware; for now it holds its members and invitations. Created with `POST /workspaces` (`workspaces-api`), which writes the record and the creator's two membership rows in one `TransactWriteItems`. The id is a UUIDv7.
+A shared project: its members and invitations, and the resources its members share (devices, artifacts, upload batches, CVEs and runs). Created with `POST /workspaces` (`workspaces-api`), which writes the record and the creator's two membership rows in one `TransactWriteItems`. The id is a UUIDv7.
 
 | Attribute | Type | Meaning |
 |---|---|---|
@@ -400,6 +428,7 @@ erDiagram
     USER ||--o{ CVE : owns
     WORKSPACE |o--o{ CVE : "workspace CVE"
     DEVICE }o--o{ CVE : "linked (same scope)"
+    WORKSPACE |o--o{ RUN : "workspace run"
     DEVICE }o--o{ RUN : "optional link"
     MODULE ||--|{ MODULE_VERSION : has
     ENV ||--|{ ENV_VERSION : has
@@ -438,6 +467,8 @@ erDiagram
 | Environment versions | `Query pk = ENV#{id}, sk begins_with VERSION#` |
 | Platform environments (visible to everyone) | `Query pk = PLATFORM, sk begins_with ENV#` |
 | Everything about a run | `Query pk = RUN#{id}` |
+| A workspace's runs | `Query pk = WORKSPACE#{wid}, sk begins_with RUN#`, then `BatchGetItem` of `RUN#{rid} / METADATA`, keeping those whose `workspaceId` is `{wid}` |
+| May this user view this run? | `GetItem RUN#{rid} / METADATA`; with a `workspaceId`, `GetItem USER#{uid} / WORKSPACE#{wid}`, otherwise `GetItem USER#{uid} / RUN#{rid}` |
 | A run's jobs / outputs | `Query pk = RUN#{id}, sk begins_with CHILD#` / `ARTIFACT#` (filter `relation = output`) |
 | Which runs used or produced this artifact | `Query pk = ARTIFACT#{aid}, sk begins_with RUN#` |
 | Has this work unit already been done? | `GetItem pk = RUN#{id}, sk = RESULT#{unitId}` (many at once: `BatchGetItem`) |

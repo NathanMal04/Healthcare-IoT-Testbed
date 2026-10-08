@@ -387,6 +387,7 @@ module "runs_api_fn" {
   runtime       = "python3.12"
   memory_size   = 1024
   timeout       = 60
+  layers        = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
     METADATA_TABLE_NAME   = module.metadata_table.table_name
@@ -440,6 +441,9 @@ module "runs_events_fn" {
   environment = "dev"
 }
 
+# A workspace run's rows are written with TransactWriteItems, authorized by
+# the actions inside it: Puts, and the ConditionChecks that re-check the
+# workspace and the caller's membership (dynamodb:ConditionCheckItem).
 resource "aws_iam_policy" "runs_api" {
   name = "${var.name}-lambda-runs-api"
 
@@ -450,7 +454,7 @@ resource "aws_iam_policy" "runs_api" {
         Effect = "Allow"
         Action = [
           "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:Query",
-          "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem",
+          "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem", "dynamodb:ConditionCheckItem",
         ]
         Resource = module.metadata_table.table_arn
       },
@@ -468,7 +472,8 @@ resource "aws_iam_policy" "runs_api" {
         Resource = "arn:aws:batch:${var.aws_region}:${local.account_id}:job/*"
       },
       {
-        # Tags go on at submit time (userId, runId) for cost allocation.
+        # Tags go on at submit time (userId, runId, and workspaceId for a
+        # workspace run) for cost allocation.
         # With tags, SubmitJob checks TagResource on every resource in the
         # request: the job, its job definition and its job queue.
         Effect = "Allow"
