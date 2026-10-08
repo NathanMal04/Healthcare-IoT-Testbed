@@ -34,6 +34,8 @@ export interface RunRequest {
   size: RunSize;
   timeoutMinutes: number;
   name?: string;
+  /** Run in this workspace, on its files; absent for a Personal run. */
+  workspaceId?: string;
 }
 
 export interface Estimate {
@@ -83,10 +85,17 @@ export interface Run {
   startedAt?: string;
   endedAt?: string;
   cancelRequested?: boolean;
+  /** Workspace runs only: the workspace, and the member who started it (Cognito sub). */
+  workspaceId?: string;
+  createdBy?: string;
+  /** Run detail of a workspace run only, while the creator is still a member with a verified email. */
+  createdByEmail?: string;
 }
 
 export interface RunDetail {
   run: Run;
+  /** Whether the signed-in user may cancel it: its creator, or a workspace owner. */
+  canCancel: boolean;
   jobs: {
     counts: Record<string, number>;
     items: {
@@ -113,8 +122,9 @@ export async function startRun(request: RunRequest): Promise<Run> {
   return (await apiRequest<{ run: Run }>("POST", "/runs", { body: request })).run;
 }
 
-export async function listRuns(): Promise<Run[]> {
-  return (await apiRequest<{ runs: Run[] }>("GET", "/runs")).runs;
+/** Personal runs, or a workspace's runs when workspaceId is given. Newest first. */
+export async function listRuns(workspaceId?: string): Promise<Run[]> {
+  return (await apiRequest<{ runs: Run[] }>("GET", "/runs", { query: { workspaceId } })).runs;
 }
 
 export function getRun(runId: string): Promise<RunDetail> {
@@ -134,5 +144,32 @@ export function formatMoney(value: number | null | undefined): string {
   return value < 0.01 && value > 0 ? `$${value.toFixed(4)}` : `$${value.toFixed(2)}`;
 }
 
+/** True when the run belongs to the given scope (workspaceId undefined = Personal). */
+export function runInScope(run: Pick<Run, "workspaceId">, workspaceId: string | undefined): boolean {
+  return (run.workspaceId ?? null) === (workspaceId ?? null);
+}
+
 /** Hand-picked artifacts travel from the Artifacts page to the run form here. */
 export const RUN_SELECTION_KEY = "runSelection";
+
+/** The stored selection: the artifact ids and the scope (scopeKey) they were picked in. */
+export function serializeRunSelection(scopeKey: string, artifactIds: string[]): string {
+  return JSON.stringify({ scope: scopeKey, artifactIds });
+}
+
+/**
+ * The selected artifact ids, if they were picked in `scopeKey`; otherwise
+ * none, so files from another workspace (or Personal) are never submitted.
+ */
+export function parseRunSelection(raw: string | null, scopeKey: string): string[] {
+  if (!raw) return [];
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const { scope, artifactIds } = value as { scope?: unknown; artifactIds?: unknown };
+    if (scope !== scopeKey || !Array.isArray(artifactIds)) return [];
+    return artifactIds.filter((id): id is string => typeof id === "string");
+  } catch {
+    return [];
+  }
+}

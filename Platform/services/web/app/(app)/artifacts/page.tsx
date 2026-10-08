@@ -14,7 +14,7 @@ import {
   type ArtifactType,
 } from "@/lib/artifacts";
 import ArtifactUploader from "@/app/components/ArtifactUploader";
-import { RUN_SELECTION_KEY } from "@/lib/runs";
+import { RUN_SELECTION_KEY, serializeRunSelection } from "@/lib/runs";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { isWorkspaceUnavailable, scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
 import { Download, FolderArchive, Layers, Play, RefreshCw, X } from "lucide-react";
@@ -61,8 +61,6 @@ function ArtifactsView() {
   const router = useRouter();
   const { scope, reportWorkspaceUnavailable } = useWorkspace();
   const workspaceId = scopeWorkspaceId(scope);
-  // Runs can't use workspace files yet, so the run shortcuts are Personal only.
-  const runsAvailable = scope.kind === "personal";
 
   const [devices, setDevices] = useState<Device[]>([]);
   const [filters, setFilters] = useState<Filters>({ type: "", tag: "", batchId: "" });
@@ -175,7 +173,8 @@ function ArtifactsView() {
 
   function runOn(artifactIds: string[]) {
     try {
-      sessionStorage.setItem(RUN_SELECTION_KEY, JSON.stringify(artifactIds));
+      // Tagged with the scope, so the run form drops it if the scope changes.
+      sessionStorage.setItem(RUN_SELECTION_KEY, serializeRunSelection(scopeKey(scope), artifactIds));
     } catch {
       setDownloadError("Your browser blocked session storage, so the selection can't be passed on");
       return;
@@ -186,27 +185,23 @@ function ArtifactsView() {
   if (loading || !user) return null;
 
   const columns: Column<Artifact>[] = [
-    ...(runsAvailable
-      ? [
-          {
-            key: "select",
-            header: (
-              <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Select all shown" className="rounded border-line-strong" />
-            ),
-            headerClassName: "w-8",
-            cell: (artifact: Artifact) => (
-              <input
-                type="checkbox"
-                checked={selectedIds.has(artifact.artifactId)}
-                disabled={artifact.status !== "ready"}
-                onChange={() => toggle(artifact.artifactId)}
-                aria-label={`Select ${artifact.name}`}
-                className="rounded border-line-strong"
-              />
-            ),
-          } satisfies Column<Artifact>,
-        ]
-      : []),
+    {
+      key: "select",
+      header: (
+        <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Select all shown" className="rounded border-line-strong" />
+      ),
+      headerClassName: "w-8",
+      cell: (artifact: Artifact) => (
+        <input
+          type="checkbox"
+          checked={selectedIds.has(artifact.artifactId)}
+          disabled={artifact.status !== "ready"}
+          onChange={() => toggle(artifact.artifactId)}
+          aria-label={`Select ${artifact.name}`}
+          className="rounded border-line-strong"
+        />
+      ),
+    },
     {
       key: "name",
       header: "Name",
@@ -288,12 +283,11 @@ function ArtifactsView() {
           label={`Actions for ${artifact.name}`}
           actions={[
             artifact.status === "ready" && { label: "Download", icon: Download, onSelect: () => void download(artifact) },
-            runsAvailable &&
-              artifact.status === "ready" && {
-                label: "Run a script",
-                icon: Play,
-                onSelect: () => runOn([artifact.artifactId]),
-              },
+            artifact.status === "ready" && {
+              label: "Run a script",
+              icon: Play,
+              onSelect: () => runOn([artifact.artifactId]),
+            },
             !!artifact.uploadBatchId &&
               artifact.uploadBatchId !== filters.batchId && {
                 label: "Show upload batch",
@@ -327,11 +321,9 @@ function ArtifactsView() {
       <Card className="overflow-hidden">
         <CardHeader
           title={scope.kind === "workspace" ? `${scope.name} artifacts` : "Your artifacts"}
-          description={
-            runsAvailable ? "Select ready files to run a script on them." : "Workspace analysis runs are not available yet."
-          }
+          description="Select ready files to run a script on them."
           actions={
-            runsAvailable && selectedIds.size > 0 ? (
+            selectedIds.size > 0 ? (
               <div className="flex items-center gap-2">
                 <Button size="sm" icon={Play} onClick={() => runOn(Array.from(selectedIds))}>
                   Run a script on selected ({selectedIds.size})
@@ -388,7 +380,7 @@ function ArtifactsView() {
               </button>
             </span>
           )}
-          {runsAvailable && filters.batchId && (
+          {filters.batchId && (
             <ButtonLink href={`/runs?batch=${filters.batchId}`} variant="link" size="sm">
               Run a script on this upload
             </ButtonLink>

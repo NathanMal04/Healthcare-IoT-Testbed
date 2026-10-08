@@ -10,6 +10,7 @@ import {
   estimateRun,
   formatMoney,
   listRuns,
+  parseRunSelection,
   startRun,
   type Estimate,
   type GroupBy,
@@ -21,6 +22,8 @@ import {
   type RunSize,
 } from "@/lib/runs";
 import { cardClass, formatDate, inputClass, labelClass, primaryButton, secondaryButton } from "@/app/components/ui";
+import { useScopeLock, useWorkspace } from "@/context/WorkspaceContext";
+import { scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
 
 type Source = "batch" | "device" | "filter" | "selection" | "run";
 
@@ -38,16 +41,27 @@ const SIZE_LABELS: Record<RunSize, string> = {
   XL: "XL · 8 vCPU, 32 GB",
 };
 
+/**
+ * Runs in the current scope: Personal, or the selected workspace with its
+ * devices, batches, files and runs. The script is always one of the user's
+ * own. Mounted per scope (the runs page is keyed on it), so nothing loaded
+ * for one scope is submitted in another.
+ */
 export default function NewRunForm({ prefill, onCancel }: { prefill: NewRunPrefill; onCancel: () => void }) {
   const router = useRouter();
+  const { scope } = useWorkspace();
+  const workspaceId = scopeWorkspaceId(scope);
+  const currentScopeKey = scopeKey(scope);
   const [modules, setModules] = useState<Module[]>([]);
   const [versions, setVersions] = useState<ModuleVersion[]>([]);
   const [batches, setBatches] = useState<UploadBatch[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
   const [selection] = useState<string[]>(() => {
+    if (!prefill.selection) return [];
     try {
-      return prefill.selection ? JSON.parse(sessionStorage.getItem(RUN_SELECTION_KEY) || "[]") : [];
+      // Files picked in another scope are dropped, not submitted here.
+      return parseRunSelection(sessionStorage.getItem(RUN_SELECTION_KEY), currentScopeKey);
     } catch {
       return [];
     }
@@ -85,12 +99,15 @@ export default function NewRunForm({ prefill, onCancel }: { prefill: NewRunPrefi
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
 
+  useScopeLock(starting);
+
   useEffect(() => {
+    // Scripts are the user's own in every scope; the inputs are the scope's.
     listModules().then((all) => setModules(all.filter((m) => m.runtime === "cloud" && m.latestReadyVersion))).catch(() => {});
-    listUploadBatches().then(setBatches).catch(() => {});
-    getDevices().then(setDevices).catch(() => {});
-    listRuns().then((all) => setRuns(all.filter((r) => r.status === "completed" && r.outputCount > 0))).catch(() => {});
-  }, []);
+    listUploadBatches(workspaceId).then(setBatches).catch(() => {});
+    getDevices(workspaceId).then(setDevices).catch(() => {});
+    listRuns(workspaceId).then((all) => setRuns(all.filter((r) => r.status === "completed" && r.outputCount > 0))).catch(() => {});
+  }, [workspaceId]);
 
   useEffect(() => {
     setVersions([]);
@@ -143,9 +160,11 @@ export default function NewRunForm({ prefill, onCancel }: { prefill: NewRunPrefi
       size,
       timeoutMinutes: timeout,
       ...(name.trim() ? { name: name.trim() } : {}),
+      ...(workspaceId ? { workspaceId } : {}),
     };
   }, [moduleId, version, source, batchId, deviceId, runId, selection, type, tag, mode, chunkSize, groupBy, depth,
-    ignoreCase, pattern, tagPrefix, requireTypes, includeIncomplete, unitsPerJob, runClass, size, timeout, name]);
+    ignoreCase, pattern, tagPrefix, requireTypes, includeIncomplete, unitsPerJob, runClass, size, timeout, name,
+    workspaceId]);
 
   // Re-estimate shortly after the form stops changing.
   useEffect(() => {
@@ -187,7 +206,14 @@ export default function NewRunForm({ prefill, onCancel }: { prefill: NewRunPrefi
 
   return (
     <div className={`${cardClass} p-6 space-y-6`}>
-      <h2 className="font-semibold text-slate-700">New run</h2>
+      <div>
+        <h2 className="font-semibold text-slate-700">New run</h2>
+        {scope.kind === "workspace" && (
+          <p className="text-xs text-slate-500 mt-1">
+            On {scope.name}&apos;s files. Members can see the run and its outputs, but not your script.
+          </p>
+        )}
+      </div>
 
       <section className="grid md:grid-cols-3 gap-4">
         <div className="md:col-span-2">

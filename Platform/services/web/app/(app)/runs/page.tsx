@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -11,15 +11,19 @@ import {
   getJobLog,
   getRun,
   listRuns,
+  runInScope,
   type Run,
   type RunDetail,
 } from "@/lib/runs";
 import { formatBytes, getArtifactDownloadUrl, listArtifacts, type Artifact } from "@/lib/artifacts";
 import NewRunForm from "@/app/components/NewRunForm";
 import { useWorkspace } from "@/context/WorkspaceContext";
+import { useAuth } from "@/context/AuthContext";
+import { isWorkspaceUnavailable, scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
 import {
   Alert,
   Button,
+  LoadingState,
   PageHeader,
   StatusBadge,
   TextModal,
@@ -34,6 +38,9 @@ const POLL_MS = 8000;
 
 function RunView({ runId }: { runId: string }) {
   const router = useRouter();
+  const { user } = useAuth();
+  const { scope } = useWorkspace();
+  const workspaceId = scopeWorkspaceId(scope);
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [outputs, setOutputs] = useState<Artifact[]>([]);
   const [outputsToken, setOutputsToken] = useState<string | undefined>();
@@ -93,6 +100,27 @@ function RunView({ runId }: { runId: string }) {
   const run = detail.run;
   const done = run.unitsSucceeded + run.unitsFailed;
 
+  // A run of another scope (e.g. after switching workspace) isn't shown here,
+  // the same way the list only shows the current scope's runs.
+  if (!runInScope(run, workspaceId)) {
+    return (
+      <div className="space-y-4">
+        <Link href="/runs" className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-brand-700">
+          ← All runs
+        </Link>
+        <Alert tone="info">
+          This run belongs to {run.workspaceId ? "a different workspace" : "Personal"}, not{" "}
+          {scope.kind === "workspace" ? scope.name : "Personal"}. Switch scope to view it.
+        </Alert>
+      </div>
+    );
+  }
+  const startedBy = !run.workspaceId
+    ? null
+    : run.createdBy === user?.userId
+      ? "you"
+      : (run.createdByEmail ?? "another member");
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
@@ -103,11 +131,12 @@ function RunView({ runId }: { runId: string }) {
           <h1 className="text-xl sm:text-2xl font-semibold text-slate-900 tracking-tight mt-1 break-words">{run.name}</h1>
           <p className="text-slate-500 text-sm mt-1">
             {run.moduleName} v{run.moduleVersion} · {run.class} {run.size} · started {formatDate(run.startedAt ?? run.createdAt)}
+            {startedBy && <> by {startedBy}</>}
           </p>
         </div>
         <div className="flex items-center gap-3">
           <StatusBadge status={run.cancelRequested && active ? "cancelling" : run.status} />
-          {active && !run.cancelRequested && (
+          {active && !run.cancelRequested && detail.canCancel && (
             <button type="button" className={secondaryButton} onClick={() => void cancel()}>
               Cancel run
             </button>
@@ -238,7 +267,8 @@ function RunView({ runId }: { runId: string }) {
 function RunsContent() {
   const params = useSearchParams();
   const router = useRouter();
-  const { scope } = useWorkspace();
+  const { scope, reportWorkspaceUnavailable } = useWorkspace();
+  const workspaceId = scopeWorkspaceId(scope);
   const runId = params.get("id");
   const prefill = {
     moduleId: params.get("module") ?? undefined,
@@ -257,10 +287,13 @@ function RunsContent() {
 
   useEffect(() => {
     if (runId) return;
-    listRuns()
+    listRuns(workspaceId)
       .then(setRuns)
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load runs"));
-  }, [runId]);
+      .catch((err) => {
+        if (workspaceId && isWorkspaceUnavailable(err)) reportWorkspaceUnavailable();
+        setError(err instanceof Error ? err.message : "Failed to load runs");
+      });
+  }, [runId, workspaceId, reportWorkspaceUnavailable]);
 
   if (runId) return <RunView runId={runId} />;
 
@@ -268,7 +301,11 @@ function RunsContent() {
     <div className="space-y-6">
       <PageHeader
         title="Runs"
-        description="Scripts running in bulk over your artifacts."
+        description={
+          scope.kind === "workspace"
+            ? `Scripts running in bulk over ${scope.name}'s artifacts, by any member.`
+            : "Scripts running in bulk over your artifacts."
+        }
         actions={
           !creating && (
             <Button icon={Plus} onClick={() => setCreating(true)}>
@@ -277,13 +314,6 @@ function RunsContent() {
           )
         }
       />
-
-      {scope.kind === "workspace" && (
-        <p className="text-sm bg-amber-50 text-amber-800 border border-amber-100 px-4 py-2.5 rounded-lg">
-          Workspace analysis runs are not available yet. Runs here use your Personal files and devices, not{" "}
-          {scope.name}&apos;s.
-        </p>
-      )}
 
       {creating && (
         <NewRunForm
@@ -340,13 +370,41 @@ function RunsContent() {
   );
 }
 
+function ScopedRuns() {
+  const router = useRouter();
+  const params = useSearchParams();
+  const { scope, scopeReady } = useWorkspace();
+  const key = scopeKey(scope);
+
+  // A prefilled new run (?module=, ?batch=, ?fromRun=, ?selection=1) belongs
+  // to the scope it was opened in; switching scope drops it rather than
+  // re-applying it to the new one. A run view (?id=) stays, and says when the
+  // run is of another scope.
+  const openedIn = useRef<string | null>(null);
+  useEffect(() => {
+    if (!scopeReady) return;
+    if (openedIn.current === null) openedIn.current = key;
+    else if (openedIn.current !== key) {
+      openedIn.current = key;
+      if (!params.get("id") && params.toString()) router.replace("/runs");
+    }
+  }, [key, scopeReady, params, router]);
+
+  // Until the saved workspace is restored, nothing scoped mounts, so no
+  // Personal requests go out first.
+  if (!scopeReady) return <LoadingState label="Loading workspace…" />;
+  // Keyed on the scope: switching remounts the view, so no runs, form state
+  // or selection carries over between scopes.
+  return <RunsContent key={key} />;
+}
+
 export default function RunsPage() {
   const ready = useRequireUser();
   if (!ready) return null;
   // useSearchParams needs a Suspense boundary in a static export.
   return (
     <Suspense fallback={<p className="text-sm text-slate-400">Loading…</p>}>
-      <RunsContent />
+      <ScopedRuns />
     </Suspense>
   );
 }

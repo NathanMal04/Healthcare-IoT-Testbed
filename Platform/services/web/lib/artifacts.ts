@@ -145,8 +145,9 @@ export interface UploadBatch {
   createdAt: string;
 }
 
-export async function listUploadBatches(): Promise<UploadBatch[]> {
-  return (await apiRequest<{ batches: UploadBatch[] }>("GET", "/artifacts/batches")).batches;
+/** Personal upload batches, or a workspace's when workspaceId is given (for the run input picker). */
+export async function listUploadBatches(workspaceId?: string): Promise<UploadBatch[]> {
+  return (await apiRequest<{ batches: UploadBatch[] }>("GET", "/artifacts/batches", { query: { workspaceId } })).batches;
 }
 
 export function listDeviceArtifacts(
