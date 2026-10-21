@@ -97,7 +97,6 @@
   nixpkgs.config.allowUnfree = true;
   hardware.enableRedistributableFirmware = true;
 
-  # System packages – cyber-focused
   environment.systemPackages = with pkgs; [
     # Core runtime
     python3
@@ -123,6 +122,7 @@
     aircrack-ng
     gobuster
     thc-hydra
+    putty
 
     # Forensics / reverse engineering
     binwalk
@@ -154,6 +154,8 @@
     # Compression / utilities
     p7zip
     zsh
+    putty
+    fastfetch
 
     # Fixed FHS Environment for BLE / serial work
     (pkgs.buildFHSEnv {
