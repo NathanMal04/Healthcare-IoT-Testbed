@@ -6,3 +6,8 @@ services:
     volumes:
       - ..:/workspaces/Healthcare-IoT-Testbed:cached
     command: sleep infinity
+    # dumpcap (Wireshark) needs these; file caps on /usr/bin/dumpcap fail exec
+    # with "Operation not permitted" if NET_ADMIN is missing from CapBnd.
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
