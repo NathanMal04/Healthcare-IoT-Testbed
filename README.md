@@ -435,13 +435,4 @@ for assets, `no-cache` for HTML), and invalidates the CloudFront distribution. O
 
 | Secret | Description |
 |---|---|
-| `AWS_ROLE_ARN` | IAM role ARN with S3 + CloudFront permissions |
-| `AWS_REGION` | AWS region (e.g. `us-east-2`) |
-
-### Pull Request Checks
-| Workflow | Trigger | Action |
-|---|---|---|
-| `terraform-pr-check.yml` | PRs touching `Platform/infra/**` | `terraform plan` against `dev` |
-| `frontend-pr-check.yml` | PRs touching `Platform/services/web/**` | Build the frontend |
-
-All five workflows authenticate via the same OIDC role.
+| `AWS_ROLE_ARN` | IAM role ARN with S3 + CloudFront permissions 
