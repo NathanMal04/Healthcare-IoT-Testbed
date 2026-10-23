@@ -6,8 +6,8 @@ on:
     branches:
       - main
     paths:
-      - 'Platform/infra/**'
-      - '.github/workflows/deploy-infra.yml'
+      - "Platform/infra/**"
+      - ".github/workflows/deploy-infra.yml"
 
 permissions:
   id-token: write
@@ -16,7 +16,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-     env:
+    env:
       TF_VAR_aws_profile: ""
     defaults:
       run:

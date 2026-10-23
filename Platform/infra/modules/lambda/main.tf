@@ -62,6 +62,7 @@ resource "aws_lambda_function" "this" {
   source_code_hash = var.package_type == "Zip" ? data.archive_file.this[0].output_base64sha256 : null
   handler          = var.package_type == "Zip" ? var.handler : null
   runtime          = var.package_type == "Zip" ? var.runtime : null
+  layers           = var.package_type == "Zip" && length(var.layers) > 0 ? var.layers : null
 
   # Container deployment
   image_uri = var.package_type == "Image" ? var.image_uri : null

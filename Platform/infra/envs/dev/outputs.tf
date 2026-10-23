@@ -51,3 +51,19 @@ output "lambda_dynamodb_policy_arn" {
 output "api_invoke_url" {
   value = module.api.invoke_url
 }
+
+output "platform_base_repository_url" {
+  value = aws_ecr_repository.platform_base.repository_url
+}
+
+output "scripts_repository_url" {
+  value = aws_ecr_repository.scripts.repository_url
+}
+
+output "image_build_project" {
+  value = aws_codebuild_project.images.name
+}
+
+output "run_manifest_url" {
+  value = local.manifest_url
+}

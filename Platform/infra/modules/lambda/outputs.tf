@@ -14,6 +14,10 @@ output "role_arn" {
   value = aws_iam_role.this.arn
 }
 
+output "role_name" {
+  value = aws_iam_role.this.name
+}
+
 output "alias_arn" {
   value = var.durable ? aws_lambda_alias.this[0].arn : null
 }

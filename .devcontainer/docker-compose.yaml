@@ -6,20 +6,8 @@ services:
     volumes:
       - ..:/workspaces/Healthcare-IoT-Testbed:cached
     command: sleep infinity
-
-  localstack:
-    image: localstack/localstack:latest
-    container_name: localstack
-    env_file:
-      - ../secrets.env
-    ports:
-      - "4566:4566"
-    environment:
-      - SERVICES=dynamodb,s3,lambda,apigateway,cognito-idp,iam,sts,cloudwatch,logs
-      - DEBUG=0
-    volumes:
-      - localstack-data:/var/lib/localstack
-      - /var/run/docker.sock:/var/run/docker.sock
-
-volumes:
-  localstack-data:
+    # dumpcap (Wireshark) needs these; file caps on /usr/bin/dumpcap fail exec
+    # with "Operation not permitted" if NET_ADMIN is missing from CapBnd.
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW

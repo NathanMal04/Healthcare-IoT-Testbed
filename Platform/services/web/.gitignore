@@ -13,3 +13,6 @@ out/
 .env.production.local
 
 .vercel
+
+# TypeScript incremental build info
+*.tsbuildinfo

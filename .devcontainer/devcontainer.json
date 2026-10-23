@@ -39,11 +39,23 @@
   "containerEnv": {
     "AWS_CONFIG_FILE": "${containerWorkspaceFolder}/.devcontainer/aws/config",
     "AWS_PROFILE": "Healthcare-IoT-Dev",
-    "LOCALSTACK_ENDPOINT": "http://localstack:4566"
+    "DISPLAY": "${localEnv:DISPLAY}",
+    "WAYLAND_DISPLAY": "${localEnv:WAYLAND_DISPLAY}",
+    "XDG_RUNTIME_DIR": "/tmp"
   },
 
+  "mounts": [
+    // X11 Socket (fallback/compatibility layer for both CachyOS & WSL)
+    "type=bind,source=/tmp/.X11-unix,target=/tmp/.X11-unix",
+    
+    // Native Linux Wayland socket (CachyOS Hyprland)
+    "type=bind,source=${localEnv:XDG_RUNTIME_DIR}/${localEnv:WAYLAND_DISPLAY},target=/tmp/${localEnv:WAYLAND_DISPLAY},consistency=cached",
+    
+    // WSLg Wayland & Audio Mounts (Safely ignored by native Linux if empty)
+    "type=bind,source=/mnt/wslg,target=/mnt/wslg,consistency=cached"
+  ],
+
   "postCreateCommand": "sudo apt-get update && sudo apt-get install -y jq curl && pip install --upgrade pip && cd ${containerWorkspaceFolder}/Platform/services/web && npm install",
-  "postStartCommand": "bash ${containerWorkspaceFolder}/.devcontainer/localstack/setup-localstack.sh",
 
   "remoteUser": "vscode"
 }
