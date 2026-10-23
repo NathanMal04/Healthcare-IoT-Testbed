@@ -39,23 +39,23 @@
   "containerEnv": {
     "AWS_CONFIG_FILE": "${containerWorkspaceFolder}/.devcontainer/aws/config",
     "AWS_PROFILE": "Healthcare-IoT-Dev",
+    // Host X server (XWayland on Hyprland, WSLg on Windows). Must be non-empty on the host.
     "DISPLAY": "${localEnv:DISPLAY}",
-    "WAYLAND_DISPLAY": "${localEnv:WAYLAND_DISPLAY}",
     "XDG_RUNTIME_DIR": "/tmp"
   },
 
   "mounts": [
-    // X11 Socket (fallback/compatibility layer for both CachyOS & WSL)
-    "type=bind,source=/tmp/.X11-unix,target=/tmp/.X11-unix",
-    
-    // Native Linux Wayland socket (CachyOS Hyprland)
-    "type=bind,source=${localEnv:XDG_RUNTIME_DIR}/${localEnv:WAYLAND_DISPLAY},target=/tmp/${localEnv:WAYLAND_DISPLAY},consistency=cached",
-    
-    // WSLg Wayland & Audio Mounts (Safely ignored by native Linux if empty)
-    "type=bind,source=/mnt/wslg,target=/mnt/wslg,consistency=cached"
+    // X11 socket only. Works on CachyOS/Hyprland (XWayland) and WSL (WSLg).
+    // Run `xhost +local:` on the host first so the container can connect.
+    // Do NOT bind the Wayland socket or /mnt/wslg here: a missing source path
+    // makes the container fail to start, and an empty WAYLAND_DISPLAY would
+    // bind your whole XDG_RUNTIME_DIR over /tmp. Put those in a per-machine override.
+    "type=bind,source=/tmp/.X11-unix,target=/tmp/.X11-unix"
   ],
 
-  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y jq curl && pip install --upgrade pip && cd ${containerWorkspaceFolder}/Platform/services/web && npm install",
+  // Local_GUI needs: Xephyr, xwininfo/xprop (x11-utils), matchbox-window-manager,
+  // libX11 (ctypes), tkinter (tk), and Pillow (ImageTk).
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y jq curl xserver-xephyr x11-utils matchbox-window-manager libx11-6 tk && pip install --upgrade pip pillow && cd ${containerWorkspaceFolder}/Platform/services/web && npm install",
 
   "remoteUser": "vscode"
 }
