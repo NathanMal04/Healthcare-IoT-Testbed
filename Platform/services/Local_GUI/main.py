@@ -454,7 +454,7 @@ class ToolRunner:
         except OSError as exc:
             os.close(master)
             os.close(slave)
-            messagebox.showerror("Tool error", f"Could not start process:\n{exc}", parent=self._window())
+            self._safe_error("Tool error", f"Could not start process:\n{exc}")
             return
         os.close(slave)
 
@@ -471,11 +471,10 @@ class ToolRunner:
 
     def _start_gui_session(self, cmd: list[str]):
         if not shutil.which("Xephyr"):
-            messagebox.showerror(
+            self._safe_error(
                 "GUI tool",
                 "Xephyr is required to keep GUI tools inside this window.\n"
                 "Install it with: sudo apt-get install xserver-xephyr",
-                parent=self._window(),
             )
             return
 
@@ -483,13 +482,13 @@ class ToolRunner:
         width, height = self.viewport.winfo_width(), self.viewport.winfo_height()
         if width < 50 or height < 50:
             self._show_console()
-            messagebox.showerror("GUI tool", "The tooling pane is not visible yet.", parent=self._window())
+            self._safe_error("GUI tool", "The tooling pane is not visible yet.")
             return
 
         display = self._free_display()
         if display is None:
             self._show_console()
-            messagebox.showerror("GUI tool", "No free X display for the embedded session.", parent=self._window())
+            self._safe_error("GUI tool", "No free X display for the embedded session.")
             return
 
         stderr_lines = []
@@ -514,7 +513,7 @@ class ToolRunner:
             )
         except OSError as exc:
             self._show_console()
-            messagebox.showerror("GUI tool", f"Could not start Xephyr: {exc}", parent=self._window())
+            self._safe_error("GUI tool", f"Could not start Xephyr: {exc}")
             return
 
         threading.Thread(target=self._drain, args=(self._xephyr.stderr, stderr_lines), daemon=True).start()
@@ -523,17 +522,16 @@ class ToolRunner:
         if not self._wait_for_display(display, self._xephyr):
             detail = "".join(stderr_lines).strip() or "Xephyr exited before the embedded display was ready."
             self._stop_gui()
-            messagebox.showerror("GUI tool", detail, parent=self._window())
+            self._safe_error("GUI tool", detail)
             return
 
         xephyr_win = self._wait_for_xephyr_window(display, self._xephyr)
         if xephyr_win is None:
             self._stop_gui()
-            messagebox.showerror(
+            self._safe_error(
                 "GUI tool",
                 "Could not find the Xephyr window to embed.\n"
                 "xwininfo is required (package x11-utils).",
-                parent=self._window(),
             )
             return
 
@@ -542,7 +540,7 @@ class ToolRunner:
             _hostx.reparent(xephyr_win, self.viewport.winfo_id(), width, height)
         except OSError as exc:
             self._stop_gui()
-            messagebox.showerror("GUI tool", f"Could not embed the tool window: {exc}", parent=self._window())
+            self._safe_error("GUI tool", f"Could not embed the tool window: {exc}")
             return
         self._xephyr_win = xephyr_win
 
@@ -562,14 +560,13 @@ class ToolRunner:
                 "GUI tool",
                 "matchbox-window-manager is not installed, so dialogs may not be arranged inside the frame.\n"
                 "Install it with: sudo apt-get install matchbox-window-manager",
-                parent=self._window(),
             )
 
         try:
             self._remember(subprocess.Popen(cmd, env=env, start_new_session=True))
         except OSError as exc:
             self._stop_gui()
-            messagebox.showerror("GUI tool", f"Could not start the tool: {exc}", parent=self._window())
+            self._safe_error("GUI tool", f"Could not start the tool: {exc}")
 
     def _reader_pty(self):
         master = self._pty_master
@@ -692,6 +689,15 @@ class ToolRunner:
 
     def _window(self):
         return self.viewport.winfo_toplevel()
+
+    def _safe_error(self, title, message):
+        """showerror that doesn't blow up if the app was closed meanwhile."""
+        try:
+            win = self._window()
+            if win.winfo_exists():
+                messagebox.showerror(title, message, parent=win)
+        except tk.TclError:
+            pass
 
     def _free_display(self):
         for number in range(2, 64):
@@ -1239,20 +1245,22 @@ tool_select_.grid(row=4, column=0, sticky="ew", padx=10, pady=(0, 10), ipady=16)
 
 
 def _style_combobox_listbox(combo: ttk.Combobox):
-    """Force dark colors on the popdown list when it is created."""
+    """Force dark colors on the popdown list when it is created.
+
+    The popdown is a Tcl-created widget, so Tkinter's nametowidget() can't
+    resolve it (KeyError: 'popdown'). Configure it through Tcl directly.
+    """
     try:
-        popdown = combo.tk.call("ttk::combobox::PopdownWindow", str(combo))
-        listbox = combo.nametowidget(f"{popdown}.f.l")
-        listbox.configure(
-            background=COLORS["bg_input"],
-            foreground=COLORS["fg"],
-            selectbackground=COLORS["menu_active_bg"],
-            selectforeground="#ffffff",
-            activebackground=COLORS["menu_active_bg"],
-            activeforeground="#ffffff",
-            highlightthickness=0,
-            borderwidth=0,
-            font=("Arial", 12),
+        popdown = str(combo.tk.call("ttk::combobox::PopdownWindow", str(combo)))
+        combo.tk.call(
+            f"{popdown}.f.l", "configure",
+            "-background", COLORS["bg_input"],
+            "-foreground", COLORS["fg"],
+            "-selectbackground", COLORS["menu_active_bg"],
+            "-selectforeground", "#ffffff",
+            "-highlightthickness", 0,
+            "-borderwidth", 0,
+            "-font", ("Arial", 12),
         )
     except tk.TclError:
         pass
