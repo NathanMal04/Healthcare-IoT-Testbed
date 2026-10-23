@@ -84,6 +84,23 @@
     package = pkgs.wireshark;   # GUI version
   };
 
+  # Git Configuration
+  programs.git = {
+    enable = true;
+    config = {
+      user = {
+        name = "cryptd3x";
+        email = "jbower2024@my.fit.edu";
+      };
+      init = {
+        defaultBranch = "main";
+      };
+      safe = {
+        directory = [ "/etc/nixos" ]; # Prevents git ownership errors when managing /etc/nixos
+      };
+    };
+  };
+
   # Enable nix-ld globally to dynamically link compiled C++ components
   programs.nix-ld = {
     enable = true;
@@ -93,21 +110,31 @@
     ];
   };
 
-    # Allow unfree packages
+  # Allow unfree packages
   nixpkgs.config.allowUnfree = true;
   hardware.enableRedistributableFirmware = true;
 
   environment.systemPackages = with pkgs; [
-    # Core runtime
-    python3
-    python3Packages.pip
-    python3Packages.scapy
-    python3Packages.pwntools
-    python3Packages.impacket
-    python3Packages.pyserial
-    python3Packages.psutil
+    # Core runtime (Unified Python installation with required packages)
+    (python3.withPackages (ps: with ps; [
+      tkinter
+      pip
+      scapy
+      pwntools
+      impacket
+      pyserial
+      psutil
+      pillow
+    ]))
 
-    # Network / recon / scanning
+    # Display dependencies
+    xorg.xwininfo
+    xorg.xprop
+    matchbox
+    xhost
+
+
+    # Network / recon / scanning   
     arp-scan
     nmap
     masscan
@@ -144,6 +171,7 @@
     # Containers / compatibility
     docker
     wine
+    vscode
 
     # Hardware / power / USB debugging
     acpi
