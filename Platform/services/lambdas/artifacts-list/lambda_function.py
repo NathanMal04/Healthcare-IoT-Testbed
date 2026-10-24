@@ -12,7 +12,7 @@ TABLE = os.environ["METADATA_TABLE_NAME"]
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 100
-ARTIFACT_TYPES = {"firmware", "pcap", "log", "binary", "other"}
+ARTIFACT_TYPES = {"firmware", "pcap", "log", "binary", "kernel_module", "report", "other"}
 
 UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 

@@ -57,7 +57,7 @@ MAX_CLIENT_REF_LENGTH = 64
 MIN_PART_SIZE = 16 * 1024 ** 2
 MAX_PARTS = 1000
 
-ARTIFACT_TYPES = {"firmware", "pcap", "log", "binary", "other"}
+ARTIFACT_TYPES = {"firmware", "pcap", "log", "binary", "kernel_module", "report", "other"}
 DEFAULT_RE_STATUS = "not_started"
 CONTENT_TYPE = "application/octet-stream"
 

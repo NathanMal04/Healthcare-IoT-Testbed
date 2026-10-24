@@ -79,7 +79,7 @@ CLASSES = {
     "heavy": ("ec2", "ec2", "ec2"),
 }
 MODES = ("map", "chunk", "all", "groupBy")
-ARTIFACT_TYPES = {"firmware", "pcap", "log", "binary", "other"}
+ARTIFACT_TYPES = {"firmware", "pcap", "log", "binary", "kernel_module", "report", "other"}
 TERMINAL = {"completed", "failed", "cancelled", "stopped"}
 
 UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")

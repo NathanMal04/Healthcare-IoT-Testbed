@@ -63,6 +63,7 @@ TYPE_BY_EXTENSION = {
     "log": "log", "txt": "log", "json": "log", "jsonl": "log", "csv": "log",
     "bin": "firmware", "img": "firmware", "hex": "firmware", "fw": "firmware",
     "elf": "binary", "so": "binary", "o": "binary", "exe": "binary", "dll": "binary", "apk": "binary",
+    "ko": "kernel_module", "pdf": "report",
 }
 
 

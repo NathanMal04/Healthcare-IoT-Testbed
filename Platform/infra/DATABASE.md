@@ -63,7 +63,7 @@ Any stored file: uploaded firmware, pcaps, logs and binaries, plus every file a 
 | Attribute | Type | Meaning |
 |---|---|---|
 | `name` | S | Display name (defaults to the file name) |
-| `type` | S | What the file is: `firmware` / `pcap` / `log` / `binary` / `other`. A run's output uses the same types, so an output pcap matches `type = pcap` queries. |
+| `type` | S | What the file is: `firmware` / `pcap` / `log` / `binary` / `kernel_module` / `report` / `other`. A run's output uses the same types, so an output pcap matches `type = pcap` queries. |
 | `origin` | S | `upload` (sent from the web app) / `run` (written by a run) |
 | `version` | S | Firmware version; required when `type = firmware`, not allowed otherwise |
 | `sha256` | S | Full-file SHA-256, declared by the uploader. Only a verified hash is trusted, e.g. as a run-result key. |
