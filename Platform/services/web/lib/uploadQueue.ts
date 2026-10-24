@@ -92,6 +92,11 @@ export class UploadQueue {
     return this.uploadBatchId;
   }
 
+  /** How many files the last run left failed (cancelled ones included). */
+  get failedCount() {
+    return this.items.filter((item) => item.stage === "failed").length;
+  }
+
   subscribe(listener: (items: QueueItem[]) => void): () => void {
     this.listeners.add(listener);
     listener(this.items.map((item) => ({ ...item })));

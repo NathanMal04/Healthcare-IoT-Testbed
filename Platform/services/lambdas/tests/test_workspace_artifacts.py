@@ -703,5 +703,55 @@ class EndToEndTests(WorldTestCase):
         self.assertEqual(get.handler(event(OUTSIDER, "/artifacts/{artifactId}", path={"artifactId": f1}), None)["statusCode"], 404)
 
 
+class DeviceTabUploadTests(WorldTestCase):
+    """An upload started from a device's Artifacts tab sends that one device;
+    the artifact must then show on that tab and on no other device's."""
+
+    def device_ids(self, user, device):
+        resp = self.lam("artifacts-list").handler(
+            event(user, "/devices/{deviceId}/artifacts", path={"deviceId": device}), None)
+        self.assertEqual(resp["statusCode"], 200, resp["body"])
+        return {a["artifactId"] for a in response_body(resp)["artifacts"]}
+
+    def test_upload_from_workspace_device_is_linked_and_listed(self):
+        aid = self.upload(MEMBER, [D1], artifact_type="pcap")
+        self.assertEqual(self.table.items[(f"ARTIFACT#{aid}", "METADATA")]["deviceIds"], {D1})
+        self.assertIn((f"DEVICE#{D1}", f"ARTIFACT#pcap#{aid}"), self.table.items)
+        for user in (USER, MEMBER):
+            self.assertEqual(self.device_ids(user, D1), {aid})
+        self.assertEqual(self.device_ids(MEMBER, D2), set())
+        detail = response_body(self.lam("artifacts-get").handler(
+            event(MEMBER, "/artifacts/{artifactId}", path={"artifactId": aid}), None))["artifact"]
+        self.assertEqual(detail["deviceIds"], [D1])
+
+    def test_upload_from_personal_device_is_linked_and_listed(self):
+        aid = self.upload(USER, [DP], artifact_type="log")
+        self.assertEqual(self.device_ids(USER, DP), {aid})
+
+    def test_general_upload_is_on_no_device(self):
+        aid = self.upload(USER, [], artifact_type="pcap")
+        self.assertNotIn("deviceIds", self.table.items[(f"ARTIFACT#{aid}", "METADATA")])
+        self.assertEqual(self.device_ids(USER, DP), set())
+        self.assertEqual(self.device_ids(USER, D1), set())
+
+    def test_unusable_device_ids_are_refused_before_anything_is_written(self):
+        unknown = "55555555-5555-4555-8555-555555555555"
+        cases = [
+            (MEMBER, [unknown], 403),   # no such device
+            (OUTSIDER, [D1], 403),      # another workspace's device
+            (W2_OWNER, [D1], 403),
+            (MEMBER, [DP], 403),        # someone else's personal device
+            (USER, ["not-a-uuid"], 400),
+            (USER, f"{D1}", 400),       # not a list
+        ]
+        before = set(self.table.items)
+        for user, device_ids, status in cases:
+            with self.subTest(user=user, device_ids=device_ids):
+                resp = self.presign(user, [self.file(artifact_type="pcap")], deviceIds=device_ids)
+                self.assertEqual(resp["statusCode"], status, resp["body"])
+        self.assertEqual(set(self.table.items), before)
+        self.assertEqual(self.client.calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()

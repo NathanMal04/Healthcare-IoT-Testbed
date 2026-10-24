@@ -1,68 +1,145 @@
-#Buffer Overflow Scanner & Exploitation Helper - Vulnerability Research Script Template
-#@author Justin Bower
-#@category Vulnerability Research
-#@keybinding 
-#@menupath Tools.Vuln Research.Scan Buffer Overflows
+#!/usr/bin/env python3
+"""buffer_overflow_scanner.py — Ghidra-based dangerous-API & ret2* scanner.
 
-from ghidra.app.script import GhidraScript
-from ghidra.program.model.symbol import FlowType
+Refactored from a GhidraScript (menu-only) into a headless pyghidra tool that
+opens a binary, runs (or skips) auto-analysis, and emits structured findings.
+"""
+import argparse
+import sys
+from pathlib import Path
 
-print("--- Buffer Overflow/Exploitation Scanner Utility ---")
+from _re_common import (
+    EXIT_TOOL_ERROR, add_common_args, check_deps, ensure_file, fail,
+    install_signals, log, merge_json_args, progress, result, write_output,
+)
 
-DANGEROUS_FUNCTIONS = {
-    'gets':          "UNBOUNDED stack buffer overflow (classic)",
-    'scanf':         "Format string or unbounded input",
-    'sprintf':       "Format string / buffer overflow",
-    'strcpy':        "Buffer overflow if dest not sized",
-    'strcat':        "Buffer overflow",
-    'memcpy':        "Buffer overflow / arbitrary write",
-    'strncpy':       "Still dangerous if n is user-controlled",
-    'read':          "Buffer overflow on stack/heap",
-    'fgets':         "Safer but still overflow if size wrong",
-    'realloc':       "Heap overflow / use-after-free risk"
+DEPS = {
+    "pyghidra": {"type": "py", "required": True,
+                 "hint": "pip install pyghidra; set GHIDRA_INSTALL_DIR"},
 }
 
-fm = currentProgram.getFunctionManager()
+DANGEROUS = {
+    "gets":    "UNBOUNDED stack buffer overflow (classic)",
+    "scanf":   "Format string or unbounded input",
+    "sprintf": "Format string / buffer overflow",
+    "strcpy":  "Buffer overflow if dest not sized",
+    "strcat":  "Buffer overflow",
+    "memcpy":  "Buffer overflow / arbitrary write",
+    "strncpy": "Still dangerous if n is user-controlled",
+    "read":    "Buffer overflow on stack/heap",
+    "fgets":   "Safer but still overflow if size wrong",
+    "realloc": "Heap overflow / use-after-free risk",
+}
 
-for func_name, description in DANGEROUS_FUNCTIONS.items():
-    if monitor.isCancelled():
-        break
-    
-    funcs = [f for f in fm.getFunctions(True) if f.getName() == func_name]
-    for f in funcs:
-        print(f"\n[!] {func_name} found at 0x{f.getEntryPoint().getOffset():x}")
-        print(f"    → {description}")
-        
-        #Show callers
-        for ref in getReferencesTo(f.getEntryPoint()):
-            if ref.getReferenceType() == FlowType.UNCONDITIONAL_CALL:
-                caller = ref.getFromAddress()
-                print(f"    Called from: 0x{caller.getOffset():x}")
 
-#Bonus: ret2* primitives
-print("\n --- Check for ret2* Primitives ---")
+def _analyze_program(program, monitor) -> dict:
+    from ghidra.program.model.symbol import FlowType
 
-#Find system / execve for ret2libc
-for name in ["system", "execve"]:
-    for f in [f for f in fm.getFunctions(True) if name in f.getName().lower()]:
-        print(f"[+] ret2libc candidate: {f.getName()} @ 0x{f.getEntryPoint().getOffset():x}")
+    fm = program.getFunctionManager()
+    ref_mgr = program.getReferenceManager()
+    findings: dict[str, list] = {name: [] for name in DANGEROUS}
 
-#Find /bin/sh string
-mem = currentProgram.getMemory()
-addr = mem.findBytes(currentProgram.getMinAddress(), "/bin/sh", None, True, monitor)
-if addr:
-    print(f"[+] ret2libc /bin/sh string @ 0x{addr.getOffset():x}")
+    funcs = list(fm.getFunctions(True))
+    log("info", f"Scanning {len(funcs)} functions")
 
-#ret2win functions
-for f in fm.getFunctions(True):
-    if "win" in f.getName().lower() or "flag" in f.getName().lower() or "success" in f.getName().lower():
-        print(f"[+] ret2win candidate: {f.getName()} @ 0x{f.getEntryPoint().getOffset():x}")
+    for i, func in enumerate(funcs, 1):
+        if monitor.isCancelled():
+            break
+        if i % 500 == 0:
+            progress(10 + int(70 * i / max(len(funcs), 1)), "Function scan")
+        name = func.getName()
+        if name not in DANGEROUS:
+            continue
 
-#ret2syscall
-for instr in currentProgram.getListing().getInstructions(True):
-    if "syscall" in instr.getMnemonicString() or ("int" in instr.getMnemonicString() and "80" in str(instr)):
-        print(f"[+] ret2syscall candidate @ 0x{instr.getAddress().getOffset():x}")
-        break  # one candidate is enough for the template
+        entry = func.getEntryPoint()
+        callers = []
+        for ref in ref_mgr.getReferencesTo(entry):
+            try:
+                if ref.getReferenceType() == FlowType.UNCONDITIONAL_CALL:
+                    callers.append(hex(ref.getFromAddress().getOffset()))
+            except Exception:
+                continue
+        findings[name].append({
+            "address": hex(entry.getOffset()),
+            "description": DANGEROUS[name],
+            "callers": callers,
+        })
 
-print("\n --- Scan Complete --- ")
-print("Next step: Use the ROP script above to build a chain to the chosen primitives.")
+    # ret2* primitive harvesting
+    ret2libc, ret2win = [], []
+    for func in funcs:
+        lname = func.getName().lower()
+        addr = hex(func.getEntryPoint().getOffset())
+        if "system" in lname or "execve" in lname:
+            ret2libc.append({"name": func.getName(), "address": addr})
+        if any(k in lname for k in ("win", "flag", "success")):
+            ret2win.append({"name": func.getName(), "address": addr})
+
+    # /bin/sh strings (cap at 10 to bound output)
+    sh_addrs = []
+    addr = program.getMemory().findBytes(
+        program.getMinAddress(), b"/bin/sh", None, True, monitor)
+    while addr and len(sh_addrs) < 10:
+        sh_addrs.append(hex(addr.getOffset()))
+        addr = program.getMemory().findBytes(
+            addr.next(), b"/bin/sh", None, True, monitor)
+
+    # syscall / int 0x80 sites (cap at 20)
+    syscalls = []
+    for instr in program.getListing().getInstructions(True):
+        m = instr.getMnemonicString().lower()
+        if m == "syscall":
+            syscalls.append(hex(instr.getAddress().getOffset()))
+            if len(syscalls) >= 20:
+                break
+
+    return {
+        "dangerous_calls": findings,
+        "ret2libc_candidates": ret2libc,
+        "ret2win_candidates": ret2win,
+        "bin_sh_strings": sh_addrs,
+        "syscall_sites": syscalls,
+    }
+
+
+def _run(binary: Path, auto_analyze: bool) -> dict:
+    import pyghidra
+    pyghidra.start()
+    from pyghidra import open_program
+
+    progress(5, "Opening binary in pyghidra")
+    with open_program(str(binary), analyze=auto_analyze) as flat_api:
+        program = flat_api.getCurrentProgram()
+        monitor = flat_api.getMonitor()
+        return _analyze_program(program, monitor)
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(description="Ghidra buffer-overflow scanner")
+    p.add_argument("binary", help="Binary to analyze")
+    p.add_argument("--skip-auto-analyze", action="store_true",
+                   help="Skip Ghidra auto-analysis (faster, less accurate)")
+    add_common_args(p)
+    args = merge_json_args(p.parse_args())
+
+    install_signals()
+
+    if args.check_deps:
+        sys.exit(0 if check_deps(DEPS) else EXIT_TOOL_ERROR)
+
+    try:
+        binary = ensure_file(args.binary)
+        findings = _run(binary, auto_analyze=not args.skip_auto_analyze)
+    except SystemExit:
+        raise
+    except Exception as e:                              # noqa: BLE001
+        fail("E_GHIDRA", str(e), {"exception": type(e).__name__})
+
+    data = {"binary": str(binary), **findings}
+    progress(100, "Complete")
+    result(data)
+    write_output(args, data)
+
+
+if __name__ == "__main__":
+    main()

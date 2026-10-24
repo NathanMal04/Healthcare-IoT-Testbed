@@ -1,0 +1,119 @@
+{
+  "version": "2.0.0",
+  "protocol": {
+    "stdout": "NDJSON events: deps | progress | log | result | error",
+    "exit_codes": {
+      "0": "success",
+      "1": "validation error",
+      "2": "tool execution error",
+      "3": "timeout / cancelled",
+      "130": "SIGINT"
+    },
+    "common_flags": ["--json-args", "--check-deps", "--output"]
+  },
+  "scripts": [
+    {
+      "name": "analyze_entropy",
+      "path": "analyze_entropy.py",
+      "category": "firmware",
+      "description": "Binwalk entropy analysis with structured parsing",
+      "dependencies": [
+        {"name": "binwalk", "type": "bin", "env": "BINWALK_PATH", "required": true}
+      ],
+      "positional": [{"name": "firmware", "type": "path", "required": true}],
+      "flags": ["--extra-args", "--save-raw"],
+      "output_schema": {
+        "firmware": "str", "size_bytes": "int", "return_code": "int",
+        "entropy_rows": "array<{offset:int,hex:str,entropy:float}>",
+        "entropy_stats": "object", "binwalk_json": "object|null",
+        "stderr": "str|null"
+      }
+    },
+    {
+      "name": "rop_gadgets_scanner",
+      "path": "rop_gadgets_scanner.py",
+      "category": "exploit",
+      "description": "ROP gadget discovery via ropper",
+      "dependencies": [
+        {"name": "ropper", "type": "bin", "env": "ROPPER_PATH", "required": true},
+        {"name": "pyghidra", "type": "py", "required": false}
+      ],
+      "positional": [{"name": "binary", "type": "path", "required": true}],
+      "flags": ["--patterns", "--image-base", "--use-ghidra-base", "--timeout"],
+      "output_schema": {
+        "binary": "str", "image_base": "str|null", "patterns": "array<str>",
+        "results": "array<{pattern:str,matches:array<str>,count:int}>",
+        "total_matches": "int"
+      }
+    },
+    {
+      "name": "buffer_overflow_scanner",
+      "path": "buffer_overflow_scanner.py",
+      "category": "vuln-research",
+      "description": "Ghidra-based dangerous API & ret2* scanner",
+      "dependencies": [
+        {"name": "pyghidra", "type": "py", "required": true}
+      ],
+      "positional": [{"name": "binary", "type": "path", "required": true}],
+      "flags": ["--skip-auto-analyze"],
+      "output_schema": {
+        "binary": "str",
+        "dangerous_calls": "object<name,array<{address,callers,description}>>",
+        "ret2libc_candidates": "array", "ret2win_candidates": "array",
+        "bin_sh_strings": "array<str>", "syscall_sites": "array<str>"
+      }
+    },
+    {
+      "name": "unsanitized_text_entries_scanner",
+      "path": "unsanitized_text_entries_scanner.py",
+      "category": "vuln-research",
+      "description": "Ghidra-based unsanitized input function scanner",
+      "dependencies": [
+        {"name": "pyghidra", "type": "py", "required": true}
+      ],
+      "positional": [{"name": "binary", "type": "path", "required": true}],
+      "flags": ["--skip-auto-analyze"],
+      "output_schema": {
+        "binary": "str",
+        "input_functions": "object<name,array<{address,risk,callers}>>",
+        "suspicious_strings": "array<{address,value}>"
+      }
+    },
+    {
+      "name": "parse_firmware",
+      "path": "parse_firmware.py",
+      "category": "acquisition",
+      "description": "Retrieve firmware over SSH or HTTP",
+      "dependencies": [
+        {"name": "paramiko", "type": "py", "required": true},
+        {"name": "requests", "type": "py", "required": true}
+      ],
+      "positional": [],
+      "flags": ["--method", "--host", "--user", "--pass", "--out",
+                "--url", "--cmd", "--get"],
+      "output_schema": {
+        "method": "str", "output_dir": "str",
+        "downloaded_file": "str (optional)",
+        "remote_command_stdout": "str (optional)"
+      }
+    },
+    {
+      "name": "analyze_bluetooth_pcap",
+      "path": "analyze_bluetooth_pcap.py",
+      "category": "bluetooth",
+      "description": "BLE PCAP reconnaissance (tshark based)",
+      "dependencies": [
+        {"name": "tshark", "type": "bin", "env": "TSHARK_PATH", "required": true}
+      ],
+      "positional": [{"name": "pcap", "type": "path", "required": true}],
+      "flags": ["--filter-mac"],
+      "output_schema": {
+        "pcap": "str", "mac_filter": "str|null",
+        "devices": "object<mac,{name,packets_seen}>",
+        "gatt": "object{services_discovered,att_operation_count,unencrypted_data_transfers}",
+        "pairing_exchanges": "array",
+        "summary": "object{device_count,services_found,unencrypted_transfers,pairing_exchanges,ltk_exposed}"
+      }
+    }
+  ]
+}
