@@ -26,6 +26,7 @@ import { useScopeLock, useWorkspace } from "@/context/WorkspaceContext";
 import { isWorkspaceUnavailable, scopeKey, scopeWorkspaceId, type Scope } from "@/lib/workspaces";
 import ReverseEngineeringStatusSelect from "@/app/components/ReverseEngineeringStatusSelect";
 import FirmwareUploadDialog from "@/app/components/firmware/FirmwareUploadDialog";
+import ArtifactUploader from "@/app/components/ArtifactUploader";
 import {
   FirmwareRetryDialog,
   FirmwareTable,
@@ -459,6 +460,9 @@ function FirmwareTab({
 // --- Artifacts ------------------------------------------------------------------
 
 function ArtifactsTab({ device }: { device: Device }) {
+  // The uploader locks the scope while it runs, so it can't be closed mid-upload.
+  const { scopeLocked } = useWorkspace();
+  const [uploading, setUploading] = useState(false);
   const [artifacts, setArtifacts] = useState<Artifact[] | null>(null);
   const [nextToken, setNextToken] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
@@ -549,38 +553,63 @@ function ArtifactsTab({ device }: { device: Device }) {
   ];
 
   return (
-    <Card className="overflow-hidden">
-      <CardHeader
-        title="Artifacts"
-        description="Every file linked to this device, including firmware"
-        actions={
-          <ButtonLink href="/artifacts" variant="secondary" size="sm" icon={Upload}>
-            Upload on Artifacts
-          </ButtonLink>
-        }
-      />
-      {downloadError && (
-        <Alert tone="error" className="mx-5 mt-3">
-          Couldn&apos;t download: {downloadError}
-        </Alert>
+    <div className="space-y-4">
+      {uploading && (
+        <ArtifactUploader
+          devices={[device]}
+          fixedDevice={device}
+          onFinished={(uploadBatchId, failedCount) => {
+            void load(false);
+            // With failures the uploader stays, so they can be reviewed or retried.
+            if (uploadBatchId && failedCount === 0) setUploading(false);
+          }}
+        />
       )}
-      {error ? (
-        <ErrorState title="Couldn't load artifacts" message={error} />
-      ) : artifacts === null ? (
-        <LoadingState label="Loading artifacts…" />
-      ) : artifacts.length === 0 && !nextToken ? (
-        <EmptyState icon={FolderArchive} title="No files linked to this device yet" />
-      ) : (
-        <DataTable columns={columns} rows={artifacts} rowKey={(a) => a.artifactId} minWidth="36rem" />
-      )}
-      {nextToken && !error && (
-        <div className="px-5 py-3 border-t border-line text-center">
-          <Button variant="secondary" size="sm" onClick={() => void load(true, nextToken)} disabled={loading}>
-            {loading ? "Loading…" : "Load more"}
-          </Button>
-        </div>
-      )}
-    </Card>
+      <Card className="overflow-hidden">
+        <CardHeader
+          title="Artifacts"
+          description="Every file linked to this device, including firmware"
+          actions={
+            uploading ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setUploading(false)}
+                disabled={scopeLocked}
+                title={scopeLocked ? "Cancel the running upload first" : undefined}
+              >
+                Close uploader
+              </Button>
+            ) : (
+              <Button variant="secondary" size="sm" icon={Upload} onClick={() => setUploading(true)}>
+                Upload new artifact
+              </Button>
+            )
+          }
+        />
+        {downloadError && (
+          <Alert tone="error" className="mx-5 mt-3">
+            Couldn&apos;t download: {downloadError}
+          </Alert>
+        )}
+        {error ? (
+          <ErrorState title="Couldn't load artifacts" message={error} />
+        ) : artifacts === null ? (
+          <LoadingState label="Loading artifacts…" />
+        ) : artifacts.length === 0 && !nextToken ? (
+          <EmptyState icon={FolderArchive} title="No files linked to this device yet" />
+        ) : (
+          <DataTable columns={columns} rows={artifacts} rowKey={(a) => a.artifactId} minWidth="36rem" />
+        )}
+        {nextToken && !error && (
+          <div className="px-5 py-3 border-t border-line text-center">
+            <Button variant="secondary" size="sm" onClick={() => void load(true, nextToken)} disabled={loading}>
+              {loading ? "Loading…" : "Load more"}
+            </Button>
+          </div>
+        )}
+      </Card>
+    </div>
   );
 }
 

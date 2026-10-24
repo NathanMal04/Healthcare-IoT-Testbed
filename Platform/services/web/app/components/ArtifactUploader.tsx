@@ -23,8 +23,16 @@ interface ArtifactUploaderProps {
    * without devices would be personal.
    */
   requireDevice?: boolean;
-  /** Called when a run of uploads ends, with the batch id if one was created. */
-  onFinished: (uploadBatchId: string | undefined) => void;
+  /**
+   * Set when the upload started from a device's page: every file is linked
+   * to it, and it can't be unchecked.
+   */
+  fixedDevice?: Device;
+  /**
+   * Called when a run of uploads ends, with the batch id if one was created
+   * and how many files ended failed.
+   */
+  onFinished: (uploadBatchId: string | undefined, failedCount: number) => void;
 }
 
 const STAGE_LABELS: Record<QueueStage, string> = {
@@ -101,11 +109,16 @@ async function filesFromDrop(dataTransfer: DataTransfer): Promise<{ file: File; 
   return results;
 }
 
-export default function ArtifactUploader({ devices, requireDevice = false, onFinished }: ArtifactUploaderProps) {
+export default function ArtifactUploader({
+  devices,
+  requireDevice = false,
+  fixedDevice,
+  onFinished,
+}: ArtifactUploaderProps) {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [skipped, setSkipped] = useState<string[]>([]);
   const [tagsInput, setTagsInput] = useState("");
-  const [deviceIds, setDeviceIds] = useState<string[]>([]);
+  const [deviceIds, setDeviceIds] = useState<string[]>(fixedDevice ? [fixedDevice.deviceId] : []);
   const [dragging, setDragging] = useState(false);
   const [running, setRunning] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -187,7 +200,7 @@ export default function ArtifactUploader({ devices, requireDevice = false, onFin
       await target.start();
     } finally {
       setRunning(false);
-      onFinished(target.batchId);
+      onFinished(target.batchId, target.failedCount);
     }
   }
 
@@ -234,6 +247,12 @@ export default function ArtifactUploader({ devices, requireDevice = false, onFin
           Firmware, pcaps, logs, binaries or anything else, up to 5 GiB each. Files uploaded together
           form one upload batch.
         </p>
+        {fixedDevice && (
+          <p className="text-xs text-slate-600 mt-2">
+            Linked to device{" "}
+            <span className="font-medium text-brand-700 bg-brand-50 px-1.5 py-0.5 rounded-md">{fixedDevice.name}</span>
+          </p>
+        )}
       </div>
 
       {!started && (
@@ -327,18 +346,20 @@ export default function ArtifactUploader({ devices, requireDevice = false, onFin
                 <div className="flex flex-wrap gap-2">
                   {devices.map((device) => {
                     const checked = deviceIds.includes(device.deviceId);
+                    const fixed = device.deviceId === fixedDevice?.deviceId;
                     return (
                       <label
                         key={device.deviceId}
+                        title={fixed ? "This upload started from this device's page" : undefined}
                         className={`text-xs px-2.5 py-1.5 rounded-lg border cursor-pointer ${
                           checked ? "border-brand-500 bg-brand-50 text-brand-700" : "border-line text-slate-600 hover:border-line-strong"
-                        } ${started ? "opacity-50 cursor-not-allowed" : ""}`}
+                        } ${started ? "opacity-50 cursor-not-allowed" : fixed ? "cursor-default" : ""}`}
                       >
                         <input
                           type="checkbox"
                           className="hidden"
                           checked={checked}
-                          disabled={started}
+                          disabled={started || fixed}
                           onChange={() =>
                             setDeviceIds((current) =>
                               checked ? current.filter((id) => id !== device.deviceId) : [...current, device.deviceId]
