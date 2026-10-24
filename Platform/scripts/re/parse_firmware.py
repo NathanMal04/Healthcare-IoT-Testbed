@@ -1,86 +1,144 @@
-#parse_firmware.py
-#parses firmware files over ssh or http
+#!/usr/bin/env python3
+"""parse_firmware.py — SSH / HTTP firmware retrieval with JSON telemetry.
 
+Bugs fixed vs. the original:
+  * SSH session is now always closed (try/finally + cleanup hook).
+  * PTY-enabled exec_command (which merged stderr into stdout) is gone.
+  * HTTP filename extraction uses urlparse().path so query strings don't
+    leak into filenames.
+  * Required CLI args are validated up-front for the chosen method.
+"""
 import argparse
-import paramiko
-import requests
+import sys
 from pathlib import Path
-from urllib.parse import urlparse  #FIX: needed for safe URL filename extraction
+from urllib.parse import urlparse
 
-def pull_via_ssh(host, username, password, local_dir, remote_cmd=None, download_path=None):
+from _re_common import (
+    EXIT_TOOL_ERROR, EXIT_VALIDATION, add_common_args, check_deps, fail,
+    install_signals, log, merge_json_args, progress, register_cleanup,
+    result, write_output,
+)
+
+DEPS = {
+    "paramiko": {"type": "py", "required": True,
+                 "hint": "pip install paramiko"},
+    "requests": {"type": "py", "required": True,
+                 "hint": "pip install requests"},
+}
+
+
+def _ssh_pull(host, user, password, out_dir, cmd, get_path):
+    import paramiko
+
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(hostname=host, username=username, password=password, timeout=15)
+    register_cleanup(client.close)
 
-    #FIX: Wrap all operations in try/finally so the SSH connection is always
-    #closed even if an exception is raised mid-operation.
-    try:
-        if remote_cmd:
-            #FIX: Removed get_pty=True. PTY mode merges stderr into stdout,
-            #making the separate stderr.read() call always return empty and
-            #potentially causing the stdout channel to stall. Without PTY,
-            #stdout and stderr are properly separated channels.
-            _, stdout, stderr = client.exec_command(remote_cmd)
-            print(stdout.read().decode())
-            err = stderr.read().decode()
-            if err:
-                print('stderr:', err)
+    log("info", f"Connecting to {user}@{host}")
+    client.connect(hostname=host, username=user, password=password, timeout=15)
 
-        if download_path:
-            sftp = client.open_sftp()
-            local_file = Path(local_dir) / Path(download_path).name
-            sftp.get(download_path, str(local_file))
-            sftp.close()
-            print(f'Downloaded {download_path} -> {local_file}')
-    finally:
-        client.close()
+    artifacts = {}
+    if cmd:
+        progress(30, "Running remote command")
+        _, stdout, stderr = client.exec_command(cmd)
+        out = stdout.read().decode(errors="replace")
+        err = stderr.read().decode(errors="replace")
+        artifacts["remote_command_stdout"] = out
+        if err:
+            artifacts["remote_command_stderr"] = err
+            log("warning", f"stderr: {err[:200]}")
 
-def pull_via_http(url, local_dir):
-    r = requests.get(url, stream=True, timeout=60)
+    if get_path:
+        progress(60, f"Downloading {get_path}")
+        sftp = client.open_sftp()
+        register_cleanup(sftp.close)
+        local = Path(out_dir) / Path(get_path).name
+        sftp.get(get_path, str(local))
+        artifacts["downloaded_file"] = str(local)
+        log("info", f"Downloaded -> {local}")
+
+    client.close()
+    return artifacts
+
+
+def _http_pull(url: str, out_dir: str) -> dict:
+    import requests
+
+    progress(10, "Starting HTTP download")
+    session = requests.Session()
+    register_cleanup(session.close)
+    r = session.get(url, stream=True, timeout=60)
     r.raise_for_status()
 
-    #FIX: Use urlparse to extract just the path component before splitting on
-    #'/'. The previous url.split('/')[-1] would include query string parameters
-    #(e.g. "firmware.bin?token=xyz") as part of the filename, producing an
-    #invalid or unintended file path.
-    parsed_path = urlparse(url).path
-    filename = parsed_path.split('/')[-1] or 'firmware.bin'
-    local_path = Path(local_dir) / filename
+    parsed = urlparse(url)
+    filename = Path(parsed.path).name or "firmware.bin"
+    local = Path(out_dir) / filename
 
-    with open(local_path, 'wb') as f:
-        for chunk in r.iter_content(8192):
-            f.write(chunk)
-    print(f'Downloaded to {local_path}')
+    total = int(r.headers.get("content-length", 0))
+    written = 0
+    with open(local, "wb") as fh:
+        for chunk in r.iter_content(65536):
+            if not chunk:
+                continue
+            fh.write(chunk)
+            written += len(chunk)
+            if total:
+                progress(min(99, int(written * 100 / total)), "Downloading")
 
-def main():
-    p = argparse.ArgumentParser(description='Pull firmware from device')
-    p.add_argument('--method', choices=['ssh', 'http'], default='ssh')
-    p.add_argument('--host', help='Device IP')
-    p.add_argument('--user', help='SSH user')
-    p.add_argument('--pass', dest='password', help='SSH password')
-    p.add_argument('--out', default='./firmware_dumps', help='Local output dir')
-    p.add_argument('--url', help='HTTP firmware URL')
-    p.add_argument('--cmd', help='SSH command e.g. "dd if=/dev/mtd0 of=/tmp/fw.bin bs=64k"')
-    p.add_argument('--get', help='Remote file to SCP e.g. /tmp/fw.bin')
-    args = p.parse_args()
+    return {"downloaded_file": str(local), "bytes": written}
 
-    #FIX: Validate that required arguments are present for the chosen method
-    #before proceeding, so failures produce a clear error instead of an
-    #unhelpful AttributeError or TypeError deep in the call.
-    if args.method == 'ssh':
-        missing = [name for name, val in [('--host', args.host), ('--user', args.user), ('--pass', args.password)] if not val]
+
+def main() -> None:
+    p = argparse.ArgumentParser(description="Retrieve firmware over SSH/HTTP")
+    p.add_argument("--method", choices=["ssh", "http"], default="ssh")
+    p.add_argument("--host")
+    p.add_argument("--user")
+    p.add_argument("--pass", dest="password")
+    p.add_argument("--out", default="./firmware_dumps")
+    p.add_argument("--url")
+    p.add_argument("--cmd", help='Remote command, e.g. "dd if=/dev/mtd0 of=/tmp/fw"')
+    p.add_argument("--get", help="Remote file to SCP")
+    add_common_args(p)
+    args = merge_json_args(p.parse_args())
+
+    install_signals()
+
+    if args.check_deps:
+        sys.exit(0 if check_deps(DEPS) else EXIT_TOOL_ERROR)
+
+    # Validation for method-specific required args
+    if args.method == "ssh":
+        missing = [f"--{k}" for k, v in
+                   [("host", args.host), ("user", args.user),
+                    ("pass", args.password)] if not v]
         if missing:
-            p.error(f'SSH method requires: {", ".join(missing)}')
+            fail("E_INVALID_ARGS", f"SSH requires: {', '.join(missing)}",
+                 exit_code=EXIT_VALIDATION)
     else:
         if not args.url:
-            p.error('HTTP method requires --url')
+            fail("E_INVALID_ARGS", "HTTP requires --url",
+                 exit_code=EXIT_VALIDATION)
 
-    Path(args.out).mkdir(exist_ok=True)
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.method == 'ssh':
-        pull_via_ssh(args.host, args.user, args.password, args.out, args.cmd, args.get)
-    else:
-        pull_via_http(args.url, args.out)
+    try:
+        if args.method == "ssh":
+            data = _ssh_pull(args.host, args.user, args.password,
+                             str(out_dir), args.cmd, args.get)
+        else:
+            data = _http_pull(args.url, str(out_dir))
+    except SystemExit:
+        raise
+    except Exception as e:                              # noqa: BLE001
+        fail("E_PULL", str(e), {"exception": type(e).__name__})
+
+    data["method"] = args.method
+    data["output_dir"] = str(out_dir)
+    progress(100, "Complete")
+    result(data)
+    write_output(args, data)
+
 
 if __name__ == "__main__":
     main()
