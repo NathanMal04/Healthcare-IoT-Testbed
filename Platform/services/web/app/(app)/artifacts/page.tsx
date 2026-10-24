@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { getDevices, type Device } from "@/lib/devices";
 import {
-  ARTIFACT_TYPES,
+  ARTIFACT_TYPE_LABELS,
   formatBytes,
   getArtifact,
   getArtifactDownloadUrl,
@@ -14,10 +14,11 @@ import {
   type ArtifactType,
 } from "@/lib/artifacts";
 import ArtifactUploader from "@/app/components/ArtifactUploader";
+import ArtifactTypeChips from "@/app/components/ArtifactTypeChips";
 import { RUN_SELECTION_KEY, serializeRunSelection } from "@/lib/runs";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { isWorkspaceUnavailable, scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
-import { Download, FolderArchive, Layers, Play, RefreshCw, X } from "lucide-react";
+import { Download, FolderArchive, Layers, Play, RefreshCw, Upload, X } from "lucide-react";
 import {
   Alert,
   Button,
@@ -27,7 +28,6 @@ import {
   DataTable,
   EmptyState,
   ErrorState,
-  FilterSelect,
   LoadingState,
   PageHeader,
   RowActionsMenu,
@@ -59,12 +59,17 @@ export default function ArtifactsPage() {
 function ArtifactsView() {
   const { user, loading } = useAuth();
   const router = useRouter();
-  const { scope, reportWorkspaceUnavailable } = useWorkspace();
+  // scopeLocked is set while an upload runs: the category can't change then,
+  // so a running upload is never hidden or unmounted.
+  const { scope, reportWorkspaceUnavailable, scopeLocked } = useWorkspace();
   const workspaceId = scopeWorkspaceId(scope);
 
   const [devices, setDevices] = useState<Device[]>([]);
   const [filters, setFilters] = useState<Filters>({ type: "", tag: "", batchId: "" });
   const [tagInput, setTagInput] = useState("");
+  // The type of the open category upload ("Upload PCAP", …), if any. The All
+  // category keeps the flexible uploader instead.
+  const [categoryUpload, setCategoryUpload] = useState<ArtifactType | null>(null);
 
   const [artifacts, setArtifacts] = useState<Artifact[] | null>(null);
   const [nextToken, setNextToken] = useState<string | undefined>();
@@ -220,7 +225,7 @@ function ArtifactsView() {
       className: "whitespace-nowrap text-slate-700",
       cell: (artifact) => (
         <>
-          <span className="capitalize">{artifact.type}</span>
+          <span>{ARTIFACT_TYPE_LABELS[artifact.type]?.single ?? artifact.type}</span>
           {artifact.version && <span className="text-slate-400"> · {artifact.version}</span>}
         </>
       ),
@@ -308,15 +313,35 @@ function ArtifactsView() {
         scope={scope}
       />
 
-      <ArtifactUploader
-        devices={devices}
-        requireDevice={scope.kind === "workspace"}
-        onFinished={(uploadBatchId) => {
-          if (uploadBatchId) setFilters({ type: "", tag: "", batchId: uploadBatchId });
-          else void load(false);
-          setTagInput("");
-        }}
-      />
+      {/* Kept mounted while another category is shown, so files staged here aren't lost. */}
+      <div hidden={filters.type !== "" || categoryUpload !== null}>
+        <ArtifactUploader
+          devices={devices}
+          requireDevice={scope.kind === "workspace"}
+          onFinished={(uploadBatchId) => {
+            if (uploadBatchId) setFilters((f) => ({ type: f.type, tag: "", batchId: uploadBatchId }));
+            else void load(false);
+            setTagInput("");
+          }}
+        />
+      </div>
+
+      {categoryUpload && (
+        <ArtifactUploader
+          key={categoryUpload}
+          devices={devices}
+          requireDevice={scope.kind === "workspace"}
+          fixedType={categoryUpload}
+          onFinished={(uploadBatchId, failedCount) => {
+            // The category stays selected; the list shows the new batch in it.
+            if (uploadBatchId) setFilters((f) => ({ type: f.type, tag: "", batchId: uploadBatchId }));
+            else void load(false);
+            setTagInput("");
+            // With failures the uploader stays, so they can be reviewed or retried.
+            if (uploadBatchId && failedCount === 0) setCategoryUpload(null);
+          }}
+        />
+      )}
 
       <Card className="overflow-hidden">
         <CardHeader
@@ -337,19 +362,32 @@ function ArtifactsView() {
         />
 
         <Toolbar>
-          <FilterSelect
+          <ArtifactTypeChips
             value={filters.type}
-            onChange={(value) => setFilters((f) => ({ ...f, type: value as ArtifactType | "" }))}
-            ariaLabel="Artifact type"
-          >
-            <option value="">All types</option>
-            {ARTIFACT_TYPES.map((type) => (
-              <option key={type} value={type}>
-                {type}
-              </option>
-            ))}
-          </FilterSelect>
+            onChange={(type) => setFilters((f) => ({ ...f, type }))}
+            disabled={scopeLocked}
+            disabledTitle="Wait for the running upload to finish"
+          />
+          {filters.type && !categoryUpload && (
+            <Button size="sm" icon={Upload} onClick={() => setCategoryUpload(filters.type || null)} className="ml-auto">
+              Upload {ARTIFACT_TYPE_LABELS[filters.type].single}
+            </Button>
+          )}
+          {categoryUpload && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setCategoryUpload(null)}
+              disabled={scopeLocked}
+              title={scopeLocked ? "Cancel the running upload first" : undefined}
+              className="ml-auto"
+            >
+              Close uploader
+            </Button>
+          )}
+        </Toolbar>
 
+        <Toolbar>
           <form
             onSubmit={(e) => {
               e.preventDefault();

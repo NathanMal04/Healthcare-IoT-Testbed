@@ -4,8 +4,19 @@ import { toReverseEngineeringStatus, type ReverseEngineeringStatus } from "@/lib
 
 // --- Types -------------------------------------------------------------------
 
-export const ARTIFACT_TYPES = ["firmware", "pcap", "log", "binary", "other"] as const;
+export const ARTIFACT_TYPES = ["firmware", "binary", "pcap", "log", "kernel_module", "report", "other"] as const;
 export type ArtifactType = (typeof ARTIFACT_TYPES)[number];
+
+/** Display names: the category tabs, and an upload button's "Upload …". */
+export const ARTIFACT_TYPE_LABELS: Record<ArtifactType, { category: string; single: string }> = {
+  firmware: { category: "Firmware", single: "Firmware" },
+  binary: { category: "Binary", single: "Binary" },
+  pcap: { category: "PCAP", single: "PCAP" },
+  log: { category: "Logs", single: "Log" },
+  kernel_module: { category: "Kernel Modules", single: "Kernel Module" },
+  report: { category: "PDF Reports", single: "PDF Report" },
+  other: { category: "Other", single: "Other" },
+};
 export type ArtifactStatus = "pending" | "verifying" | "ready" | "failed";
 
 export const MAX_ARTIFACT_SIZE_BYTES = 5 * 1024 ** 3; // 5 GiB
@@ -220,12 +231,19 @@ const TYPE_BY_EXTENSION: Record<string, ArtifactType> = {
   exe: "binary",
   dll: "binary",
   apk: "binary",
+  ko: "kernel_module",
+  pdf: "report",
 };
 
 /** Best guess from the file extension; the user can change it per file. */
 export function guessArtifactType(filename: string): ArtifactType {
   const extension = filename.toLowerCase().split(".").pop() ?? "";
   return TYPE_BY_EXTENSION[extension] ?? "other";
+}
+
+/** A staged file's type: the upload's fixed type if it has one, else the guess. */
+export function stagedArtifactType(filename: string, fixedType?: ArtifactType): ArtifactType {
+  return fixedType ?? guessArtifactType(filename);
 }
 
 export function formatBytes(bytes: number): string {

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getModule, listModules, type Module, type ModuleVersion } from "@/lib/builds";
-import { ARTIFACT_TYPES, formatBytes, listUploadBatches, type ArtifactType, type UploadBatch } from "@/lib/artifacts";
+import { ARTIFACT_TYPES, ARTIFACT_TYPE_LABELS, formatBytes, listUploadBatches, type ArtifactType, type UploadBatch } from "@/lib/artifacts";
 import { getDevices, type Device } from "@/lib/devices";
 import {
   RUN_SELECTION_KEY,
@@ -286,7 +286,7 @@ export default function NewRunForm({ prefill, onCancel }: { prefill: NewRunPrefi
               <option value="">All types</option>
               {ARTIFACT_TYPES.map((t) => (
                 <option key={t} value={t}>
-                  {t}
+                  {ARTIFACT_TYPE_LABELS[t].single}
                 </option>
               ))}
             </select>
@@ -298,7 +298,7 @@ export default function NewRunForm({ prefill, onCancel }: { prefill: NewRunPrefi
               <option value="">All types</option>
               {ARTIFACT_TYPES.map((t) => (
                 <option key={t} value={t}>
-                  {t}
+                  {ARTIFACT_TYPE_LABELS[t].single}
                 </option>
               ))}
             </select>
@@ -396,7 +396,7 @@ export default function NewRunForm({ prefill, onCancel }: { prefill: NewRunPrefi
                       checked={requireTypes.includes(t)}
                       onChange={() => setRequireTypes((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]))}
                     />
-                    {t}
+                    {ARTIFACT_TYPE_LABELS[t].single}
                   </label>
                 ))}
               </div>

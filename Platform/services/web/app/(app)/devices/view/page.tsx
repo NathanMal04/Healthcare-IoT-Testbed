@@ -5,10 +5,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Cpu, Download, Eye, FolderArchive, Link2, Microchip, ShieldAlert, Unlink, Upload } from "lucide-react";
 import { getDevices, updateDeviceReverseEngineeringStatus, type Device, type ReverseEngineeringStatus } from "@/lib/devices";
 import {
+  ARTIFACT_TYPE_LABELS,
   formatBytes,
   getArtifactDownloadUrl,
   listDeviceArtifacts,
   type Artifact,
+  type ArtifactType,
 } from "@/lib/artifacts";
 import {
   MAX_DEVICES_PER_CVE,
@@ -27,6 +29,7 @@ import { isWorkspaceUnavailable, scopeKey, scopeWorkspaceId, type Scope } from "
 import ReverseEngineeringStatusSelect from "@/app/components/ReverseEngineeringStatusSelect";
 import FirmwareUploadDialog from "@/app/components/firmware/FirmwareUploadDialog";
 import ArtifactUploader from "@/app/components/ArtifactUploader";
+import ArtifactTypeChips from "@/app/components/ArtifactTypeChips";
 import {
   FirmwareRetryDialog,
   FirmwareTable,
@@ -50,6 +53,7 @@ import {
   StatusBadge,
   TabPanel,
   Tabs,
+  Toolbar,
   formatDate,
   formatDay,
   selectClass,
@@ -460,9 +464,12 @@ function FirmwareTab({
 // --- Artifacts ------------------------------------------------------------------
 
 function ArtifactsTab({ device }: { device: Device }) {
-  // The uploader locks the scope while it runs, so it can't be closed mid-upload.
+  // The uploader locks the scope while it runs, so it can't be closed, nor
+  // the category changed, mid-upload.
   const { scopeLocked } = useWorkspace();
-  const [uploading, setUploading] = useState(false);
+  // The open uploader; fixedType is set when it was opened from a category.
+  const [upload, setUpload] = useState<{ fixedType?: ArtifactType } | null>(null);
+  const [type, setType] = useState<ArtifactType | "">("");
   const [artifacts, setArtifacts] = useState<Artifact[] | null>(null);
   const [nextToken, setNextToken] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
@@ -476,7 +483,11 @@ function ArtifactsTab({ device }: { device: Device }) {
       setLoading(true);
       setError(null);
       try {
-        const page = await listDeviceArtifacts(device.deviceId, { limit: 100, nextToken: token });
+        const page = await listDeviceArtifacts(device.deviceId, {
+          limit: 100,
+          type: type || undefined,
+          nextToken: token,
+        });
         if (loadId !== loadIdRef.current) return;
         setArtifacts((current) => (append && current ? [...current, ...page.artifacts] : page.artifacts));
         setNextToken(page.nextToken);
@@ -487,7 +498,7 @@ function ArtifactsTab({ device }: { device: Device }) {
         if (loadId === loadIdRef.current) setLoading(false);
       }
     },
-    [device.deviceId]
+    [device.deviceId, type]
   );
 
   useEffect(() => {
@@ -524,7 +535,7 @@ function ArtifactsTab({ device }: { device: Device }) {
       className: "whitespace-nowrap text-slate-700",
       cell: (a) => (
         <>
-          <span className="capitalize">{a.type}</span>
+          <span>{ARTIFACT_TYPE_LABELS[a.type]?.single ?? a.type}</span>
           {a.version && <span className="text-slate-400"> · {a.version}</span>}
         </>
       ),
@@ -554,14 +565,16 @@ function ArtifactsTab({ device }: { device: Device }) {
 
   return (
     <div className="space-y-4">
-      {uploading && (
+      {upload && (
         <ArtifactUploader
+          key={upload.fixedType ?? "all"}
           devices={[device]}
           fixedDevice={device}
+          fixedType={upload.fixedType}
           onFinished={(uploadBatchId, failedCount) => {
             void load(false);
             // With failures the uploader stays, so they can be reviewed or retried.
-            if (uploadBatchId && failedCount === 0) setUploading(false);
+            if (uploadBatchId && failedCount === 0) setUpload(null);
           }}
         />
       )}
@@ -570,23 +583,36 @@ function ArtifactsTab({ device }: { device: Device }) {
           title="Artifacts"
           description="Every file linked to this device, including firmware"
           actions={
-            uploading ? (
+            upload ? (
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={() => setUploading(false)}
+                onClick={() => setUpload(null)}
                 disabled={scopeLocked}
                 title={scopeLocked ? "Cancel the running upload first" : undefined}
               >
                 Close uploader
               </Button>
             ) : (
-              <Button variant="secondary" size="sm" icon={Upload} onClick={() => setUploading(true)}>
-                Upload new artifact
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={Upload}
+                onClick={() => setUpload(type ? { fixedType: type } : {})}
+              >
+                {type ? `Upload ${ARTIFACT_TYPE_LABELS[type].single}` : "Upload new artifact"}
               </Button>
             )
           }
         />
+        <Toolbar>
+          <ArtifactTypeChips
+            value={type}
+            onChange={setType}
+            disabled={scopeLocked}
+            disabledTitle="Wait for the running upload to finish"
+          />
+        </Toolbar>
         {downloadError && (
           <Alert tone="error" className="mx-5 mt-3">
             Couldn&apos;t download: {downloadError}
@@ -597,7 +623,10 @@ function ArtifactsTab({ device }: { device: Device }) {
         ) : artifacts === null ? (
           <LoadingState label="Loading artifacts…" />
         ) : artifacts.length === 0 && !nextToken ? (
-          <EmptyState icon={FolderArchive} title="No files linked to this device yet" />
+          <EmptyState
+            icon={FolderArchive}
+            title={type ? `No ${ARTIFACT_TYPE_LABELS[type].category} linked to this device` : "No files linked to this device yet"}
+          />
         ) : (
           <DataTable columns={columns} rows={artifacts} rowKey={(a) => a.artifactId} minWidth="36rem" />
         )}

@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ARTIFACT_TYPES,
+  ARTIFACT_TYPE_LABELS,
   MAX_ARTIFACT_SIZE_BYTES,
   formatBytes,
-  guessArtifactType,
+  stagedArtifactType,
   type ArtifactType,
 } from "@/lib/artifacts";
 import { UploadQueue, type QueueItem, type QueueStage } from "@/lib/uploadQueue";
@@ -28,6 +29,12 @@ interface ArtifactUploaderProps {
    * to it, and it can't be unchecked.
    */
   fixedDevice?: Device;
+  /**
+   * Set when the upload started from a category: every file gets this type,
+   * and it can't be changed. Without it each file's type is guessed from its
+   * name and can be changed.
+   */
+  fixedType?: ArtifactType;
   /**
    * Called when a run of uploads ends, with the batch id if one was created
    * and how many files ended failed.
@@ -60,12 +67,12 @@ const VERSION_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?$/;
 
 let nextItemId = 0;
 
-function toQueueItem(file: File, path: string): QueueItem {
+function toQueueItem(file: File, path: string, fixedType?: ArtifactType): QueueItem {
   return {
     id: `f${nextItemId++}`,
     file,
     path,
-    type: guessArtifactType(file.name),
+    type: stagedArtifactType(file.name, fixedType),
     version: "",
     stage: "queued",
     progress: 0,
@@ -113,6 +120,7 @@ export default function ArtifactUploader({
   devices,
   requireDevice = false,
   fixedDevice,
+  fixedType,
   onFinished,
 }: ArtifactUploaderProps) {
   const [items, setItems] = useState<QueueItem[]>([]);
@@ -156,7 +164,7 @@ export default function ArtifactUploader({
     for (const { file, path } of files) {
       if (file.size === 0) rejected.push(`${path} (empty)`);
       else if (file.size > MAX_ARTIFACT_SIZE_BYTES) rejected.push(`${path} (over 5 GiB)`);
-      else accepted.push(toQueueItem(file, path));
+      else accepted.push(toQueueItem(file, path, fixedType));
     }
     setItems((current) => [...current, ...accepted]);
     setSkipped((current) => [...current, ...rejected]);
@@ -242,10 +250,14 @@ export default function ArtifactUploader({
   return (
     <div className={`${cardClass} p-5 space-y-5`}>
       <div>
-        <h2 className="text-sm font-semibold text-slate-800">Upload files</h2>
+        <h2 className="text-sm font-semibold text-slate-800">
+          {fixedType ? `Upload ${ARTIFACT_TYPE_LABELS[fixedType].single}` : "Upload files"}
+        </h2>
         <p className="text-xs text-slate-500 mt-1">
-          Firmware, pcaps, logs, binaries or anything else, up to 5 GiB each. Files uploaded together
-          form one upload batch.
+          {fixedType
+            ? `Every file is uploaded as ${ARTIFACT_TYPE_LABELS[fixedType].single}, up to 5 GiB each.`
+            : "Firmware, pcaps, logs, binaries, kernel modules, PDF reports or anything else, up to 5 GiB each."}{" "}
+          Files uploaded together form one upload batch.
         </p>
         {fixedDevice && (
           <p className="text-xs text-slate-600 mt-2">
@@ -412,18 +424,27 @@ export default function ArtifactUploader({
                     <td className="px-3 py-2 text-slate-700 break-all">{item.path}</td>
                     <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{formatBytes(item.file.size)}</td>
                     <td className="px-3 py-2">
-                      <select
-                        value={item.type}
-                        disabled={started}
-                        onChange={(e) => updateStaged(item.id, { type: e.target.value as ArtifactType })}
-                        className="text-sm border border-line rounded-md px-2 py-1 bg-white disabled:opacity-60"
-                      >
-                        {ARTIFACT_TYPES.map((type) => (
-                          <option key={type} value={type}>
-                            {type}
-                          </option>
-                        ))}
-                      </select>
+                      {fixedType ? (
+                        <span
+                          className="text-xs font-medium text-brand-700 bg-brand-50 px-1.5 py-0.5 rounded-md whitespace-nowrap"
+                          title="Set by the category this upload started from"
+                        >
+                          {ARTIFACT_TYPE_LABELS[item.type].single}
+                        </span>
+                      ) : (
+                        <select
+                          value={item.type}
+                          disabled={started}
+                          onChange={(e) => updateStaged(item.id, { type: e.target.value as ArtifactType })}
+                          className="text-sm border border-line rounded-md px-2 py-1 bg-white disabled:opacity-60"
+                        >
+                          {ARTIFACT_TYPES.map((type) => (
+                            <option key={type} value={type}>
+                              {ARTIFACT_TYPE_LABELS[type].single}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </td>
                     <td className="px-3 py-2">
                       {item.type === "firmware" ? (
