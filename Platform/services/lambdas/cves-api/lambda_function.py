@@ -361,21 +361,34 @@ def _link_device(table, user_id, record_id, device_id):
                   "deviceName": device.get("name"), "createdBy": user_id, "createdAt": now}
 
     # The device must still be in the CVE's scope, and the caller still allowed,
-    # when the links are written; either may change after the reads above.
-    if workspace_id is not None:
-        device_check = _condition_check(f"DEVICE#{device_id}", "METADATA", "#workspaceId = :workspaceId",
-                                        names={"#workspaceId": "workspaceId"},
-                                        values={":workspaceId": workspace_id})
+    # when the links are written; either may change after the reads above. Its
+    # name must also be unchanged, since cve-device copies it: a rename
+    # (update-device) then either finds this row or fails this link.
+    check_names = {"#workspaceId": "workspaceId", "#name": "name"}
+    check_values = {}
+    if device.get("name") is None:
+        name_condition = "attribute_not_exists(#name)"
     else:
-        device_check = _condition_check(f"DEVICE#{device_id}", "METADATA",
-                                        "attribute_exists(pk) AND attribute_not_exists(#workspaceId)",
-                                        names={"#workspaceId": "workspaceId"})
+        name_condition = "#name = :deviceName"
+        check_values[":deviceName"] = device["name"]
+    if workspace_id is not None:
+        scope_condition = "#workspaceId = :workspaceId"
+        check_values[":workspaceId"] = workspace_id
+    else:
+        scope_condition = "attribute_exists(pk) AND attribute_not_exists(#workspaceId)"
+    device_check = _condition_check(f"DEVICE#{device_id}", "METADATA", f"{scope_condition} AND {name_condition}",
+                                    names=check_names, values=check_values)
     items = [update, _put(device_cve), _put(cve_device), device_check, _caller_check(user_id, record_id, workspace_id)]
     if workspace_id is None:
         items.append(_condition_check(f"USER#{user_id}", f"DEVICE#{device_id}", "#role = :owner",
                                       names={"#role": "role"}, values={":owner": "owner"}))
 
     failed = _transact(items, "link_device", record_id)
+    if 3 in failed and 5 not in failed:
+        current_device = table.get_item(Key={"pk": f"DEVICE#{device_id}", "sk": "METADATA"}).get("Item")
+        if (current_device is not None and current_device.get("workspaceId") == workspace_id
+                and current_device.get("name") != device.get("name")):
+            raise RequestError(409, "This device was renamed by another request; try again")
     if 3 in failed or 5 in failed:
         raise RequestError(404, "Device not found")
     if 4 in failed:

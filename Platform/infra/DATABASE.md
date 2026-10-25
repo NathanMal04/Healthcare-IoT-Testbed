@@ -18,7 +18,7 @@ The metadata table is single-table so that one `Query` on a partition returns a 
 - **Base record.** Every entity's own record is `pk = TYPE#id`, `sk = METADATA`. The other rows in that partition are children or links.
 - **Versions.** `VERSION#0001`, `VERSION#0002`, … are zero-padded so that they sort in order. Version numbers elsewhere (`moduleVersion`, `envVersion`, `latestVersion`) are plain numbers.
 - **`entity`.** Every row has an `entity` attribute naming its kind (`device`, `run-child`, `user-artifact`, …). Use it to tell rows apart when a query returns a mixed partition.
-- **Two-way links.** A relationship is written as two rows, one in each partition, so that it can be queried from either side. Both rows are written in the same `TransactWriteItems` call. The row in the `USER#` / `DEVICE#` / `BATCH#` partition repeats a few **immutable** display fields (`name`, `type`, `createdAt`). Anything that changes, such as `status`, is only stored on the base record: list endpoints query the link rows, then read the base records with `BatchGetItem`, so status is never stale.
+- **Two-way links.** A relationship is written as two rows, one in each partition, so that it can be queried from either side. Both rows are written in the same `TransactWriteItems` call. The row in the `USER#` / `DEVICE#` / `BATCH#` partition repeats a few display fields (`name`, `type`, `createdAt`). Anything that changes, such as `status`, is only stored on the base record: list endpoints query the link rows, then read the base records with `BatchGetItem`, so status is never stale. These copies are immutable, except a **device's name**, which can be edited: see [Device names](#device-names).
 - **Ownership.** Every personal device, personal run and personal CVE, and every artifact, upload batch, module, environment and session, has `USER#{uid} / X#{id}` and `X#{id} / USER#{uid}` rows with `role = owner`. Their `entity` values are `user-x` / `x-user` (`user-device` / `device-user`, `user-artifact` / `artifact-user`, and likewise `batch`, `module`, `env`, `run`, `session`, `cve`). `owner` is currently the only role. The ownership check is a single `GetItem(USER#{uid}, X#{id})`.
 - **Money.** Costs, holds and limits are DynamoDB numbers (`N`, exact decimals; boto3 `Decimal`) in USD, so they can be added atomically and compared in conditions.
 - **Timestamps.** ISO-8601 UTC strings.
@@ -31,8 +31,16 @@ A physical device under test.
 
 | Attribute | Type | Meaning |
 |---|---|---|
-| `name` | S | Display name |
-| `type` | S | Device category, e.g. `blood-pressure` |
+| `name` | S | Display name. Required, at most 255 characters. Editable; copied onto several link rows (see [Device names](#device-names)) |
+| `type` | S | Device category, e.g. `blood-pressure`. Required, at most 100 characters. Editable |
+| `manufacturer` | S | *Optional.* At most 100 characters |
+| `modelNumber` | S | *Optional.* At most 100 characters |
+| `chipset` | S | *Optional.* At most 100 characters |
+| `serialNumber` | S | *Optional.* At most 100 characters. Not required to be unique |
+| `hardwareRevision` | S | *Optional.* At most 50 characters |
+| `firmwareVersion` | S | *Optional.* The version the device runs, as recorded by the user; independent of uploaded firmware artifacts and their `FWVER#` guards. At most 100 characters |
+| `description` | S | *Optional.* Free text, at most 2000 characters; may contain line breaks and tabs |
+| `pendingNameSync` | S | **Internal.** Set to the new name while a rename is copying it to the link rows, removed when every copy is written. Never returned by the API |
 | `status` | S | `active` |
 | `reverseEngineeringStatus` | S | `not_started` / `in_progress` / `complete`. Set with `PATCH /devices/{id}` (`update-device`) by the owner of a personal device, or by any member of a workspace device's workspace. Separate from `status`. Devices created before it existed have no attribute and read as `not_started`. Only stored here, not on the link rows; `GET /devices` reads it with `BatchGetItem`. |
 | `dataPath` | S | S3 prefix for the device's files |
@@ -40,6 +48,14 @@ A physical device under test.
 | `workspaceId` | S | **Workspace devices only.** The workspace the device belongs to. Authoritative for access (see below). Set at creation and never changed. |
 | `createdBy` | S | **Workspace devices only.** The member who created it (provenance, not ownership) |
 | `createdAt`, `updatedAt` | S | Timestamps |
+
+**Field rules** (`_shared/python/device_fields.py`, used by `create-device`, `list-devices` and `update-device`): values are trimmed; control characters are rejected (except line breaks and tabs in `description`); an optional field that is missing, `null`, empty or only whitespace is **not stored**, so "no attribute" means "not provided" for new and pre-existing devices alike. No migration is needed: devices created before the optional fields existed simply have none of them. The optional fields are stored on `METADATA` only, never on link rows.
+
+**API:**
+- `POST /devices` `{name, type, workspaceId?, ...optional fields}`. Only `name` and `type` are required; other keys are ignored.
+- `GET /devices[?workspaceId=]` returns `deviceId`, `name`, `type`, `role`, `reverseEngineeringStatus`, `workspaceId` (workspace lists) and whichever optional fields each device has, all read from `METADATA`.
+- `GET /devices/{did}` (`list-devices`) returns one device with the same fields plus `status`, `createdAt`, `updatedAt` and, on workspace devices, `createdBy`. Read rule: any `USER#/DEVICE#` link of a personal device, or membership of a workspace device's workspace; `404` if there is no `METADATA`, `403` otherwise.
+- `PATCH /devices/{did}` (`update-device`) is a partial update of any of `name`, `type`, the optional fields and `reverseEngineeringStatus`; at least one is required. An optional field sent as `null` or `""` is removed; `name` and `type` can't be removed. `pk`, `sk`, `entity`, `deviceId`, `workspaceId`, `createdBy`, `createdAt`, `updatedAt`, `status`, `dataPath`, `role` and `pendingNameSync` are refused (`400`), as is any unknown key. Who may: the owner of a personal device, or any member of a workspace device's workspace.
 
 A device is either **personal** or belongs to exactly one **workspace**, decided only by whether its `METADATA` has a `workspaceId`:
 
@@ -54,6 +70,7 @@ A device is either **personal** or belongs to exactly one **workspace**, decided
 - **The workspace/device rows are for listing only.** `GET /devices?workspaceId=` queries `WORKSPACE#{wid}`, then lists a device only if its `METADATA` has that `workspaceId`; a link row alone never makes a device part of a workspace. `GET /devices` (personal) leaves out any device whose `METADATA` has a `workspaceId`.
 - A workspace device's `METADATA`, both links, and `ConditionCheck`s that the workspace exists and the caller is still a member are written in one transaction.
 - **Existing devices are personal.** Nothing adds a `workspaceId` to them; moving a device into a workspace will be a separate, explicit operation.
+- <a id="device-names"></a>**Device names.** A device's name is copied onto `USER#{uid} / DEVICE#{did}` (`name`), `WORKSPACE#{wid} / DEVICE#{did}` (`name`), `ARTIFACT#{aid} / DEVICE#{did}` (`name`) and `CVE#{rid} / DEVICE#{did}` (`deviceName`). A rename (`PATCH` with `name`) sets `name` and `pendingNameSync` on `METADATA`, finds every copy from the `DEVICE#{did}` partition (strongly consistent `Query` on `USER#`, `WORKSPACE#`, `ARTIFACT#` and `CVE#`), rewrites them in transactions of up to 99 `Update`s plus a `ConditionCheck` that `METADATA` still has that name, then removes `pendingNameSync`. A sync superseded by a later rename stops (the later one writes the copies). If a sync is cut short, `pendingNameSync` stays and the next `PATCH` of the device finishes it. The endpoints that copy an existing device's name into a new row (`artifacts-presign`, `cves-api` link) check in their own transaction that `METADATA` still has the name they copied, so a row written during a rename is either found by the rename or refused (`409`, try again). The lists and `GET /devices/{did}` read the name from `METADATA`, never from a copy.
 - **Artifacts and firmware** follow the device's scope: see [Artifact scope](#artifact-scope). The old `/devices/{id}/firmware` routes still refuse workspace devices; a workspace device is a run input only for a run of its workspace (see [Run scope](#run-scope)).
 
 ### Artifact: `ARTIFACT#{id}` / `METADATA`
@@ -94,7 +111,7 @@ Lifecycle:
 
 Device links are **optional**, and an artifact can link to several devices (only devices the uploader may use, all of one scope; see below):
 - `DEVICE#{did} / ARTIFACT#{type}#{id}` (`device-artifact`): `name`, `type`. The type is in the sort key, so "this device's firmware" is a single `begins_with`.
-- `ARTIFACT#{id} / DEVICE#{did}` (`artifact-device`): `name` of the device.
+- `ARTIFACT#{id} / DEVICE#{did}` (`artifact-device`): `name` of the device, kept up to date when the device is renamed (see [Device names](#device-names)).
 
 **Firmware version guard:** `DEVICE#{did} / FWVER#{version}` (`device-firmware-version`): `artifactId`, `version`. Written in the same transaction as the artifact, one per linked device, with `attribute_not_exists`, so a firmware version is unique per device (whoever in a workspace uploads it).
 
@@ -350,7 +367,7 @@ A CVE is **personal** or belongs to exactly one **workspace**, decided only by w
 A CVE is linked to any number (up to 40) of devices **of its own scope**, and a device to any number of CVEs:
 
 - `DEVICE#{did} / CVE#{rid}` (`device-cve`): `cveId` (immutable), `createdBy`, `createdAt`. Lists a device's CVEs.
-- `CVE#{rid} / DEVICE#{did}` (`cve-device`): `deviceName` (device names don't change), `createdBy`, `createdAt`. Lists a CVE's devices; `DELETE` uses it to find every link.
+- `CVE#{rid} / DEVICE#{did}` (`cve-device`): `deviceName` (kept up to date when the device is renamed; see [Device names](#device-names)), `createdBy`, `createdAt`. Lists a CVE's devices; `DELETE` uses it to find every link.
 - `deviceIds` on the CVE's `METADATA` mirrors the second set of rows, so `GET /cves` can show each CVE's devices without a query per CVE.
 
 **Scope.** The CVE's and the device's `METADATA` must agree: a personal CVE links only personal devices (no `workspaceId`) that the caller owns, and a workspace CVE only devices whose `workspaceId` is the CVE's. Personal ↔ workspace and workspace A ↔ workspace B links are refused with 400 when the caller may use both, and with the same 404 as a missing device when the caller may not use the device (`testbed_authz.require_resource`, so a leftover `USER#/DEVICE#` row on a workspace device grants nothing).

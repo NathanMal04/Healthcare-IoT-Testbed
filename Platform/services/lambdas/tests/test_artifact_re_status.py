@@ -68,6 +68,8 @@ def put_items(transact_mock):
     items = []
     for call in transact_mock.call_args_list:
         for t in call.kwargs["TransactItems"]:
+            if "Put" not in t:
+                continue
             items.append({k: TypeDeserializer().deserialize(v) for k, v in t["Put"]["Item"].items()})
     return items
 

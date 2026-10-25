@@ -1,7 +1,9 @@
 # Shared Python code for the Lambdas, published as a layer. Lambda extracts
 # layers under /opt and puts /opt/python on the import path, so
 # services/lambdas/_shared/python/testbed_authz.py is importable as
-# `testbed_authz` by every function that lists this layer.
+# `testbed_authz` by every function that lists this layer (and likewise
+# device_fields.py, the device field validation used by create-device,
+# list-devices and update-device).
 #
 # Functions using it: create-device, list-devices, update-device and the old
 # presign-firmware, complete-firmware and list-firmware (main.tf), every
@@ -19,7 +21,7 @@ data "archive_file" "shared_layer" {
 
 resource "aws_lambda_layer_version" "shared" {
   layer_name          = "${var.name}-shared"
-  description         = "Shared Lambda code (testbed_authz)"
+  description         = "Shared Lambda code (testbed_authz, device_fields)"
   filename            = data.archive_file.shared_layer.output_path
   source_code_hash    = data.archive_file.shared_layer.output_base64sha256
   compatible_runtimes = ["python3.12"]

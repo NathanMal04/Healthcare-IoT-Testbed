@@ -3,6 +3,7 @@ import os
 import re
 import uuid
 import boto3
+import device_fields
 import testbed_authz
 from datetime import datetime, timezone
 from boto3.dynamodb.types import TypeSerializer
@@ -15,8 +16,6 @@ serializer = TypeSerializer()
 TABLE = os.environ["METADATA_TABLE_NAME"]
 BUCKET = os.environ["DATA_LAKE_BUCKET"]
 
-REQUIRED_FIELDS = ["name", "type"]
-
 # Separate from the device's lifecycle "status"; changed with
 # PATCH /devices/{deviceId} (update-device).
 DEFAULT_RE_STATUS = "not_started"
@@ -25,7 +24,8 @@ UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
 
 
 def handler(event, context):
-    """POST /devices with {name, type, workspaceId?}.
+    """POST /devices with {name, type, workspaceId?} and any of the optional
+    descriptive fields (device_fields.OPTIONAL_FIELDS).
 
     Without workspaceId the device is personal: the caller owns it through
     USER#/DEVICE# links. With one, the device belongs to that workspace
@@ -43,18 +43,18 @@ def handler(event, context):
     if not isinstance(body, dict):
         return _resp(400, {"error": "Invalid JSON in request body"})
 
-    values = {}
-    for field in REQUIRED_FIELDS:
-        raw = body.get(field)
-        if not isinstance(raw, str) or not raw.strip():
-            return _resp(400, {"error": f"{field} is required"})
-        values[field] = raw.strip()
+    # Optional fields left empty are not stored; other keys are ignored.
+    try:
+        values = device_fields.clean_new_device(body)
+    except device_fields.FieldError as e:
+        return _resp(400, {"error": str(e)})
+    details = {field: values[field] for field in device_fields.OPTIONAL_FIELDS if field in values}
 
     if "workspaceId" in body:
         workspace_id = body["workspaceId"]
         if not isinstance(workspace_id, str) or not UUID_PATTERN.match(workspace_id):
             return _resp(400, {"error": "workspaceId is invalid"})
-        return _create_workspace_device(user_id, workspace_id, values)
+        return _create_workspace_device(user_id, workspace_id, values, details)
 
     device_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
@@ -66,6 +66,7 @@ def handler(event, context):
         "entity": "device",
         "name": values["name"],
         "type": values["type"],
+        **details,
         "status": "active",
         "reverseEngineeringStatus": DEFAULT_RE_STATUS,
         "dataPath": data_path,
@@ -111,6 +112,7 @@ def handler(event, context):
             "deviceId": device_id,
             "name": values["name"],
             "type": values["type"],
+            **details,
             "status": "active",
             "reverseEngineeringStatus": DEFAULT_RE_STATUS,
             "dataPath": data_path,
@@ -120,7 +122,7 @@ def handler(event, context):
     )
 
 
-def _create_workspace_device(user_id, workspace_id, values):
+def _create_workspace_device(user_id, workspace_id, values, details):
     table = dynamodb.Table(TABLE)
 
     # Members and owners may add devices. A non-member gets the same 404 as
@@ -143,6 +145,7 @@ def _create_workspace_device(user_id, workspace_id, values):
         "deviceId": device_id,
         "name": values["name"],
         "type": values["type"],
+        **details,
         "status": "active",
         "reverseEngineeringStatus": DEFAULT_RE_STATUS,
         "dataPath": data_path,
@@ -203,6 +206,7 @@ def _create_workspace_device(user_id, workspace_id, values):
             "deviceId": device_id,
             "name": values["name"],
             "type": values["type"],
+            **details,
             "status": "active",
             "reverseEngineeringStatus": DEFAULT_RE_STATUS,
             "dataPath": data_path,

@@ -191,7 +191,8 @@ resource "aws_iam_policy" "lambda_dynamodb_create_device" {
 # list-devices queries the caller's USER#/DEVICE# links (or, with
 # ?workspaceId, the WORKSPACE#/DEVICE# links after GetItem of the caller's
 # membership and WORKSPACE#/METADATA), then reads the DEVICE#/METADATA
-# records with BatchGetItem.
+# records with BatchGetItem. GET /devices/{deviceId} (same function) reads
+# one DEVICE#/METADATA and the caller's link or membership with GetItem.
 resource "aws_iam_policy" "lambda_dynamodb_list_devices" {
   name = "${var.name}-lambda-list-devices"
 
@@ -206,7 +207,10 @@ resource "aws_iam_policy" "lambda_dynamodb_list_devices" {
 }
 
 # update-device reads the caller's USER#/DEVICE# link (ownership check) and
-# updates DEVICE#/METADATA.
+# updates DEVICE#/METADATA. A rename then queries the DEVICE# partition for
+# the rows that copy the name and rewrites them with TransactWriteItems:
+# Update items (dynamodb:UpdateItem) plus a ConditionCheck on METADATA
+# (dynamodb:ConditionCheckItem).
 resource "aws_iam_policy" "lambda_dynamodb_update_device" {
   name = "${var.name}-lambda-update-device"
 
@@ -214,7 +218,7 @@ resource "aws_iam_policy" "lambda_dynamodb_update_device" {
     Version = "2012-10-17"
     Statement = [{
       Effect   = "Allow"
-      Action   = ["dynamodb:GetItem", "dynamodb:UpdateItem"]
+      Action   = ["dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:Query", "dynamodb:ConditionCheckItem"]
       Resource = module.metadata_table.table_arn
     }]
   })
@@ -474,11 +478,12 @@ module "api" {
 }
 
 # Integrations defined with the api_lambda_method / api_cors_preflight
-# modules: PATCH /devices/{deviceId} below, plus artifacts.tf, builds.tf,
+# modules: GET and PATCH /devices/{deviceId} below, plus artifacts.tf, builds.tf,
 # runs.tf, usage.tf, workspaces.tf and cves.tf.
 locals {
   module_route_integration_ids = concat(
     [
+      module.devices_device_id_get.integration_id,
       module.devices_device_id_patch.integration_id,
       module.devices_device_id_preflight.integration_id,
     ],
@@ -657,10 +662,26 @@ resource "aws_api_gateway_resource" "devices_device_id" {
   path_part   = "{deviceId}"
 }
 
-# PATCH /devices/{deviceId} -> update-device (reverseEngineeringStatus).
+# GET /devices/{deviceId} -> list-devices (one device with all its details)
+# PATCH /devices/{deviceId} -> update-device (name, type, details,
+# reverseEngineeringStatus).
 # Uses the api_lambda_method / api_cors_preflight modules (see artifacts.tf),
 # which take the full route path for the invoke permission, so they work on
 # this path-parameter resource.
+module "devices_device_id_get" {
+  source = "../../modules/api_lambda_method"
+
+  rest_api_id          = module.api.rest_api_id
+  resource_id          = aws_api_gateway_resource.devices_device_id.id
+  execution_arn        = module.api.execution_arn
+  http_method          = "GET"
+  route_path           = "devices/*"
+  authorizer_id        = module.api.cognito_authorizer_id
+  lambda_invoke_arn    = module.list_devices_fn.invoke_arn
+  lambda_function_name = module.list_devices_fn.function_name
+  statement_suffix     = "devices-id-GET"
+}
+
 module "devices_device_id_patch" {
   source = "../../modules/api_lambda_method"
 
@@ -680,7 +701,7 @@ module "devices_device_id_preflight" {
 
   rest_api_id     = module.api.rest_api_id
   resource_id     = aws_api_gateway_resource.devices_device_id.id
-  allowed_methods = ["PATCH"]
+  allowed_methods = ["GET", "PATCH"]
 }
 
 resource "aws_api_gateway_resource" "devices_device_id_firmware" {

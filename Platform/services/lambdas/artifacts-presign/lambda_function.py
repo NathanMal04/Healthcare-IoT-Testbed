@@ -253,7 +253,7 @@ def _create_artifact(user_id, batch_id, tags, devices, spec, workspace_id=None):
         }))
         transact_items.append(_put({
             "pk": f"ARTIFACT#{artifact_id}", "sk": f"DEVICE#{device_id}",
-            "entity": "artifact-device", "name": device_name,
+            "entity": "artifact-device", "name": device_name or device_id,
         }))
 
     # The caller must still be a member when the artifact is written.
@@ -261,6 +261,14 @@ def _create_artifact(user_id, batch_id, tags, devices, spec, workspace_id=None):
     if workspace_id:
         membership_index = len(transact_items)
         transact_items.append(_membership_check(user_id, workspace_id))
+
+    # The artifact-device rows copy each device's name. Checking that the name
+    # is unchanged when they are written means a rename (update-device) either
+    # finds these rows or happened first and fails this upload, never leaving
+    # a row with the old name behind.
+    name_check_start = len(transact_items)
+    for device_id, device_name in devices.items():
+        transact_items.append(_device_name_check(device_id, device_name))
 
     # Firmware versions are unique per device. The guard rows are the last
     # items in the transaction so a cancellation reason can be mapped back to
@@ -285,6 +293,10 @@ def _create_artifact(user_id, batch_id, tags, devices, spec, workspace_id=None):
             if (membership_index is not None and membership_index < len(reasons)
                     and reasons[membership_index].get("Code") == "ConditionalCheckFailed"):
                 raise RequestError(403, "Not authorized for this workspace")
+            for offset, device_id in enumerate(devices):
+                index = name_check_start + offset
+                if index < len(reasons) and reasons[index].get("Code") == "ConditionalCheckFailed":
+                    raise RequestError(409, f"Device {device_id} was changed during the upload; try again")
             guard_start = len(transact_items) - len(guard_devices)
             for offset, reason in enumerate(reasons[guard_start:]):
                 if reason.get("Code") == "ConditionalCheckFailed":
@@ -567,7 +579,7 @@ def _validate_tags(raw):
 
 
 def _resolve_devices(table, user_id, raw):
-    """Returns ({deviceId: deviceName}, workspaceId or None).
+    """Returns ({deviceId: deviceName or None}, workspaceId or None).
 
     Each device is authorized by its own scope (testbed_authz): the owner of a
     personal device, or a member of a workspace device's workspace. All of
@@ -588,7 +600,7 @@ def _resolve_devices(table, user_id, raw):
             item = testbed_authz.require_resource(table, user_id, "DEVICE", device_id, legacy_roles=("owner",))
         except testbed_authz.AuthorizationError:
             raise RequestError(403, f"Not authorized for device {device_id}")
-        devices[device_id] = item.get("name") or device_id
+        devices[device_id] = item.get("name")
         scopes.add(item.get("workspaceId"))
 
     if len(scopes) > 1:
@@ -724,6 +736,20 @@ def _sha256_hex_to_base64(sha256_hex):
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def _device_name_check(device_id, name):
+    check = {
+        "TableName": TABLE,
+        "Key": {"pk": serializer.serialize(f"DEVICE#{device_id}"), "sk": serializer.serialize("METADATA")},
+        "ExpressionAttributeNames": {"#name": "name"},
+    }
+    if name is None:
+        check["ConditionExpression"] = "attribute_not_exists(#name)"
+    else:
+        check["ConditionExpression"] = "#name = :name"
+        check["ExpressionAttributeValues"] = {":name": serializer.serialize(name)}
+    return {"ConditionCheck": check}
 
 
 def _membership_check(user_id, workspace_id):

@@ -1274,6 +1274,23 @@ class LinkTests(ApiTestCase):
         ])
         self.assertIn("attribute_not_exists(#workspaceId)", items[3]["ConditionCheck"]["ConditionExpression"])
 
+    def test_device_renamed_during_link_is_refused(self):
+        # update-device renames the device between this request's reads and
+        # its write: the link would carry the old name, so it is refused.
+        def rename(table):
+            table.items[(f"DEVICE#{DEV_P1}", "METADATA")]["name"] = "Renamed pump"
+        self.client.before_transact = rename
+        resp = self.link(CVE_P, DEV_P1)
+        self.assertEqual(resp["statusCode"], 409)
+        self.assertIn("renamed", response_body(resp)["error"])
+        self.assertNotIn((f"CVE#{CVE_P}", f"DEVICE#{DEV_P1}"), self.table.items)
+        self.assertNotIn((f"DEVICE#{DEV_P1}", f"CVE#{CVE_P}"), self.table.items)
+
+        # Trying again links it under the new name.
+        self.client.before_transact = None
+        self.assertEqual(self.link(CVE_P, DEV_P1)["statusCode"], 200)
+        self.assertEqual(self.table.items[(f"CVE#{CVE_P}", f"DEVICE#{DEV_P1}")]["deviceName"], "Renamed pump")
+
     def test_workspace_owner_and_member_link(self):
         self.assertEqual(self.link(CVE_A, DEV_A2, user=USER)["statusCode"], 200)
         resp = self.link(CVE_A, DEV_A1, user=MEMBER)
@@ -1286,7 +1303,8 @@ class LinkTests(ApiTestCase):
         # METADATA update, 2 Puts, device workspace check, membership check.
         items = self.client.calls[1]
         self.assertEqual(len(items), 5)
-        self.assertEqual(items[3]["ConditionCheck"]["ConditionExpression"], "#workspaceId = :workspaceId")
+        self.assertEqual(items[3]["ConditionCheck"]["ConditionExpression"],
+                         "#workspaceId = :workspaceId AND #name = :deviceName")
         self.assertEqual(_deserialize(items[4]["ConditionCheck"]["Key"]),
                          {"pk": f"USER#{MEMBER}", "sk": f"WORKSPACE#{WS_A}"})
 

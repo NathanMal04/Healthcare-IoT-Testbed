@@ -17,6 +17,13 @@ from unittest import mock
 from boto3.dynamodb.types import TypeDeserializer
 from botocore.exceptions import ClientError
 
+# The expression evaluator and strict transaction fake of the cves-api tests,
+# imported as a module so its test cases aren't collected here again.
+import test_cves_api as cves_fakes
+# The artifact tests' world (workspaces, devices, real artifacts-presign), for
+# renames of devices that have artifacts.
+import test_workspace_artifacts as artifact_world
+
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-2")
 os.environ.setdefault("METADATA_TABLE_NAME", "metadata")
 os.environ.setdefault("DATA_LAKE_BUCKET", "data-lake")
@@ -25,6 +32,8 @@ LAMBDAS = Path(__file__).resolve().parent.parent
 # The shared layer (testbed_authz), which Lambda puts on the path from /opt/python.
 sys.path.insert(0, str(LAMBDAS / "_shared" / "python"))
 TABLE = os.environ["METADATA_TABLE_NAME"]
+
+import device_fields  # noqa: E402  (from the shared layer, on the path above)
 
 USER = "user-sub-1"
 OTHER_USER = "user-sub-2"
@@ -42,8 +51,9 @@ def load_lambda(name):
     return module
 
 
-def event(user=USER, body=None, device_id=None, query=None):
+def event(user=USER, body=None, device_id=None, query=None, resource=None):
     return {
+        "resource": resource,
         "requestContext": {"authorizer": {"claims": {"sub": user}}},
         "pathParameters": {"deviceId": device_id} if device_id else None,
         "queryStringParameters": query,
@@ -75,8 +85,8 @@ class FakeTable:
         item = self.items.get((Key["pk"], Key["sk"]))
         return {"Item": dict(item)} if item else {}
 
-    def query(self, KeyConditionExpression, ExclusiveStartKey=None):
-        # Only the shape list-devices uses: pk = X AND begins_with(sk, Y).
+    def query(self, KeyConditionExpression, ExclusiveStartKey=None, ConsistentRead=False):
+        # Only the shape the device Lambdas use: pk = X AND begins_with(sk, Y).
         pk_cond, sk_cond = KeyConditionExpression.get_expression()["values"]
         pk = pk_cond.get_expression()["values"][1]
         prefix = sk_cond.get_expression()["values"][1]
@@ -87,16 +97,19 @@ class FakeTable:
         )
         return {"Items": rows}
 
-    def update_item(self, Key, UpdateExpression, ConditionExpression, ExpressionAttributeValues, ReturnValues):
+    def update_item(self, Key, UpdateExpression, ConditionExpression, ExpressionAttributeValues=None,
+                    ExpressionAttributeNames=None, ReturnValues=None):
         self.update_calls.append(Key)
-        assert ConditionExpression == "attribute_exists(pk)"
+        names, values = ExpressionAttributeNames or {}, ExpressionAttributeValues or {}
+        cves_fakes.assert_all_used({"ConditionExpression": ConditionExpression, "UpdateExpression": UpdateExpression,
+                                    "ExpressionAttributeNames": names, "ExpressionAttributeValues": values})
+        expression = cves_fakes.Expression(names, values)
         key = (Key["pk"], Key["sk"])
-        if key not in self.items:
+        current = self.items.get(key)
+        if not expression.condition(ConditionExpression, current):
             raise conditional_check_failed()
-        item = self.items[key]
-        item["reverseEngineeringStatus"] = ExpressionAttributeValues[":status"]
-        item["updatedAt"] = ExpressionAttributeValues[":now"]
-        return {"Attributes": dict(item)}
+        self.items[key] = expression.update(UpdateExpression, current or {"pk": key[0], "sk": key[1]})
+        return {"Attributes": dict(self.items[key])}
 
 
 class FakeResource:
@@ -237,8 +250,10 @@ class ListDevicesTests(unittest.TestCase):
             + device_rows(DEVICE_B, name="B", re_status="complete")
         )
         self.assertEqual(devices, [
-            {"deviceId": DEVICE_A, "name": "A", "role": "owner", "reverseEngineeringStatus": "in_progress"},
-            {"deviceId": DEVICE_B, "name": "B", "role": "owner", "reverseEngineeringStatus": "complete"},
+            {"deviceId": DEVICE_A, "name": "A", "type": "pump", "role": "owner",
+             "reverseEngineeringStatus": "in_progress"},
+            {"deviceId": DEVICE_B, "name": "B", "type": "pump", "role": "owner",
+             "reverseEngineeringStatus": "complete"},
         ])
 
     def test_missing_attribute_reads_as_not_started(self):
@@ -643,7 +658,8 @@ class WorkspaceListDevicesTests(unittest.TestCase):
 
     def test_personal_listing_unchanged(self):
         self.assertEqual(self.devices(), [
-            {"deviceId": DEVICE_A, "name": "Personal", "role": "owner", "reverseEngineeringStatus": "complete"},
+            {"deviceId": DEVICE_A, "name": "Personal", "type": "pump", "role": "owner",
+             "reverseEngineeringStatus": "complete"},
         ])
         self.assertEqual(self.table.queries, [(f"USER#{USER}", "DEVICE#")])
 
@@ -655,7 +671,7 @@ class WorkspaceListDevicesTests(unittest.TestCase):
         resp = self.list(user=OTHER_USER, workspace_id=WORKSPACE)
         self.assertEqual(resp["statusCode"], 200)
         self.assertEqual(response_body(resp), {"workspaceId": WORKSPACE, "devices": [
-            {"deviceId": DEVICE_B, "name": "Shared", "role": "member",
+            {"deviceId": DEVICE_B, "name": "Shared", "type": "pump", "role": "member",
              "reverseEngineeringStatus": "in_progress", "workspaceId": WORKSPACE},
         ]})
 
@@ -695,7 +711,8 @@ class WorkspaceListDevicesTests(unittest.TestCase):
     def test_queries_only_the_workspace_partition(self):
         self.devices(user=OTHER_USER, workspace_id=WORKSPACE)
         self.assertEqual(self.table.queries, [(f"WORKSPACE#{WORKSPACE}", "DEVICE#")])
-        self.assertEqual(self.resource.batch_requests[0]["ExpressionAttributeNames"], {"#name": "name"})
+        self.assertEqual(self.resource.batch_requests[0]["ExpressionAttributeNames"],
+                         {"#name": "name", "#type": "type"})
 
     def test_name_comes_from_metadata(self):
         self.table.items[(f"WORKSPACE#{WORKSPACE}", f"DEVICE#{DEVICE_B}")]["name"] = "Stale"
@@ -805,6 +822,520 @@ class WorkspaceDeviceFlowTests(unittest.TestCase):
         self.assertEqual(update.handler(event(user=OTHER_USER, body=body, device_id=did), None)["statusCode"], 200)
         self.assertEqual(update.handler(event(user=THIRD_USER, body=body, device_id=did), None)["statusCode"], 403)
         self.assertEqual(listing.handler(event(user=THIRD_USER, query={"workspaceId": WORKSPACE}), None)["statusCode"], 404)
+
+
+# --- Device details (manufacturer, model, ... description) ---------------------------
+
+DETAILS = {
+    "manufacturer": "Acme Medical",
+    "modelNumber": "IP-200",
+    "chipset": "nRF52840",
+    "serialNumber": "SN-0001",
+    "hardwareRevision": "rev B",
+    "firmwareVersion": "2.4.1",
+    "description": "Bench unit.\nUsed for BLE pairing tests.",
+}
+INTERNAL_FIELDS = {"pk", "sk", "entity", "dataPath", "pendingNameSync"}
+
+
+def metadata_of(table, device_id):
+    return table.items[(f"DEVICE#{device_id}", "METADATA")]
+
+
+class DeviceFieldsTests(unittest.TestCase):
+    def test_optional_values_are_trimmed(self):
+        self.assertEqual(device_fields.clean_optional("chipset", "  nRF52840 \t"), "nRF52840")
+
+    def test_empty_optional_values_are_absent(self):
+        for raw in (None, "", "   ", "\n\t"):
+            with self.subTest(raw=raw):
+                self.assertIsNone(device_fields.clean_optional("manufacturer", raw))
+
+    def test_optional_values_must_be_strings(self):
+        for raw in (1, 0, False, [], ["a"], {"a": 1}):
+            with self.subTest(raw=raw):
+                with self.assertRaises(device_fields.FieldError):
+                    device_fields.clean_optional("manufacturer", raw)
+
+    def test_length_limits(self):
+        for field, limit in {**device_fields.REQUIRED_FIELDS, **device_fields.OPTIONAL_FIELDS}.items():
+            with self.subTest(field=field):
+                clean = (device_fields.clean_required if field in device_fields.REQUIRED_FIELDS
+                         else device_fields.clean_optional)
+                self.assertEqual(clean(field, "x" * limit), "x" * limit)
+                with self.assertRaises(device_fields.FieldError):
+                    clean(field, "x" * (limit + 1))
+
+    def test_control_characters_rejected(self):
+        for field in ("name", "type", "serialNumber", "firmwareVersion"):
+            for value in ("a\nb", "a\tb", "a\x00b", "a\x7fb", "a\x85b"):
+                with self.subTest(field=field, value=value):
+                    clean = (device_fields.clean_required if field in device_fields.REQUIRED_FIELDS
+                             else device_fields.clean_optional)
+                    with self.assertRaises(device_fields.FieldError):
+                        clean(field, value)
+
+    def test_description_allows_line_breaks_and_tabs_only(self):
+        self.assertEqual(device_fields.clean_optional("description", "a\r\nb\tc"), "a\r\nb\tc")
+        for value in ("a\x00b", "a\x1bb", "a\x7fb"):
+            with self.subTest(value=value):
+                with self.assertRaises(device_fields.FieldError):
+                    device_fields.clean_optional("description", value)
+
+    def test_unicode_text_is_allowed(self):
+        self.assertEqual(device_fields.clean_optional("manufacturer", "Dräger · 医疗"), "Dräger · 医疗")
+
+
+class CreateDeviceDetailsTests(unittest.TestCase):
+    def setUp(self):
+        self.module = load_lambda("create-device")
+        self.table = FakeTable(workspace_rows())
+        self.module.dynamodb = FakeResource(self.table)
+        self.client = cves_fakes.FakeClient(self.table)
+        self.module.client = self.client
+
+    def create(self, body, user=USER):
+        return self.module.handler(event(user=user, body=body), None)
+
+    def test_name_and_type_alone_still_create_a_device(self):
+        resp = self.create({"name": "Pump", "type": "infusion"})
+        self.assertEqual(resp["statusCode"], 201)
+        body = response_body(resp)
+        metadata = metadata_of(self.table, body["deviceId"])
+        for field in device_fields.OPTIONAL_FIELDS:
+            self.assertNotIn(field, metadata)
+            self.assertNotIn(field, body)
+
+    def test_details_are_stored_on_metadata_only(self):
+        resp = self.create({"name": "Pump", "type": "infusion", **{k: f"  {v}  " for k, v in DETAILS.items()}})
+        self.assertEqual(resp["statusCode"], 201)
+        body = response_body(resp)
+        did = body["deviceId"]
+        metadata = metadata_of(self.table, did)
+        self.assertEqual({k: metadata[k] for k in DETAILS}, DETAILS)
+        self.assertEqual({k: body[k] for k in DETAILS}, DETAILS)
+        for key in ((f"USER#{USER}", f"DEVICE#{did}"), (f"DEVICE#{did}", f"USER#{USER}")):
+            self.assertFalse(set(self.table.items[key]) & set(DETAILS))
+
+    def test_workspace_device_with_details(self):
+        resp = self.create({"name": "Pump", "type": "infusion", "workspaceId": WORKSPACE, "chipset": "ESP32"})
+        self.assertEqual(resp["statusCode"], 201)
+        did = response_body(resp)["deviceId"]
+        self.assertEqual(metadata_of(self.table, did)["chipset"], "ESP32")
+        self.assertNotIn("chipset", self.table.items[(f"WORKSPACE#{WORKSPACE}", f"DEVICE#{did}")])
+
+    def test_empty_details_are_omitted(self):
+        resp = self.create({"name": "Pump", "type": "infusion", "manufacturer": "", "modelNumber": "   ",
+                            "description": None, "chipset": "ESP32"})
+        self.assertEqual(resp["statusCode"], 201)
+        body = response_body(resp)
+        metadata = metadata_of(self.table, body["deviceId"])
+        self.assertEqual({k for k in DETAILS if k in metadata}, {"chipset"})
+        self.assertEqual({k for k in DETAILS if k in body}, {"chipset"})
+
+    def test_invalid_details_rejected_and_nothing_written(self):
+        before = dict(self.table.items)
+        for field, value in (("manufacturer", 7), ("serialNumber", ["x"]), ("chipset", "x" * 101),
+                             ("firmwareVersion", "1.0\n2"), ("description", "x" * 2001), ("modelNumber", "a\x00")):
+            with self.subTest(field=field):
+                resp = self.create({"name": "Pump", "type": "infusion", field: value})
+                self.assertEqual(resp["statusCode"], 400)
+                self.assertIn(field, response_body(resp)["error"])
+        self.assertEqual(self.table.items, before)
+        self.assertEqual(self.client.calls, [])
+
+    def test_required_field_limits(self):
+        self.assertEqual(self.create({"name": "x" * 256, "type": "infusion"})["statusCode"], 400)
+        self.assertEqual(self.create({"name": "Pump", "type": "x" * 101})["statusCode"], 400)
+        self.assertEqual(self.create({"name": "Pu\x00mp", "type": "infusion"})["statusCode"], 400)
+
+    def test_missing_name_or_type_reported_before_details(self):
+        resp = self.create({"type": "infusion", "chipset": 5})
+        self.assertEqual(response_body(resp)["error"], "name is required")
+
+
+class GetDeviceTests(unittest.TestCase):
+    def setUp(self):
+        self.module = load_lambda("list-devices")
+        self.table = FakeTable(
+            workspace_rows()
+            + device_rows(DEVICE_A, name="Pump", re_status="in_progress")
+            + workspace_device_rows(DEVICE_B, name="Shared")
+        )
+        metadata_of(self.table, DEVICE_A).update(DETAILS, dataPath="s3://data-lake/devices/a/",
+                                                 createdAt="2026-10-01T00:00:00+00:00",
+                                                 updatedAt="2026-10-02T00:00:00+00:00")
+        self.module.dynamodb = FakeResource(self.table)
+
+    def get(self, device_id, user=USER):
+        return self.module.handler(event(user=user, device_id=device_id, resource="/devices/{deviceId}"), None)
+
+    def test_owner_reads_every_detail(self):
+        resp = self.get(DEVICE_A)
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertEqual(response_body(resp), {
+            "deviceId": DEVICE_A, "name": "Pump", "type": "pump", "role": "owner", "status": "active",
+            "reverseEngineeringStatus": "in_progress",
+            "createdAt": "2026-10-01T00:00:00+00:00", "updatedAt": "2026-10-02T00:00:00+00:00",
+            **DETAILS,
+        })
+
+    def test_existing_device_without_details(self):
+        body = response_body(self.get(DEVICE_B, user=OTHER_USER))
+        self.assertEqual(body["role"], "member")
+        self.assertEqual((body["workspaceId"], body["createdBy"]), (WORKSPACE, USER))
+        self.assertEqual(body["reverseEngineeringStatus"], "not_started")
+        self.assertFalse(set(body) & set(DETAILS))
+        self.assertFalse(set(body) & INTERNAL_FIELDS)
+
+    def test_internal_fields_never_returned(self):
+        metadata_of(self.table, DEVICE_A)["pendingNameSync"] = "Pump"
+        self.assertFalse(set(response_body(self.get(DEVICE_A))) & INTERNAL_FIELDS)
+
+    def test_outsiders_cannot_read(self):
+        self.assertEqual(self.get(DEVICE_A, user=OTHER_USER)["statusCode"], 403)
+        self.assertEqual(self.get(DEVICE_B, user=THIRD_USER)["statusCode"], 403)
+
+    def test_stale_owner_row_does_not_bypass_membership(self):
+        add_rows(self.table, device_rows(DEVICE_B, owner=THIRD_USER)[1:])
+        self.assertEqual(self.get(DEVICE_B, user=THIRD_USER)["statusCode"], 403)
+
+    def test_unknown_and_invalid_ids(self):
+        self.assertEqual(self.get(DEVICE_C)["statusCode"], 404)
+        for bad in ("nope", "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA", f"{DEVICE_A}#x"):
+            with self.subTest(bad=bad):
+                self.assertEqual(self.get(bad)["statusCode"], 400)
+
+    def test_list_returns_type_and_details_from_metadata(self):
+        self.table.items[(f"USER#{USER}", f"DEVICE#{DEVICE_A}")]["name"] = "Stale copy"
+        [device] = response_body(self.module.handler(event(), None))["devices"]
+        self.assertEqual(device["name"], "Pump")
+        self.assertEqual(device["type"], "pump")
+        self.assertEqual({k: device[k] for k in DETAILS}, DETAILS)
+        self.assertFalse(set(device) & INTERNAL_FIELDS)
+
+    def test_list_falls_back_to_the_link_name_without_metadata(self):
+        del self.table.items[(f"DEVICE#{DEVICE_A}", "METADATA")]
+        [device] = response_body(self.module.handler(event(), None))["devices"]
+        self.assertEqual(device["name"], "Pump")
+
+
+class EditDeviceTests(unittest.TestCase):
+    """PATCH /devices/{deviceId} with the name, type and details."""
+
+    def setUp(self):
+        self.module = load_lambda("update-device")
+        self.table = FakeTable(workspace_rows() + device_rows(DEVICE_A, name="Pump", re_status="complete")
+                               + workspace_device_rows(DEVICE_B, name="Shared"))
+        metadata_of(self.table, DEVICE_A).update(DETAILS)
+        self.module.dynamodb = FakeResource(self.table)
+        self.client = cves_fakes.FakeClient(self.table)
+        self.module.client = self.client
+
+    def patch(self, body, user=USER, device_id=DEVICE_A):
+        return self.module.handler(event(user=user, body=body, device_id=device_id), None)
+
+    def test_edit_details_without_status(self):
+        resp = self.patch({"manufacturer": "  Globex ", "firmwareVersion": "3.0.0"})
+        self.assertEqual(resp["statusCode"], 200)
+        metadata = metadata_of(self.table, DEVICE_A)
+        self.assertEqual((metadata["manufacturer"], metadata["firmwareVersion"]), ("Globex", "3.0.0"))
+        self.assertEqual(metadata["chipset"], DETAILS["chipset"])
+        self.assertEqual(metadata["reverseEngineeringStatus"], "complete")
+        body = response_body(resp)
+        self.assertEqual(body["manufacturer"], "Globex")
+        self.assertEqual(body["reverseEngineeringStatus"], "complete")
+        self.assertEqual(body["type"], "pump")
+        # Details live on METADATA only: no copies to update.
+        self.assertEqual(self.table.update_calls, [{"pk": f"DEVICE#{DEVICE_A}", "sk": "METADATA"}])
+        self.assertEqual(self.client.calls, [])
+
+    def test_edit_type(self):
+        self.assertEqual(self.patch({"type": "Infusion pump"})["statusCode"], 200)
+        self.assertEqual(metadata_of(self.table, DEVICE_A)["type"], "Infusion pump")
+        self.assertEqual(self.client.calls, [])
+
+    def test_clear_details_with_null_or_empty(self):
+        resp = self.patch({"manufacturer": None, "chipset": "", "description": "   "})
+        self.assertEqual(resp["statusCode"], 200)
+        metadata = metadata_of(self.table, DEVICE_A)
+        for field in ("manufacturer", "chipset", "description"):
+            self.assertNotIn(field, metadata)
+            self.assertNotIn(field, response_body(resp))
+        self.assertEqual(metadata["serialNumber"], DETAILS["serialNumber"])
+
+    def test_clearing_a_detail_the_device_never_had(self):
+        add_rows(self.table, device_rows(DEVICE_C))
+        self.assertEqual(self.patch({"chipset": None}, device_id=DEVICE_C)["statusCode"], 200)
+        self.assertNotIn("chipset", metadata_of(self.table, DEVICE_C))
+
+    def test_existing_device_without_details_or_status(self):
+        add_rows(self.table, device_rows(DEVICE_C))
+        resp = self.patch({"description": "Added later"}, device_id=DEVICE_C)
+        self.assertEqual(resp["statusCode"], 200)
+        body = response_body(resp)
+        self.assertEqual(body["description"], "Added later")
+        self.assertEqual(body["reverseEngineeringStatus"], "not_started")
+        self.assertNotIn("reverseEngineeringStatus", metadata_of(self.table, DEVICE_C))
+
+    def test_name_and_type_cannot_be_cleared(self):
+        for body in ({"name": ""}, {"name": None}, {"type": "  "}, {"type": None}):
+            with self.subTest(body=body):
+                resp = self.patch(body)
+                self.assertEqual(resp["statusCode"], 400)
+                self.assertIn("is required", response_body(resp)["error"])
+        self.assertEqual(self.table.update_calls, [])
+
+    def test_invalid_values_rejected_and_nothing_written(self):
+        before = {k: dict(v) for k, v in self.table.items.items()}
+        for body in ({"chipset": 5}, {"serialNumber": "x" * 101}, {"name": "a\nb"}, {"description": "\x00"},
+                     {"manufacturer": ["Acme"]}, {"chipset": "ok", "reverseEngineeringStatus": "done"}):
+            with self.subTest(body=body):
+                self.assertEqual(self.patch(body)["statusCode"], 400)
+        self.assertEqual(self.table.items, before)
+
+    def test_protected_fields_cannot_be_changed(self):
+        for field, value in (("workspaceId", WORKSPACE), ("createdBy", OTHER_USER), ("deviceId", DEVICE_B),
+                             ("pk", "DEVICE#x"), ("sk", "x"), ("entity", "x"), ("status", "retired"),
+                             ("dataPath", "s3://elsewhere/"), ("createdAt", "x"), ("updatedAt", "x"),
+                             ("role", "owner"), ("pendingNameSync", "x")):
+            with self.subTest(field=field):
+                resp = self.patch({"manufacturer": "Globex", field: value})
+                self.assertEqual(resp["statusCode"], 400)
+                self.assertIn(f"cannot be changed: {field}", response_body(resp)["error"])
+        self.assertEqual(self.table.update_calls, [])
+        self.assertNotIn("workspaceId", metadata_of(self.table, DEVICE_A))
+
+    def test_unknown_fields_rejected(self):
+        resp = self.patch({"manufacturer": "Globex", "colour": "red"})
+        self.assertEqual(resp["statusCode"], 400)
+        self.assertIn("Unsupported field(s): colour", response_body(resp)["error"])
+
+    def test_empty_body_rejected(self):
+        resp = self.patch({})
+        self.assertEqual(resp["statusCode"], 400)
+        self.assertEqual(response_body(resp)["error"], "No fields to update")
+
+    def test_status_and_details_together(self):
+        resp = self.patch({"reverseEngineeringStatus": "in_progress", "chipset": "ESP32"})
+        self.assertEqual(resp["statusCode"], 200)
+        metadata = metadata_of(self.table, DEVICE_A)
+        self.assertEqual((metadata["reverseEngineeringStatus"], metadata["chipset"]), ("in_progress", "ESP32"))
+
+    def test_unauthorized_edits_are_refused(self):
+        self.assertEqual(self.patch({"manufacturer": "X"}, user=OTHER_USER)["statusCode"], 403)
+        self.assertEqual(self.patch({"name": "X"}, user=THIRD_USER, device_id=DEVICE_B)["statusCode"], 403)
+        self.table.items[(f"USER#{USER}", f"DEVICE#{DEVICE_A}")]["role"] = "viewer"
+        self.assertEqual(self.patch({"manufacturer": "X"})["statusCode"], 403)
+        self.assertEqual(self.table.update_calls, [])
+        self.assertEqual(self.client.calls, [])
+
+    def test_workspace_member_edits_workspace_device(self):
+        resp = self.patch({"type": "Monitor", "chipset": "ESP32"}, user=OTHER_USER, device_id=DEVICE_B)
+        self.assertEqual(resp["statusCode"], 200)
+        metadata = metadata_of(self.table, DEVICE_B)
+        self.assertEqual((metadata["type"], metadata["chipset"]), ("Monitor", "ESP32"))
+        self.assertEqual((metadata["workspaceId"], metadata["createdBy"]), (WORKSPACE, USER))
+        self.assertEqual(response_body(resp)["workspaceId"], WORKSPACE)
+
+
+class RenameDeviceTests(unittest.TestCase):
+    """A rename rewrites every row that repeats the device's name."""
+
+    ARTIFACT_1 = "0192d000-0000-7000-8000-000000000001"
+    ARTIFACT_2 = "0192d000-0000-7000-8000-000000000002"
+    CVE_1 = "0192c000-0000-7000-8000-000000000001"
+
+    def setUp(self):
+        self.module = load_lambda("update-device")
+        self.module.time = mock.Mock()  # no real back-off sleeps
+        self.table = FakeTable(workspace_rows() + device_rows(DEVICE_A, name="Pump")
+                               + workspace_device_rows(DEVICE_B, name="Shared"))
+        for device_id, name in ((DEVICE_A, "Pump"), (DEVICE_B, "Shared")):
+            self.link_artifact(device_id, name, self.ARTIFACT_1, "firmware")
+            self.link_artifact(device_id, name, self.ARTIFACT_2, "pcap")
+            self.link_cve(device_id, name, self.CVE_1)
+        self.module.dynamodb = FakeResource(self.table)
+        self.client = cves_fakes.FakeClient(self.table)
+        self.module.client = self.client
+
+    def link_artifact(self, device_id, device_name, artifact_id, artifact_type):
+        # As artifacts-presign writes them.
+        add_rows(self.table, [
+            {"pk": f"DEVICE#{device_id}", "sk": f"ARTIFACT#{artifact_type}#{artifact_id}",
+             "entity": "device-artifact", "name": f"{artifact_type}.bin", "type": artifact_type},
+            {"pk": f"ARTIFACT#{artifact_id}", "sk": f"DEVICE#{device_id}", "entity": "artifact-device",
+             "name": device_name},
+        ])
+
+    def link_cve(self, device_id, device_name, cve_id):
+        # As cves-api writes them.
+        add_rows(self.table, [
+            {"pk": f"DEVICE#{device_id}", "sk": f"CVE#{cve_id}", "entity": "device-cve", "cveId": "CVE-2026-0001"},
+            {"pk": f"CVE#{cve_id}", "sk": f"DEVICE#{device_id}", "entity": "cve-device", "deviceName": device_name},
+        ])
+
+    def patch(self, body, user=USER, device_id=DEVICE_A):
+        return self.module.handler(event(user=user, body=body, device_id=device_id), None)
+
+    def name_copies(self, device_id):
+        """Every copy of the device's name, by row key."""
+        return {
+            key: item.get("deviceName", item.get("name"))
+            for key, item in self.table.items.items()
+            if key[1] == f"DEVICE#{device_id}"
+        }
+
+    def test_rename_personal_device_updates_every_copy(self):
+        before = {k: dict(v) for k, v in self.table.items.items()}
+        resp = self.patch({"name": "  Infusion pump A  "})
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertEqual(response_body(resp)["name"], "Infusion pump A")
+        metadata = metadata_of(self.table, DEVICE_A)
+        self.assertEqual(metadata["name"], "Infusion pump A")
+        self.assertNotIn("pendingNameSync", metadata)
+        self.assertEqual(self.name_copies(DEVICE_A), {
+            (f"USER#{USER}", f"DEVICE#{DEVICE_A}"): "Infusion pump A",
+            (f"ARTIFACT#{self.ARTIFACT_1}", f"DEVICE#{DEVICE_A}"): "Infusion pump A",
+            (f"ARTIFACT#{self.ARTIFACT_2}", f"DEVICE#{DEVICE_A}"): "Infusion pump A",
+            (f"CVE#{self.CVE_1}", f"DEVICE#{DEVICE_A}"): "Infusion pump A",
+        })
+        # Nothing else changed: the associations, the artifacts' own names,
+        # the other device and every other attribute of the copies.
+        changed = {k for k in self.table.items if self.table.items[k] != before.get(k)}
+        self.assertEqual(changed, set(self.name_copies(DEVICE_A)) | {(f"DEVICE#{DEVICE_A}", "METADATA")})
+        self.assertEqual(set(self.table.items), set(before))
+        self.assertEqual(self.name_copies(DEVICE_B)[(f"ARTIFACT#{self.ARTIFACT_1}", f"DEVICE#{DEVICE_B}")], "Shared")
+
+    def test_rename_workspace_device_updates_the_workspace_row(self):
+        resp = self.patch({"name": "Shared monitor"}, user=OTHER_USER, device_id=DEVICE_B)
+        self.assertEqual(resp["statusCode"], 200)
+        copies = self.name_copies(DEVICE_B)
+        self.assertEqual(copies[(f"WORKSPACE#{WORKSPACE}", f"DEVICE#{DEVICE_B}")], "Shared monitor")
+        self.assertEqual(set(copies.values()), {"Shared monitor"})
+        self.assertEqual(len(copies), 4)
+
+    def test_each_transaction_checks_the_name_first(self):
+        self.patch({"name": "Renamed"})
+        [items] = self.client.calls
+        self.assertEqual(cves_fakes._deserialize(items[0]["ConditionCheck"]["Key"]),
+                         {"pk": f"DEVICE#{DEVICE_A}", "sk": "METADATA"})
+        self.assertEqual(items[0]["ConditionCheck"]["ConditionExpression"], "#name = :name")
+        self.assertTrue(all(i["Update"]["ConditionExpression"] == "attribute_exists(pk)" for i in items[1:]))
+
+    def test_many_copies_are_written_in_chunks(self):
+        for n in range(250):
+            self.link_artifact(DEVICE_A, "Pump", f"0192d000-0000-7000-8000-{n + 1000:012x}", "log")
+        self.assertEqual(self.patch({"name": "Renamed"})["statusCode"], 200)
+        # 254 copies: 99 + 99 + 56, each with the METADATA check.
+        self.assertEqual([len(items) for items in self.client.calls], [100, 100, 57])
+        self.assertEqual(set(self.name_copies(DEVICE_A).values()), {"Renamed"})
+
+    def test_missing_counterpart_rows_are_skipped_not_created(self):
+        del self.table.items[(f"ARTIFACT#{self.ARTIFACT_2}", f"DEVICE#{DEVICE_A}")]
+        self.assertEqual(self.patch({"name": "Renamed"})["statusCode"], 200)
+        self.assertNotIn((f"ARTIFACT#{self.ARTIFACT_2}", f"DEVICE#{DEVICE_A}"), self.table.items)
+        self.assertEqual(set(self.name_copies(DEVICE_A).values()), {"Renamed"})
+        self.assertNotIn("pendingNameSync", metadata_of(self.table, DEVICE_A))
+
+    def test_a_later_rename_wins(self):
+        # Another request renames the device after this one updated METADATA
+        # but before its copies are written.
+        def concurrent_rename(table):
+            table.items[(f"DEVICE#{DEVICE_A}", "METADATA")].update(name="Second", pendingNameSync="Second")
+        self.client.before_transact = concurrent_rename
+        resp = self.patch({"name": "First"})
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertEqual(response_body(resp)["name"], "Second")
+        # This request wrote no copy; the copies are the later request's to write.
+        self.assertNotIn("First", self.name_copies(DEVICE_A).values())
+        self.assertEqual(metadata_of(self.table, DEVICE_A)["pendingNameSync"], "Second")
+
+    def test_failed_sync_is_finished_by_the_next_update(self):
+        self.client.fail_code = "InternalServerError"
+        resp = self.patch({"name": "Renamed"})
+        self.assertEqual(resp["statusCode"], 500)
+        self.assertIn("Save again", response_body(resp)["error"])
+        metadata = metadata_of(self.table, DEVICE_A)
+        self.assertEqual((metadata["name"], metadata["pendingNameSync"]), ("Renamed", "Renamed"))
+        self.assertIn("Pump", self.name_copies(DEVICE_A).values())
+
+        # Any later update, even of the status alone, completes it.
+        self.client.fail_code = None
+        self.assertEqual(self.patch({"reverseEngineeringStatus": "in_progress"})["statusCode"], 200)
+        self.assertEqual(set(self.name_copies(DEVICE_A).values()), {"Renamed"})
+        self.assertNotIn("pendingNameSync", metadata_of(self.table, DEVICE_A))
+
+    def test_status_only_update_writes_no_copies(self):
+        self.assertEqual(self.patch({"reverseEngineeringStatus": "complete"})["statusCode"], 200)
+        self.assertEqual(self.client.calls, [])
+        self.assertEqual(set(self.name_copies(DEVICE_A).values()), {"Pump"})
+
+    def test_unauthorized_rename_changes_nothing(self):
+        before = {k: dict(v) for k, v in self.table.items.items()}
+        self.assertEqual(self.patch({"name": "Hijacked"}, user=OTHER_USER)["statusCode"], 403)
+        self.assertEqual(self.patch({"name": "Hijacked"}, user=THIRD_USER, device_id=DEVICE_B)["statusCode"], 403)
+        self.assertEqual(self.table.items, before)
+
+
+class RenameWithArtifactsTests(artifact_world.WorldTestCase):
+    """Renames through update-device on the artifact tests' world, with
+    artifacts uploaded through the real artifacts-presign."""
+
+    def update_device(self):
+        module = load_lambda("update-device")
+        table = FakeTable([])
+        table.items = self.table.items  # the same rows as every other Lambda here
+        module.dynamodb = FakeResource(table)
+        module.client = cves_fakes.FakeClient(table)
+        return module
+
+    def rename(self, user, device_id, name):
+        resp = self.update_device().handler(event(user=user, body={"name": name}, device_id=device_id), None)
+        self.assertEqual(resp["statusCode"], 200, resp["body"])
+
+    def test_rename_keeps_artifact_associations(self):
+        firmware = self.upload(artifact_world.USER, [artifact_world.DP])
+        pcap = self.upload(artifact_world.USER, [artifact_world.DP], artifact_type="pcap")
+        self.rename(artifact_world.USER, artifact_world.DP, "Renamed pump")
+
+        # The device's artifacts are still listed for it...
+        listing = self.lam("artifacts-list").handler(artifact_world.event(
+            artifact_world.USER, "/devices/{deviceId}/artifacts", path={"deviceId": artifact_world.DP}), None)
+        self.assertEqual(listing["statusCode"], 200, listing["body"])
+        self.assertEqual({a["artifactId"] for a in response_body(listing)["artifacts"]}, {firmware, pcap})
+        # ...and each artifact shows the device under its new name.
+        for artifact_id in (firmware, pcap):
+            resp = self.lam("artifacts-get").handler(artifact_world.event(
+                artifact_world.USER, "/artifacts/{artifactId}", path={"artifactId": artifact_id}), None)
+            self.assertEqual(resp["statusCode"], 200, resp["body"])
+            self.assertEqual(response_body(resp)["artifact"]["devices"],
+                             [{"deviceId": artifact_world.DP, "name": "Renamed pump"}])
+            self.assertEqual(self.table.items[(f"ARTIFACT#{artifact_id}", "METADATA")]["deviceIds"],
+                             {artifact_world.DP})
+        self.assertIn((f"DEVICE#{artifact_world.DP}", "FWVER#1.0"), self.table.items)
+
+    def test_upload_after_rename_copies_the_new_name(self):
+        self.rename(artifact_world.MEMBER, artifact_world.D1, "Pump one")
+        aid = self.upload(artifact_world.MEMBER, [artifact_world.D1], artifact_type="log")
+        self.assertEqual(self.table.items[(f"ARTIFACT#{aid}", f"DEVICE#{artifact_world.D1}")]["name"], "Pump one")
+
+    def test_upload_racing_a_rename_is_refused(self):
+        presign = self.lam("artifacts-presign")
+        resolve = presign._resolve_devices
+
+        def resolve_then_rename(*args):
+            result = resolve(*args)
+            self.table.items[(f"DEVICE#{artifact_world.DP}", "METADATA")]["name"] = "Renamed meanwhile"
+            return result
+
+        with mock.patch.object(presign, "_resolve_devices", resolve_then_rename):
+            resp = self.presign(artifact_world.USER, [self.file(artifact_type="log")], deviceIds=[artifact_world.DP])
+        [result] = response_body(resp)["results"]
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], 409)
+        self.assertFalse([k for k in self.table.items
+                          if k[0].startswith("ARTIFACT#") and k[1] == f"DEVICE#{artifact_world.DP}"])
 
 
 if __name__ == "__main__":

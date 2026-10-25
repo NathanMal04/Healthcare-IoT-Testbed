@@ -129,6 +129,9 @@ class FakeResource:
 
 CONDITIONS = {
     "attribute_not_exists(pk)": lambda item, v, n: item is None,
+    # artifacts-presign: the device's name is still the one copied onto the links.
+    "#name = :name": lambda item, v, n: item is not None and item.get(n["#name"]) == v[":name"],
+    "attribute_not_exists(#name)": lambda item, v, n: item is not None and n["#name"] not in item,
     "#role IN (:role0, :role1)":
         lambda item, v, n: item is not None and item.get(n["#role"]) in (v[":role0"], v[":role1"]),
 }
