@@ -2,8 +2,15 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Cpu, Download, Eye, FolderArchive, Link2, Microchip, ShieldAlert, Unlink, Upload } from "lucide-react";
-import { getDevices, updateDeviceReverseEngineeringStatus, type Device, type ReverseEngineeringStatus } from "@/lib/devices";
+import { Cpu, Download, Eye, FolderArchive, Link2, Microchip, Pencil, ShieldAlert, Unlink, Upload } from "lucide-react";
+import {
+  DEVICE_DETAIL_FIELDS,
+  getDevice,
+  updateDeviceReverseEngineeringStatus,
+  type Device,
+  type ReverseEngineeringStatus,
+} from "@/lib/devices";
+import { ApiError } from "@/lib/api";
 import {
   ARTIFACT_TYPE_LABELS,
   formatBytes,
@@ -27,6 +34,7 @@ import { cveHref, deviceHref } from "@/lib/routes";
 import { useScopeLock, useWorkspace } from "@/context/WorkspaceContext";
 import { isWorkspaceUnavailable, scopeKey, scopeWorkspaceId, type Scope } from "@/lib/workspaces";
 import ReverseEngineeringStatusSelect from "@/app/components/ReverseEngineeringStatusSelect";
+import EditDeviceDialog from "@/app/components/EditDeviceDialog";
 import FirmwareUploadDialog from "@/app/components/firmware/FirmwareUploadDialog";
 import ArtifactUploader from "@/app/components/ArtifactUploader";
 import ArtifactTypeChips from "@/app/components/ArtifactTypeChips";
@@ -111,6 +119,7 @@ function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: Ta
   const [firmware, setFirmware] = useState<Artifact[] | null>(null);
   const [firmwareError, setFirmwareError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>(initialTab);
+  const [editing, setEditing] = useState(false);
 
   const isMountedRef = useRef(true);
   useEffect(() => {
@@ -120,22 +129,32 @@ function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: Ta
     };
   }, []);
 
-  // The device is looked up in the current scope's own device list: a device
-  // of another scope (or one the caller can't use) is simply not there.
+  // The device is shown only in its own scope: one of another scope (or one
+  // the caller can't use) is treated as not found here.
   useEffect(() => {
     let active = true;
-    Promise.allSettled([getDevices(workspaceId), listCves(workspaceId)]).then(([deviceResult, cveResult]) => {
+    Promise.allSettled([getDevice(deviceId), listCves(workspaceId)]).then(([deviceResult, cveResult]) => {
       if (!active) return;
       if (deviceResult.status === "fulfilled") {
-        const found = deviceResult.value.find((d) => d.deviceId === deviceId) ?? null;
+        const found = deviceResult.value.workspaceId === workspaceId ? deviceResult.value : null;
         setDevice(found);
         setNotFound(!found);
+      } else if (
+        deviceResult.reason instanceof ApiError &&
+        [400, 403, 404].includes(deviceResult.reason.status)
+      ) {
+        setNotFound(true);
       } else {
         setLoadError(deviceResult.reason instanceof Error ? deviceResult.reason.message : "Failed to load the device");
-        if (workspaceId && isWorkspaceUnavailable(deviceResult.reason)) reportWorkspaceUnavailable();
       }
-      if (cveResult.status === "fulfilled") setCves(cveResult.value);
-      else setCveError(cveErrorMessage(cveResult.reason, "Couldn't load vulnerabilities"));
+      if (cveResult.status === "fulfilled") {
+        setCves(cveResult.value);
+      } else {
+        setCveError(cveErrorMessage(cveResult.reason, "Couldn't load vulnerabilities"));
+        // The CVE list is the workspace-scoped request here, so it is what
+        // shows the workspace has gone.
+        if (workspaceId && isWorkspaceUnavailable(cveResult.reason)) reportWorkspaceUnavailable();
+      }
     });
     return () => {
       active = false;
@@ -213,8 +232,13 @@ function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: Ta
         title={device.name}
         back={back}
         scope={scope}
-        description="Device"
+        description={device.type ? `Device · ${device.type}` : "Device"}
         meta={<span className="text-xs text-slate-500 capitalize">Your access: {device.role}</span>}
+        actions={
+          <Button variant="secondary" size="sm" icon={Pencil} onClick={() => setEditing(true)}>
+            Edit Device
+          </Button>
+        }
       />
 
       <Tabs
@@ -262,6 +286,8 @@ function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: Ta
           />
         )}
       </TabPanel>
+
+      {editing && <EditDeviceDialog device={device} onClose={() => setEditing(false)} onSaved={setDevice} />}
     </div>
   );
 }
@@ -315,8 +341,14 @@ function OverviewTab({
     }
   }
 
+  // Optional details are shown only when the device has them.
   const facts: [string, React.ReactNode][] = [
     ["Name", device.name],
+    ["Type", device.type || <span key="type" className="text-slate-300">—</span>],
+    ...DEVICE_DETAIL_FIELDS.filter(({ key }) => device[key]).map(({ key, label }): [string, React.ReactNode] => [
+      label,
+      key === "description" ? <span key={key} className="whitespace-pre-wrap">{device[key]}</span> : device[key],
+    ]),
     ["Scope", <ScopeLabel key="scope" scope={scope} />],
     ["Your access", <span key="role" className="capitalize">{device.role}</span>],
   ];
