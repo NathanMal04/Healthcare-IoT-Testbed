@@ -8,13 +8,14 @@ Categories and recommends_for control dropdown grouping and file-based ranking.
 
 from __future__ import annotations
 
+import glob
 import os
 import shlex
+import shutil
+import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Optional
-
-# Base path used by Ghidra installs on this testbed image.
-GHIDRA_HOME = "/opt/ghidra_12.1.4_PUBLIC"
 
 # Display order for category sections in the tool dropdown / menu.
 # id -> label shown in the UI
@@ -28,6 +29,77 @@ CATEGORIES: list[tuple[str, str]] = [
 KIND_ELF = "elf"
 KIND_PCAP = "pcap"
 KIND_SCRIPT = "script"
+
+
+def _find_ghidra() -> str:
+    """Dynamically locate Ghidra based on NixOS or manual installations."""
+    # 1. Explicit environment variable override
+    env_home = os.environ.get("GHIDRA_HOME")
+    if env_home and os.path.exists(env_home):
+        return env_home
+
+    def check_bin(bin_path: Optional[str]) -> Optional[str]:
+        if not bin_path or not os.path.exists(bin_path):
+            return None
+        # Resolve symlinks (crucial for /run/current-system -> /nix/store)
+        real_path = os.path.realpath(bin_path)
+        p = Path(real_path)
+
+        # Nix layout: /nix/store/...-ghidra.../bin/ghidra
+        # The actual binaries live in /nix/store/...-ghidra.../lib/ghidra/
+        if "bin" in p.parts:
+            idx = p.parts.index("bin")
+            base = Path(*p.parts[:idx])
+            for sub in ["lib/ghidra", "lib/ghidra-bin", "ghidra", ""]:
+                candidate = base / sub
+                if (candidate / "ghidraRun").exists() or (candidate / "support" / "analyzeHeadless").exists():
+                    return str(candidate)
+
+        # Manual layout: /opt/ghidra.../support/analyzeHeadless
+        if p.name in ["ghidraRun", "analyzeHeadless"]:
+            return str(p.parent if p.parent.name != "support" else p.parent.parent)
+
+        return None
+
+    # 2. Check PATH
+    for cmd in ["ghidra", "ghidraRun", "analyzeHeadless"]:
+        found = check_bin(shutil.which(cmd))
+        if found:
+            return found
+
+    # 3. Check standard NixOS paths explicitly (in case PATH is stripped by the GUI)
+    for base in ["/run/current-system/sw/bin", os.path.expanduser("~/.nix-profile/bin")]:
+        for cmd in ["ghidra", "ghidraRun", "analyzeHeadless"]:
+            found = check_bin(os.path.join(base, cmd))
+            if found:
+                return found
+
+    # 4. Ask Nix directly if it's installed but not linked in PATH
+    if shutil.which("nix-build"):
+        try:
+            out = subprocess.check_output(
+                ["nix-build", "<nixpkgs>", "-A", "ghidra-bin", "--no-out-link"],
+                stderr=subprocess.DEVNULL,
+                text=True
+            ).strip()
+            if os.path.exists(out):
+                candidate = Path(out) / "lib" / "ghidra"
+                if (candidate / "ghidraRun").exists():
+                    return str(candidate)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+
+    # 5. Check for manual installations in /opt dynamically
+    for opt in glob.glob("/opt/ghidra*"):
+        if os.path.exists(os.path.join(opt, "ghidraRun")):
+            return opt
+
+    # 6. Last resort
+    return "/opt/ghidra_12.1.4_PUBLIC"
+
+
+# Base path used by Ghidra installs. Resolved dynamically at startup.
+GHIDRA_HOME = _find_ghidra()
 
 
 @dataclass(frozen=True)

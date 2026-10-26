@@ -1247,6 +1247,7 @@ tool_select_.grid(row=4, column=0, sticky="ew", padx=10, pady=(0, 10), ipady=16)
 def _style_combobox_listbox(combo: ttk.Combobox):
     """Force dark colors on the popdown list when it is created.
 
+<<<<<<< Updated upstream
     The popdown is a Tcl-created widget, so Tkinter's nametowidget() can't
     resolve it (KeyError: 'popdown'). Configure it through Tcl directly.
     """
@@ -1254,17 +1255,48 @@ def _style_combobox_listbox(combo: ttk.Combobox):
         popdown = str(combo.tk.call("ttk::combobox::PopdownWindow", str(combo)))
         combo.tk.call(
             f"{popdown}.f.l", "configure",
+=======
+    The popdown window (and its inner ``.f`` frame and ``.l`` listbox) is
+    created by Tcl internals (``ttk::combobox::CreatePopdown``), NOT
+    through Tkinter's widget constructor. It is therefore never registered
+    in any Python widget's ``.children`` dict. ``Widget.nametowidget()``
+    walks that dict and raises ``KeyError('popdown')`` for the Tcl-created
+    widget even though it exists and is a perfectly valid Tk widget. We
+    bypass Tkinter's widget registry entirely and configure the listbox
+    via ``tk.call`` directly, which is the supported way to touch
+    sub-widgets Tkinter did not create.
+    """
+    try:
+        popdown = combo.tk.call("ttk::combobox::PopdownWindow", str(combo))
+    except tk.TclError:
+        return
+    if not popdown:
+        # Popdown is created lazily on first open. Nothing to style yet.
+        return
+    listbox_path = f"{popdown}.f.l"
+    try:
+        combo.tk.call(
+            listbox_path, "configure",
+>>>>>>> Stashed changes
             "-background", COLORS["bg_input"],
             "-foreground", COLORS["fg"],
             "-selectbackground", COLORS["menu_active_bg"],
             "-selectforeground", "#ffffff",
+<<<<<<< Updated upstream
             "-highlightthickness", 0,
             "-borderwidth", 0,
             "-font", ("Arial", 12),
+=======
+            "-activebackground", COLORS["menu_active_bg"],
+            "-activeforeground", "#ffffff",
+            "-highlightthickness", 0,
+            "-borderwidth", 0,
+            "-font", "Arial 12",
+>>>>>>> Stashed changes
         )
     except tk.TclError:
+        # Path resolved but the listbox isn't there (rare teardown race).
         pass
-
 
 def refresh_tool_picker():
     """Rebuild tool dropdown + Tools menu; keep selection when still valid."""

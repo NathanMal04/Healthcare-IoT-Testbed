@@ -68,7 +68,7 @@
   users.users.hacker = {
     isNormalUser = true;
     description = "User";
-    extraGroups = [ "networkmanager" "wheel" "docker" "dialout" "uucp" "wireshark" ];
+    extraGroups = [ "networkmanager" "wheel" "docker" "dialout" "uucp" "wireshark kvm"];
     shell = pkgs.zsh;
   };
 
@@ -77,6 +77,9 @@
 
   # Enable the background Docker daemon service
   virtualisation.docker.enable = true;
+
+  # Ensure the libvirtd/KVM backend is enabled (good practice for QEMU)
+  virtualisation.libvirtd.enable = true;
 
   # Wireshark System Configuration
   programs.wireshark = {
@@ -132,7 +135,7 @@
     xorg.xprop
     matchbox
     xhost
-
+    devcontainer
 
     # Network / recon / scanning   
     arp-scan
