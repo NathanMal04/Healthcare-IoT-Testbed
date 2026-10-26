@@ -51,6 +51,7 @@ from botocore.exceptions import ClientError
 
 batch = boto3.client("batch")
 logs = boto3.client("logs")
+lambda_client = boto3.client("lambda")
 dynamodb = boto3.resource("dynamodb")
 client = boto3.client("dynamodb")
 serializer = TypeSerializer()
@@ -65,6 +66,7 @@ HEAVY_ENABLED = os.environ.get("HEAVY_ENABLED", "false") == "true"
 MAX_INPUTS = int(os.environ.get("MAX_INPUTS", "2000"))
 MAX_CHILDREN = int(os.environ.get("MAX_CHILDREN", "10000"))
 MAX_FILTER_SCAN = 20000
+NETWORK_CONTROLLER_FUNCTION = os.environ.get("NETWORK_CONTROLLER_FUNCTION", "")
 
 SIZES = {
     "fargate": {"S": (1, 2048), "M": (2, 8192), "L": (4, 16384), "XL": (8, 32768)},
@@ -432,6 +434,7 @@ def _estimate_view(table, user_id, plan):
         "incomplete": report["incomplete"][:50], "incompleteCount": len(report["incomplete"]),
         "duplicates": report["duplicates"],
         "version": int(plan["version"]["version"]),
+        "network": _network_status(table),
         "class": plan["class"], "size": plan["size"], "vcpu": plan["vcpu"], "memoryMiB": plan["memory"],
         "maxCost": float(plan["maxCost"]),
         "expectedCost": float(plan["expectedCost"]) if plan["expectedCost"] is not None else None,
@@ -536,6 +539,7 @@ def _start(table, user_id, body):
 
     table.put_item(Item={"pk": "ACTIVE#RUNS", "sk": f"RUN#{run_id}", "entity": "active-run",
                          "userId": user_id, "createdAt": now})
+    _wake_network()
     updated = table.update_item(
         Key={"pk": f"RUN#{run_id}", "sk": "METADATA"},
         UpdateExpression="SET batchJobId = :j, #st = :q, statusUpdatedAt = :now",
@@ -545,6 +549,23 @@ def _start(table, user_id, body):
         ReturnValues="ALL_NEW",
     )["Attributes"]
     return _resp(201, {"run": _public_run(updated)})
+
+
+def _wake_network():
+    """Starts the on-demand network now rather than on the controller's next
+    one-minute tick. Best effort: the tick picks the run up anyway."""
+    if not NETWORK_CONTROLLER_FUNCTION:
+        return
+    try:
+        lambda_client.invoke(FunctionName=NETWORK_CONTROLLER_FUNCTION, InvocationType="Event", Payload=b"{}")
+    except ClientError as e:
+        print(json.dumps({"event": "network_wake_failed", "error": str(e)}))
+
+
+def _network_status(table):
+    """up, starting, stopping or down (see network-controller)."""
+    item = table.get_item(Key={"pk": "NETWORK", "sk": "STATE"}).get("Item") or {}
+    return item.get("status", "down")
 
 
 def _mark_failed(table, run_id):
@@ -703,6 +724,7 @@ def _run_detail(table, user_id, run):
             for c in children[:500]
         ]},
         "failedUnits": failed,
+        "network": _network_status(table),
     }
 
 

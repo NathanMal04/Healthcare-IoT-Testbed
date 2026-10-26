@@ -6,6 +6,7 @@ import {
   Gauge,
   LayoutDashboard,
   Microchip,
+  NotebookPen,
   ShieldAlert,
   Users,
   Workflow,
@@ -40,6 +41,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/scripts", label: "Scripts", icon: FileCode },
       { href: "/environments", label: "Environments", icon: Boxes },
       { href: "/runs", label: "Runs", icon: Workflow },
+      { href: "/notebooks", label: "Notebooks", icon: NotebookPen },
     ],
   },
 ];

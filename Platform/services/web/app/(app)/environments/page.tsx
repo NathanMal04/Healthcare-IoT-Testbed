@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { Plus } from "lucide-react";
+import { NotebookPen, Plus } from "lucide-react";
 import {
   createEnvironment,
   createEnvironmentVersion,
@@ -259,9 +260,17 @@ export default function EnvironmentsPage() {
 
       {detail && (
         <div className={`${cardClass} p-6 space-y-5`}>
-          <div>
-            <h2 className="font-semibold text-slate-700">{detail.environment.name}</h2>
-            {detail.environment.description && <p className="text-sm text-slate-500 mt-1">{detail.environment.description}</p>}
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="font-semibold text-slate-700">{detail.environment.name}</h2>
+              {detail.environment.description && <p className="text-sm text-slate-500 mt-1">{detail.environment.description}</p>}
+            </div>
+            {latest && (
+              <Link href={`/notebooks?env=${encodeURIComponent(detail.environment.envId)}`} className={secondaryButton}>
+                <NotebookPen className="w-4 h-4 inline mr-1" aria-hidden />
+                Open in notebook
+              </Link>
+            )}
           </div>
 
           <table className="w-full text-sm">

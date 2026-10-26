@@ -38,6 +38,9 @@ export interface RunRequest {
   workspaceId?: string;
 }
 
+/** The on-demand private network runs and notebooks use (see network-controller). */
+export type NetworkStatus = "up" | "starting" | "stopping" | "down";
+
 export interface Estimate {
   matched: number;
   inputCount: number;
@@ -58,6 +61,7 @@ export interface Estimate {
   maxCost: number;
   expectedCost: number | null;
   budget: { monthlyLimit: number; spent: number; held: number; available: number; heavyEnabled: boolean };
+  network: NetworkStatus;
 }
 
 export interface Run {
@@ -110,6 +114,7 @@ export interface RunDetail {
     }[];
   };
   failedUnits: { unitId: string; key: string; error?: string; exitCode?: number }[];
+  network: NetworkStatus;
 }
 
 export const TERMINAL_STATUSES: RunStatus[] = ["completed", "failed", "cancelled", "stopped"];

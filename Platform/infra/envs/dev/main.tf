@@ -22,6 +22,12 @@ module "cdn" {
   aliases             = [var.domain_name, "www.${var.domain_name}"]
   acm_certificate_arn = aws_acm_certificate.frontend.arn
   canonical_host      = var.domain_name
+
+  # /s/* goes to notebook sessions (sessions.tf).
+  session_origin = {
+    vpc_origin_id = aws_cloudfront_vpc_origin.sessions.id
+    domain_name   = aws_lb.sessions.dns_name
+  }
 }
 
 # Cognito User Pool for authentication
@@ -479,7 +485,7 @@ module "api" {
 
 # Integrations defined with the api_lambda_method / api_cors_preflight
 # modules: GET and PATCH /devices/{deviceId} below, plus artifacts.tf, builds.tf,
-# runs.tf, usage.tf, workspaces.tf and cves.tf.
+# runs.tf, usage.tf, workspaces.tf, cves.tf and sessions.tf.
 locals {
   module_route_integration_ids = concat(
     [
@@ -493,6 +499,7 @@ locals {
     local.usage_integration_ids,
     local.workspaces_integration_ids,
     local.cves_integration_ids,
+    local.sessions_integration_ids,
   )
 }
 

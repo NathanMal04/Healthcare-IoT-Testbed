@@ -37,7 +37,7 @@ variable "domain_aliases" {
   default     = []
 }
 variable "enable_heavy_class" {
-  description = "Create the Heavy (EC2) run class. Adds the ecs, ecs-agent and ecs-telemetry VPC endpoints (about $22/month in one zone)."
+  description = "Create the Heavy (EC2) run class. Its ecs, ecs-agent and ecs-telemetry VPC endpoints are created on demand, only while Heavy runs need them (network.tf)."
   type        = bool
   default     = true
 }
@@ -46,4 +46,10 @@ variable "default_monthly_limit" {
   description = "Monthly spending limit (USD) for users who don't have a budget yet."
   type        = string
   default     = "25"
+}
+
+variable "network_idle_minutes" {
+  description = "How long the on-demand VPC endpoints stay up after the last run or notebook session finishes (network.tf). Each hour up costs about $0.04 ($0.07 with Heavy)."
+  type        = number
+  default     = 120
 }

@@ -149,6 +149,9 @@ function RunView({ runId }: { runId: string }) {
         </div>
       </div>
       {run.statusReason && <p className="text-sm text-slate-600 bg-surface-muted px-3 py-2 rounded-lg">{run.statusReason}</p>}
+      {run.status === "queued" && detail.network !== "up" && (
+        <Alert tone="info">Starting the private network. Runs start about 2–3 minutes after a quiet period.</Alert>
+      )}
 
       <div className="grid md:grid-cols-4 gap-4">
         {[

@@ -2,9 +2,11 @@
 #
 #   GET /usage?period=YYYY-MM   usage-api   (budget + ledger)
 #
-# usage-meter receives the CodeBuild (builds.tf) and Batch (runs.tf) state
-# change events and writes provisional ledger rows. run-watchdog runs every
-# 5 minutes and stops runs that reach their cost cap or the owner's budget.
+# usage-meter receives the CodeBuild (builds.tf), Batch (runs.tf) and
+# notebook session ECS (sessions.tf) state change events and writes
+# provisional ledger rows. run-watchdog runs every 5 minutes and stops runs
+# that reach their cost cap or the owner's budget, and sessions past their
+# time limit or over budget.
 
 module "usage_meter_fn" {
   source        = "../../modules/lambda"
@@ -34,6 +36,7 @@ module "run_watchdog_fn" {
   environment_variables = {
     METADATA_TABLE_NAME = module.metadata_table.table_name
     PRICING             = local.pricing
+    SESSION_CLUSTER_ARN = aws_ecs_cluster.sessions.arn
   }
 
   project     = var.name
@@ -91,6 +94,11 @@ resource "aws_iam_policy" "run_watchdog" {
         Effect   = "Allow"
         Action   = "batch:TerminateJob"
         Resource = "arn:aws:batch:${var.aws_region}:${local.account_id}:job/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = "ecs:StopTask"
+        Resource = "arn:aws:ecs:${var.aws_region}:${local.account_id}:task/${aws_ecs_cluster.sessions.name}/*"
       },
     ]
   })

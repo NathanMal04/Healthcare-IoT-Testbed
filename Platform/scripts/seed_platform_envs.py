@@ -12,6 +12,11 @@ SDK) from the newest platform-base version.
 
 Idempotent: if the newest ready version already has this image, nothing
 changes.
+
+It also records the notebook layer image (containers/notebook), which
+notebook sessions copy JupyterLab from:
+
+  python3 seed_platform_envs.py --table ... --notebook-image-uri <repo>@sha256:...
 """
 import argparse
 import sys
@@ -31,18 +36,29 @@ DESCRIPTIONS = {
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--table", required=True)
-    parser.add_argument("--env-id", required=True, choices=sorted(DESCRIPTIONS))
-    parser.add_argument("--image-uri", required=True, help="repository@sha256:digest")
+    parser.add_argument("--env-id", choices=sorted(DESCRIPTIONS))
+    parser.add_argument("--image-uri", help="repository@sha256:digest")
+    parser.add_argument("--notebook-image-uri", help="repository@sha256:digest of the notebook layer image")
     parser.add_argument("--packages-dir", type=Path, help="folder with pip-freeze.txt and dpkg.txt")
     parser.add_argument("--bucket", help="data lake bucket, for the package lists")
     parser.add_argument("--region", default="us-east-2")
     parser.add_argument("--profile")
     args = parser.parse_args()
-    if "@sha256:" not in args.image_uri:
-        sys.exit("--image-uri must be a digest reference (repo@sha256:...)")
+    if bool(args.notebook_image_uri) == bool(args.env_id or args.image_uri):
+        sys.exit("Give either --env-id and --image-uri, or --notebook-image-uri")
+    image_uri = args.notebook_image_uri or args.image_uri
+    if not image_uri or "@sha256:" not in image_uri or (args.image_uri and not args.env_id):
+        sys.exit("The image must be a digest reference (repo@sha256:...), with --env-id for an environment")
 
     session = boto3.Session(profile_name=args.profile, region_name=args.region)
     table = session.resource("dynamodb").Table(args.table)
+    if args.notebook_image_uri:
+        table.put_item(Item={"pk": "PLATFORM", "sk": "NOTEBOOK", "entity": "platform-notebook",
+                             "imageUri": args.notebook_image_uri,
+                             "updatedAt": datetime.now(timezone.utc).isoformat()})
+        print(f"notebook layer -> {args.notebook_image_uri}")
+        return
+
     env_id = args.env_id
     name, description = DESCRIPTIONS[env_id]
     now = datetime.now(timezone.utc).isoformat()

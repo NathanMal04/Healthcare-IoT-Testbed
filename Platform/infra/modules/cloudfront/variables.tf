@@ -46,3 +46,12 @@ variable "canonical_host" {
   type        = string
   default     = ""
 }
+
+variable "session_origin" {
+  description = "Notebook sessions: a CloudFront VPC origin (and its load balancer's DNS name) that /s/* is sent to. Null leaves /s/* to the web bucket."
+  type = object({
+    vpc_origin_id = string
+    domain_name   = string
+  })
+  default = null
+}

@@ -16,9 +16,10 @@ import {
 import ArtifactUploader from "@/app/components/ArtifactUploader";
 import ArtifactTypeChips from "@/app/components/ArtifactTypeChips";
 import { RUN_SELECTION_KEY, serializeRunSelection } from "@/lib/runs";
+import { NOTEBOOK_SELECTION_KEY } from "@/lib/sessions";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { isWorkspaceUnavailable, scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
-import { Download, FolderArchive, Layers, Play, RefreshCw, Upload, X } from "lucide-react";
+import { Download, FolderArchive, Layers, NotebookPen, Play, RefreshCw, Upload, X } from "lucide-react";
 import {
   Alert,
   Button,
@@ -177,14 +178,22 @@ function ArtifactsView() {
   }
 
   function runOn(artifactIds: string[]) {
+    passSelection(RUN_SELECTION_KEY, artifactIds, "/runs?selection=1");
+  }
+
+  function openInNotebook(artifactIds: string[]) {
+    passSelection(NOTEBOOK_SELECTION_KEY, artifactIds, "/notebooks?selection=1");
+  }
+
+  function passSelection(key: string, artifactIds: string[], href: string) {
     try {
-      // Tagged with the scope, so the run form drops it if the scope changes.
-      sessionStorage.setItem(RUN_SELECTION_KEY, serializeRunSelection(scopeKey(scope), artifactIds));
+      // Tagged with the scope, so the form drops it if the scope changes.
+      sessionStorage.setItem(key, serializeRunSelection(scopeKey(scope), artifactIds));
     } catch {
       setDownloadError("Your browser blocked session storage, so the selection can't be passed on");
       return;
     }
-    router.push("/runs?selection=1");
+    router.push(href);
   }
 
   if (loading || !user) return null;
@@ -293,6 +302,11 @@ function ArtifactsView() {
               icon: Play,
               onSelect: () => runOn([artifact.artifactId]),
             },
+            artifact.status === "ready" && {
+              label: "Open in notebook",
+              icon: NotebookPen,
+              onSelect: () => openInNotebook([artifact.artifactId]),
+            },
             !!artifact.uploadBatchId &&
               artifact.uploadBatchId !== filters.batchId && {
                 label: "Show upload batch",
@@ -352,6 +366,16 @@ function ArtifactsView() {
               <div className="flex items-center gap-2">
                 <Button size="sm" icon={Play} onClick={() => runOn(Array.from(selectedIds))}>
                   Run a script on selected ({selectedIds.size})
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  icon={NotebookPen}
+                  disabled={selectedIds.size > 50}
+                  title={selectedIds.size > 50 ? "A notebook opens at most 50 files" : undefined}
+                  onClick={() => openInNotebook(Array.from(selectedIds))}
+                >
+                  Open in notebook
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
                   Clear selection

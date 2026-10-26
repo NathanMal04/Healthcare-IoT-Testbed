@@ -1,10 +1,16 @@
-# Private network for run jobs (and, in step 3, notebook sessions).
+# Private network for run jobs and notebook sessions.
 #
-# There is no internet gateway or NAT: jobs reach only the VPC endpoints
-# below. Every endpoint has a policy that only allows principals from this
-# account (or, for execute-api, only our manifest API, set by the caller
-# with aws_vpc_endpoint_policy), so a job can't use AWS keys of its own to
-# send data out through them.
+# There is no NAT and no route to the internet: jobs reach only the S3
+# gateway endpoint below and the interface endpoints (ecr.api, ecr.dkr, logs,
+# execute-api, and ecs* for Heavy). Those cost about $7.30 a month each, so
+# they aren't created here: the network-controller Lambda creates them while
+# runs or sessions need them and deletes them after an idle period. Every
+# endpoint gets a policy that only allows principals from this account (or,
+# for execute-api, only our manifest API), so a job can't use AWS keys of its
+# own to send data out through them.
+#
+# The internet gateway exists only because CloudFront VPC origins require
+# one in the VPC; no route table uses it.
 
 data "aws_availability_zones" "available" {
   state = "available"
@@ -16,10 +22,6 @@ locals {
     Project = var.project
     Env     = var.environment
   }
-  interface_endpoints = concat(
-    ["ecr.api", "ecr.dkr", "logs", "execute-api"],
-    var.enable_ecs_endpoints ? ["ecs", "ecs-agent", "ecs-telemetry"] : [],
-  )
   account_only_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -130,21 +132,97 @@ resource "aws_vpc_endpoint" "s3" {
   })
 }
 
-resource "aws_vpc_endpoint" "interface" {
-  for_each            = toset(local.interface_endpoints)
-  vpc_id              = aws_vpc.this.id
-  service_name        = "com.amazonaws.${var.region}.${each.value}"
-  vpc_endpoint_type   = "Interface"
-  subnet_ids          = aws_subnet.private[*].id
-  security_group_ids  = [aws_security_group.endpoints.id]
-  private_dns_enabled = true
-  tags                = merge(local.tags, { Name = "${var.name}-${each.value}" })
+# --- Notebook sessions ---------------------------------------------------------------------
+
+# Required by CloudFront VPC origins ("denotes that the VPC can receive
+# traffic from the internet"). Nothing routes to it: the private route table
+# has only the local and S3 routes, so jobs and sessions still can't reach
+# the internet.
+resource "aws_internet_gateway" "this" {
+  vpc_id = aws_vpc.this.id
+  tags   = merge(local.tags, { Name = var.name })
 }
 
-# execute-api's policy is set by the caller (runs.tf), since it names the
-# private API, which needs this endpoint to exist first.
-resource "aws_vpc_endpoint_policy" "account_only" {
-  for_each        = { for k, v in aws_vpc_endpoint.interface : k => v if k != "execute-api" }
-  vpc_endpoint_id = each.value.id
-  policy          = local.account_only_policy
+# An ALB needs subnets in two zones. Only the load balancer's own interfaces
+# (and CloudFront's VPC origin interface) live here; sessions, jobs and the
+# interface endpoints stay in the private subnet(s) above, so this costs
+# nothing extra. Same route table: no internet route.
+locals {
+  alb_azs = slice(data.aws_availability_zones.available.names, 0, 2)
+}
+
+resource "aws_subnet" "alb" {
+  count             = 2
+  vpc_id            = aws_vpc.this.id
+  availability_zone = local.alb_azs[count.index]
+  cidr_block        = cidrsubnet(var.cidr_block, 8, 240 + count.index)
+  tags              = merge(local.tags, { Name = "${var.name}-alb-${local.alb_azs[count.index]}" })
+}
+
+resource "aws_route_table_association" "alb" {
+  count          = 2
+  subnet_id      = aws_subnet.alb[count.index].id
+  route_table_id = aws_route_table.private.id
+}
+
+data "aws_ec2_managed_prefix_list" "cloudfront" {
+  name = "com.amazonaws.global.cloudfront.origin-facing"
+}
+
+# The session load balancer: HTTP from CloudFront only, and onward only to
+# session tasks.
+resource "aws_security_group" "alb" {
+  name        = "${var.name}-sessions-alb"
+  description = "Notebook load balancer: HTTP from CloudFront, to session tasks"
+  vpc_id      = aws_vpc.this.id
+  tags        = local.tags
+}
+
+resource "aws_vpc_security_group_ingress_rule" "alb_cloudfront" {
+  security_group_id = aws_security_group.alb.id
+  ip_protocol       = "tcp"
+  from_port         = 80
+  to_port           = 80
+  prefix_list_id    = data.aws_ec2_managed_prefix_list.cloudfront.id
+}
+
+resource "aws_vpc_security_group_egress_rule" "alb_sessions" {
+  security_group_id            = aws_security_group.alb.id
+  ip_protocol                  = "tcp"
+  from_port                    = var.session_port
+  to_port                      = var.session_port
+  referenced_security_group_id = aws_security_group.session.id
+}
+
+# Session tasks: JupyterLab reachable only from the load balancer; outbound
+# like run jobs (HTTPS to the endpoints and S3 only).
+resource "aws_security_group" "session" {
+  name        = "${var.name}-session"
+  description = "Notebook sessions: JupyterLab from the ALB; HTTPS to VPC endpoints and S3 only"
+  vpc_id      = aws_vpc.this.id
+  tags        = local.tags
+}
+
+resource "aws_vpc_security_group_ingress_rule" "session_alb" {
+  security_group_id            = aws_security_group.session.id
+  ip_protocol                  = "tcp"
+  from_port                    = var.session_port
+  to_port                      = var.session_port
+  referenced_security_group_id = aws_security_group.alb.id
+}
+
+resource "aws_vpc_security_group_egress_rule" "session_endpoints" {
+  security_group_id = aws_security_group.session.id
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+  cidr_ipv4         = var.cidr_block
+}
+
+resource "aws_vpc_security_group_egress_rule" "session_s3" {
+  security_group_id = aws_security_group.session.id
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+  prefix_list_id    = aws_vpc_endpoint.s3.prefix_list_id
 }

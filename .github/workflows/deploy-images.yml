@@ -2,7 +2,8 @@ name: Deploy Platform Images
 
 # Builds the platform images (analysis-base and platform-ghidra, which carry
 # the launcher and SDK), pushes them to ECR, and records them as new ready
-# versions of the platform environments.
+# versions of the platform environments. Also builds the notebook layer
+# (JupyterLab, copied into notebook sessions) and records it.
 
 on:
   workflow_dispatch:
@@ -14,6 +15,7 @@ on:
       - "Platform/services/containers/ghidra/**"
       - "Platform/services/containers/launcher/**"
       - "Platform/services/containers/sdk/**"
+      - "Platform/services/containers/notebook/**"
       - "Platform/scripts/seed_platform_envs.py"
       - ".github/workflows/deploy-images.yml"
 
@@ -106,3 +108,16 @@ jobs:
             --table "${{ steps.tf.outputs.table }}" --region "${{ secrets.AWS_REGION }}" \
             --env-id platform-ghidra --image-uri "$digest" \
             --packages-dir /tmp/packages-ghidra --bucket "${{ steps.tf.outputs.bucket }}"
+
+      - name: Build, push and record the notebook layer
+        working-directory: Platform/services/containers
+        env:
+          REPO: ${{ steps.tf.outputs.repo }}
+        run: |
+          tag="$REPO:notebook-${GITHUB_SHA::12}"
+          docker build -f notebook/Dockerfile -t "$tag" .
+          docker push "$tag"
+          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$tag")"
+          python3 "$GITHUB_WORKSPACE/Platform/scripts/seed_platform_envs.py" \
+            --table "${{ steps.tf.outputs.table }}" --region "${{ secrets.AWS_REGION }}" \
+            --notebook-image-uri "$digest"

@@ -10,6 +10,11 @@
 # their files only through the private manifest API (runs-manifest), which
 # hands out presigned S3 URLs. Batch "Job State Change" events go to
 # runs-events (status, settlement) and usage-meter (usage.tf).
+#
+# The VPC's interface endpoints come and go with demand (network.tf): the
+# compute environments are left DISABLED here and only enabled by the
+# network-controller Lambda once every endpoint they need is available, so
+# submitted jobs wait in RUNNABLE until then.
 
 locals {
   pricing = jsonencode({
@@ -31,12 +36,11 @@ module "network" {
 
   name   = "${var.name}-runs"
   region = var.aws_region
-  # One zone keeps the endpoints at ~$29/month instead of ~$58. If that zone
-  # has an outage, runs wait until it recovers.
+  # One zone halves the interface endpoints' hourly cost. If that zone has
+  # an outage, runs wait until it recovers.
   az_count             = 1
   account_id           = local.account_id
   data_lake_bucket_arn = module.data_lake_bucket.bucket_arn
-  enable_ecs_endpoints = var.enable_heavy_class
   project              = var.name
   environment          = "dev"
 }
@@ -112,6 +116,13 @@ resource "aws_batch_compute_environment" "fargate_spot" {
     security_group_ids = [module.network.job_security_group_id]
   }
 
+  # Owned by the network-controller Lambda (network.tf) after creation.
+  state = "DISABLED"
+
+  lifecycle {
+    ignore_changes = [state]
+  }
+
   tags = {
     Project = var.name
     Env     = "dev"
@@ -127,6 +138,13 @@ resource "aws_batch_compute_environment" "fargate" {
     max_vcpus          = 64
     subnets            = module.network.private_subnet_ids
     security_group_ids = [module.network.job_security_group_id]
+  }
+
+  # Owned by the network-controller Lambda (network.tf) after creation.
+  state = "DISABLED"
+
+  lifecycle {
+    ignore_changes = [state]
   }
 
   tags = {
@@ -230,6 +248,13 @@ resource "aws_batch_compute_environment" "heavy" {
       image_type = "ECS_AL2023"
     }
   }
+
+  # Owned by the network-controller Lambda (network.tf) after creation.
+  state = "DISABLED"
+
+  lifecycle {
+    ignore_changes = [state]
+  }
 }
 
 resource "aws_batch_job_queue" "heavy" {
@@ -250,9 +275,11 @@ resource "aws_api_gateway_rest_api" "manifest" {
   name        = "${var.name}-run-manifest"
   description = "Private API used by run jobs to fetch inputs and register outputs"
 
+  # No endpoint association: the execute-api endpoint is created and deleted
+  # on demand (network.tf), and with private DNS on it the API is invoked at
+  # its usual hostname.
   endpoint_configuration {
-    types            = ["PRIVATE"]
-    vpc_endpoint_ids = [module.network.execute_api_endpoint_id]
+    types = ["PRIVATE"]
   }
 
   tags = {
@@ -261,7 +288,9 @@ resource "aws_api_gateway_rest_api" "manifest" {
   }
 }
 
-# Only requests that arrive through our VPC endpoint are accepted.
+# Only requests that arrive from our VPC (through its execute-api endpoint)
+# are accepted. aws:SourceVpc rather than aws:SourceVpce, because the
+# endpoint's id changes each time the network-controller recreates it.
 #
 # The document is a local so the deployment trigger below can hash it: the
 # resource's own `policy` attribute comes back from AWS normalized, which
@@ -274,7 +303,7 @@ locals {
       Principal = "*"
       Action    = "execute-api:Invoke"
       Resource  = "${aws_api_gateway_rest_api.manifest.execution_arn}/*"
-      Condition = { StringEquals = { "aws:SourceVpce" = module.network.execute_api_endpoint_id } }
+      Condition = { StringEquals = { "aws:SourceVpc" = module.network.vpc_id } }
     }]
   })
 }
@@ -284,12 +313,11 @@ resource "aws_api_gateway_rest_api_policy" "manifest" {
   policy      = local.manifest_api_policy
 }
 
-# And the endpoint only reaches this API, so a job can't call other private
-# APIs (in any account) through it.
-resource "aws_vpc_endpoint_policy" "execute_api" {
-  vpc_endpoint_id = module.network.execute_api_endpoint_id
-
-  policy = jsonencode({
+# And the execute-api endpoint only reaches this API, so a job can't call
+# other private APIs (in any account) through it. Applied by the
+# network-controller when it creates the endpoint.
+locals {
+  execute_api_endpoint_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
@@ -319,11 +347,27 @@ resource "aws_api_gateway_resource" "manifest_outputs_action" {
   path_part   = each.value
 }
 
+# Notebook sessions (sessions.tf): /session/manifest and /session/home.
+resource "aws_api_gateway_resource" "manifest_session" {
+  rest_api_id = aws_api_gateway_rest_api.manifest.id
+  parent_id   = aws_api_gateway_rest_api.manifest.root_resource_id
+  path_part   = "session"
+}
+
+resource "aws_api_gateway_resource" "manifest_session_action" {
+  for_each    = toset(["manifest", "home"])
+  rest_api_id = aws_api_gateway_rest_api.manifest.id
+  parent_id   = aws_api_gateway_resource.manifest_session.id
+  path_part   = each.value
+}
+
 locals {
   manifest_resources = {
-    manifest = aws_api_gateway_resource.manifest.id
-    presign  = aws_api_gateway_resource.manifest_outputs_action["presign"].id
-    complete = aws_api_gateway_resource.manifest_outputs_action["complete"].id
+    manifest         = aws_api_gateway_resource.manifest.id
+    presign          = aws_api_gateway_resource.manifest_outputs_action["presign"].id
+    complete         = aws_api_gateway_resource.manifest_outputs_action["complete"].id
+    session-manifest = aws_api_gateway_resource.manifest_session_action["manifest"].id
+    session-home     = aws_api_gateway_resource.manifest_session_action["home"].id
   }
 }
 
@@ -398,6 +442,8 @@ module "runs_api_fn" {
     DEFAULT_MONTHLY_LIMIT = var.default_monthly_limit
     HEAVY_ENABLED         = tostring(var.enable_heavy_class)
     MAX_INPUTS            = "2000"
+    # Woken right after a submit, so the network starts coming up at once.
+    NETWORK_CONTROLLER_FUNCTION = module.network_controller_fn.function_name
   }
 
   project     = var.name
@@ -419,6 +465,7 @@ module "runs_manifest_fn" {
     MAX_FILES_PER_UNIT  = "1000"
     MAX_BYTES_PER_UNIT  = tostring(20 * 1024 * 1024 * 1024)
     MAX_BYTES_PER_FILE  = tostring(5 * 1024 * 1024 * 1024)
+    MAX_HOME_BYTES      = tostring(2 * 1024 * 1024 * 1024)
   }
 
   project     = var.name
@@ -491,6 +538,11 @@ resource "aws_iam_policy" "runs_api" {
         Action   = "logs:GetLogEvents"
         Resource = "${aws_cloudwatch_log_group.runs.arn}:*"
       },
+      {
+        Effect   = "Allow"
+        Action   = "lambda:InvokeFunction"
+        Resource = module.network_controller_fn.function_arn
+      },
     ]
   })
 }
@@ -524,6 +576,12 @@ resource "aws_iam_policy" "runs_manifest" {
         Effect   = "Allow"
         Action   = ["s3:PutObject", "s3:PutObjectTagging"]
         Resource = local.artifact_objects_arn
+      },
+      {
+        # Notebook sessions' saved notebooks folders (restore and save).
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject"]
+        Resource = "${module.data_lake_bucket.bucket_arn}/sessions/home/*"
       },
     ]
   })

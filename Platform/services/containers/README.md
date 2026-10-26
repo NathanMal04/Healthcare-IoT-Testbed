@@ -10,6 +10,7 @@ containers/
   launcher/            the job entrypoint (Go, static binary)
   sdk/platform_sdk/    Python helpers: run(ctx) driver, local runner
   buildkit/            what CodeBuild runs: build.py, buildspec.yml, catalog.json
+  notebook/            the JupyterLab layer for notebook sessions (session.py, platform_notebook.py)
 ```
 
 The base and Ghidra images are built by `.github/workflows/deploy-images.yml` and recorded as the
@@ -128,3 +129,41 @@ Outputs go to `./outputs/<unit>/`.
 
 The manifest service is `Platform/services/lambdas/runs-manifest`. It's a private API that's only reachable
 from inside the run VPC.
+
+## Notebook sessions
+
+The Notebooks page opens an environment in JupyterLab with the files you choose. Sessions follow the same
+rules as jobs: no internet, no AWS credentials, files only through the manifest service.
+
+- **Files:** what you chose is in `/work/inputs`. `from platform_notebook import context; ctx = context()` gives
+  you the same `ctx` as a script's `run(ctx)`.
+- **Saved:** only `/work/notebooks`. It's saved every 10 minutes and when the session stops, and restored at the
+  next start. There's one folder per user, shared by your sessions: if two are open, the last save wins. At most 2 GiB.
+- **Stopping:** after 30 minutes with no browser tab open, at the session's time limit, by its Stop button, or
+  when your monthly budget runs out.
+- **Packages:** `pip install` fails at once (`PIP_NO_INDEX=1`). To add tools, build a new environment version and
+  open that.
+- **Save as script:** turns a notebook into an L1 script on the same environment. The `context()` lines are dropped,
+  the code is wrapped in `run(ctx)` (unless the notebook defines it already), and `%`/`!` lines are commented out.
+
+How it's put together:
+- **Image:** `notebook/Dockerfile` builds a venv at `/opt/notebook` (JupyterLab, ipykernel) with
+  `--system-site-packages`. A session task's first container copies it into a shared volume, mounted read-only
+  into the environment's container, which runs `session.py`. So every environment version opens without a rebuild.
+  This relies on environments being `python:3.12-slim-bookworm` based, which all platform-derived ones are.
+- **Reaching it:** CloudFront sends `vzoniq.com/s/*` through a VPC origin to an internal load balancer. Each session
+  has a target group and a `/s/{sessionId}/*` rule, and JupyterLab requires the session's token, which only its
+  owner gets.
+
+## Costs and the on-demand network
+
+Jobs and sessions reach AWS only through VPC endpoints (ECR, CloudWatch Logs, the manifest API, and for Heavy the
+ECS ones). Those cost about $0.01 an hour each, so they exist **only while there is work**: the `network-controller`
+Lambda creates them when a run or session starts and deletes them `network_idle_minutes` (default 120) after the last
+one finishes. While they're down, the Batch compute environments are disabled, and jobs wait in `RUNNABLE`.
+
+- **Starting:** the first run or session after a quiet period waits about 2–3 minutes for the network.
+- **Idle window:** set `network_idle_minutes` in `Platform/infra/envs/dev/variables.tf` (or the Lambda's
+  `IDLE_MINUTES`). Each extra hour up costs about $0.04, or $0.07 with Heavy.
+- **Always on:** only the notebook load balancer (about $17 a month) costs money when nothing runs.
+

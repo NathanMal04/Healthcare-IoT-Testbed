@@ -10,6 +10,12 @@ the run.
                                                                     -> presigned POST per output file
   POST /outputs/complete  {runId, childIndex, unitId, status, exitCode, error, outputs:[{artifactId, attemptId}]}
                                                                     -> verifies outputs, records the unit's result
+
+Notebook sessions use it the same way, with the per-session token
+(X-Session-Token) whose SHA-256 is stored on the session:
+
+  POST /session/manifest  {sessionId}   -> presigned input URLs + the saved notebooks to restore
+  POST /session/home      {sessionId}   -> presigned POST for saving the notebooks folder
 """
 import base64
 import hashlib
@@ -52,6 +58,8 @@ MAX_FILES_PER_UNIT = int(os.environ.get("MAX_FILES_PER_UNIT", "1000"))
 MAX_BYTES_PER_UNIT = int(os.environ.get("MAX_BYTES_PER_UNIT", str(20 * 1024 ** 3)))
 MAX_BYTES_PER_FILE = int(os.environ.get("MAX_BYTES_PER_FILE", str(5 * 1024 ** 3)))
 MAX_FILES_PER_REQUEST = 100
+MAX_HOME_BYTES = int(os.environ.get("MAX_HOME_BYTES", str(2 * 1024 ** 3)))
+SESSION_ACTIVE = {"launching", "running"}
 
 ACTIVE = {"queued", "running"}
 PENDING_TAGGING_XML = "<Tagging><TagSet><Tag><Key>upload-state</Key><Value>pending</Value></Tag></TagSet></Tagging>"
@@ -84,9 +92,15 @@ def handler(event, context):
         return _resp(400, {"error": "Invalid JSON"})
 
     table = dynamodb.Table(TABLE)
+    resource = event.get("resource")
     try:
+        if resource in ("/session/manifest", "/session/home"):
+            session = _authorize_session(table, headers.get("x-session-token"), body)
+            if resource == "/session/manifest":
+                return _resp(200, _session_manifest(session))
+            return _resp(200, _session_home_upload(session))
+
         run, child = _authorize(table, headers.get("x-run-token"), body)
-        resource = event.get("resource")
         if resource == "/manifest":
             return _resp(200, _manifest(table, run, child))
         if resource == "/outputs/presign":
@@ -386,6 +400,65 @@ def _verify_outputs(table, run_id, unit_id, outputs):
             if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
                 raise
     return [o["artifactId"] for o in wanted], []
+
+
+# --- Notebook sessions ----------------------------------------------------------------
+
+def _authorize_session(table, token, body):
+    session_id = body.get("sessionId")
+    if not isinstance(session_id, str) or not UUID_PATTERN.match(session_id) or not isinstance(token, str):
+        raise RequestError(403, "Forbidden")
+    session = table.get_item(Key={"pk": f"SESSION#{session_id}", "sk": "METADATA"}).get("Item")
+    if session is None or not hmac.compare_digest(hashlib.sha256(token.encode()).hexdigest(),
+                                                  session.get("tokenHash", "")):
+        raise RequestError(403, "Forbidden")
+    if session.get("status") not in SESSION_ACTIVE:
+        raise RequestError(409, f"The session is {session.get('status')}")
+    return session
+
+
+def _home_key(session):
+    # One saved notebooks folder per user, shared by all their sessions.
+    return f"sessions/home/{session['createdBy']}/notebooks.tar.gz"
+
+
+def _session_manifest(session):
+    """The files chosen at start (checked then for scope and readiness) and
+    the saved notebooks folder, if there is one."""
+    ids = list(session.get("artifactIds") or [])
+    artifacts = {a["artifactId"]: a for a in _batch_get([{"pk": f"ARTIFACT#{a}", "sk": "METADATA"} for a in ids])}
+    inputs = []
+    for aid in ids:
+        art = artifacts.get(aid)
+        if art is None or art.get("status") != "ready":
+            continue
+        inputs.append({
+            "artifactId": aid, "name": art.get("name"), "originalFilename": art.get("originalFilename"),
+            "type": art.get("type"), "sha256": art.get("sha256"), "sizeBytes": int(art.get("sizeBytes", 0)),
+            "tags": sorted(art.get("tags") or []),
+            "url": s3.generate_presigned_url("get_object", Params={"Bucket": art["s3Bucket"], "Key": art["s3Key"]},
+                                             ExpiresIn=URL_EXPIRES_SEC),
+        })
+
+    home = None
+    key = _home_key(session)
+    try:
+        s3.head_object(Bucket=BUCKET, Key=key)
+        home = {"url": s3.generate_presigned_url("get_object", Params={"Bucket": BUCKET, "Key": key},
+                                                 ExpiresIn=URL_EXPIRES_SEC)}
+    except ClientError:
+        pass  # nothing saved yet
+    return {"sessionId": session["sessionId"], "inputs": inputs, "home": home,
+            "limits": {"maxHomeBytes": MAX_HOME_BYTES}}
+
+
+def _session_home_upload(session):
+    post = s3.generate_presigned_post(
+        Bucket=BUCKET, Key=_home_key(session),
+        Conditions=[["content-length-range", 1, MAX_HOME_BYTES]],
+        ExpiresIn=URL_EXPIRES_SEC,
+    )
+    return {"upload": {"url": post["url"], "fields": post["fields"]}}
 
 
 # --- Helpers ---------------------------------------------------------------------------

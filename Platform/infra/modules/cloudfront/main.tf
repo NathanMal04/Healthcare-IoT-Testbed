@@ -78,8 +78,41 @@ resource "aws_cloudfront_distribution" "this" {
     origin_access_control_id = aws_cloudfront_origin_access_control.this.id
   }
 
+  # Notebook sessions, behind an internal load balancer.
+  dynamic "origin" {
+    for_each = var.session_origin == null ? [] : [var.session_origin]
+    content {
+      domain_name = origin.value.domain_name
+      origin_id   = "sessions"
+
+      vpc_origin_config {
+        vpc_origin_id            = origin.value.vpc_origin_id
+        origin_keepalive_timeout = 5
+        origin_read_timeout      = 60
+      }
+    }
+  }
+
   enabled             = true
   default_root_object = var.default_root_object
+
+  # /s/{sessionId}/... is JupyterLab: never cached, every method, every
+  # viewer header, cookie and query string forwarded (AllViewer keeps the
+  # Host header, which JupyterLab's WebSocket origin check compares against),
+  # and no url_rewrite function.
+  dynamic "ordered_cache_behavior" {
+    for_each = var.session_origin == null ? [] : [1]
+    content {
+      path_pattern             = "/s/*"
+      allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+      cached_methods           = ["GET", "HEAD"]
+      target_origin_id         = "sessions"
+      viewer_protocol_policy   = "redirect-to-https"
+      compress                 = true
+      cache_policy_id          = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" # Managed-CachingDisabled
+      origin_request_policy_id = "216adef6-5c7f-47e4-b989-5492eafa07d3" # Managed-AllViewer
+    }
+  }
 
   default_cache_behavior {
     allowed_methods        = ["GET", "HEAD"]
@@ -101,10 +134,10 @@ resource "aws_cloudfront_distribution" "this" {
   }
 
   viewer_certificate {
-  acm_certificate_arn      = var.acm_certificate_arn
-  ssl_support_method       = "sni-only"
-  minimum_protocol_version = "TLSv1.2_2021"
-}
+    acm_certificate_arn      = var.acm_certificate_arn
+    ssl_support_method       = "sni-only"
+    minimum_protocol_version = "TLSv1.2_2021"
+  }
 
   tags = {
     Project = var.project

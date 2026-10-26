@@ -208,7 +208,7 @@ Each version (`entity = env-version`):
 | `parentVersion` / `basedOn` | N / S | The version it was built from |
 | `packageMode` | S | `offline` (the only mode in v1) |
 | `buildId`, `imageUri`, `freezeKey` | S | Same meaning as for module versions |
-| `taskDefArn` | S | (Step 3) ECS task definition used to start sessions |
+| `sessionTaskDef` | M | ECS task definition notebook sessions use: `arn`, plus the `imageUri` and `notebookImage` it was registered for. Registered by `sessions-api` the first time a session opens the version, and re-registered when the notebook image changes |
 | `status`, `statusReason`, `statusUpdatedAt` | S | Same lifecycle as a cloud module version |
 | `createdAt` | S | Timestamp |
 
@@ -279,19 +279,37 @@ A run is **personal** or belongs to exactly one **workspace**, decided only by w
 
 ### Session: `SESSION#{id}` / `METADATA`
 
-(Step 3.) An interactive JupyterLab session on Fargate. **Session** only ever means this; executions are runs.
+An interactive JupyterLab session on Fargate (`entity = session`). **Session** only ever means this; executions are runs.
+
+Sessions are **always personal**: only `USER#{uid} / SESSION#{sid}` (`role = owner`) authorizes them, even when their files come from a workspace. That's why the files' workspace is stored as `inputsWorkspaceId`, never `workspaceId`, which would make `testbed_authz` treat the session as a workspace resource.
 
 | Attribute | Type | Meaning |
 |---|---|---|
 | `name` | S | Display name |
-| `envId`, `envVersion` | S, N | Environment the session runs on |
-| `packageMode` | S | Per-session override of the environment's mode |
-| `taskArn`, `taskIp` | S | ECS task; the session proxy forwards traffic to `taskIp` |
+| `envId`, `envName`, `envVersion` | S, S, N | Environment the session runs on |
+| `imageUri`, `notebookImage` | S | The environment's image and the notebook layer image (by digest) |
+| `size`, `vcpu`, `memoryMiB` | S, N, N | S, M or L |
+| `maxSeconds` | N | Time limit; the session stops itself then, and the watchdog backs it up |
+| `maxCost`, `held` | N | Maximum cost (time limit plus 10 minutes), held against the budget until it settles |
+| `costProvisional` | N | Metered by `usage-meter` when the task stops |
+| `artifactIds`, `inputCount`, `inputsWorkspaceId` | L, N, S | Files staged into `/work/inputs` (checked at start: the caller's own personal files, or that workspace's) |
 | `tokenHash` | S | SHA-256 of the per-session manifest token |
-| `status`, `statusReason`, `statusUpdatedAt` | S | `starting` → `running` → `stopping` → `stopped`, or `failed` |
-| `startedAt`, `lastActivity`, `endedAt` | S | `lastActivity` drives the idle reaper |
-| `cost` | N | Running cost total |
-| `createdBy`, `createdAt`, `updatedAt` | S | Author and timestamps |
+| `launchSecret` | S | The manifest token itself, kept only until launch hands it to the task |
+| `jupyterToken` | S | JupyterLab's login token; returned only to the owner, once the session is reachable |
+| `taskArn`, `taskIp`, `targetGroupArn`, `ruleArn` | S | ECS task and its load balancer route (`/s/{sid}/*`) |
+| `ready` | BOOL | JupyterLab passed the load balancer's health check |
+| `status`, `statusReason`, `stopReason`, `statusUpdatedAt` | S | `waiting` (for the on-demand network) → `launching` → `running` → `stopping` → `stopped`, or `failed` |
+| `launchedAt`, `startedAt`, `endedAt` | S | Timestamps |
+| `createdBy`, `createdAt`, `updatedAt` | S | Owner and timestamps |
+
+- `ACTIVE#SESSIONS / SESSION#{sid}` (`active-session`): `userId`. Written at start and deleted when the session settles. The network-controller and the watchdog read it.
+- The saved notebooks folder is an S3 object, `sessions/home/{uid}/notebooks.tar.gz`, one per user.
+
+### Platform rows
+
+- `PLATFORM / NOTEBOOK` (`platform-notebook`): `imageUri` of the notebook layer (JupyterLab), recorded by the deploy-images workflow.
+- `NETWORK / STATE` (`network-state`): the on-demand network's `status` (`up`, `starting`, `stopping`, `down`), `lastDemandAt` and `heavyLastDemandAt`. Written only by `network-controller`. The endpoints themselves are found in EC2 by tag.
+- `NETWORK / LOCK`: `owner`, `expiresAt`. Keeps two network-controller invocations from running at once.
 
 ### Workspace: `WORKSPACE#{id}` / `METADATA`
 
@@ -490,7 +508,8 @@ erDiagram
 | Which runs used or produced this artifact | `Query pk = ARTIFACT#{aid}, sk begins_with RUN#` |
 | Has this work unit already been done? | `GetItem pk = RUN#{id}, sk = RESULT#{unitId}` (many at once: `BatchGetItem`) |
 | Runs in progress (watchdog) | `Query pk = ACTIVE#RUNS` |
-| Session for the proxy | `GetItem pk = SESSION#{id}, sk = METADATA` |
+| User's sessions | `Query pk = USER#{uid}, sk begins_with SESSION#`, then `BatchGetItem` of `SESSION#{sid} / METADATA` |
+| Open sessions (network-controller, watchdog) | `Query pk = ACTIVE#SESSIONS` |
 | Budget check / hold | `GetItem` then `UpdateItem pk = USER#{uid}, sk = BUDGET` conditional on `version` |
 | Usage for a month | `Query pk = USER#{uid}, sk begins_with USAGE#2026-09#` |
 | Is this user a workspace member, and with which role? | `GetItem pk = USER#{uid}, sk = WORKSPACE#{wid}` |
@@ -511,7 +530,7 @@ erDiagram
 ## Status tracking
 
 Each status-bearing row stores its **current** status (`status`, `statusReason`, `statusUpdatedAt`) in DynamoDB. The UI reads status from these rows only, and never calls CodeBuild, Batch or ECS from the browser path.
-- **Writers:** the event Lambdas (`builds-events`, `runs-events`, `usage-meter`, and the session Lambdas in step 3) triggered by EventBridge state-change events, plus `runs-manifest` for work-unit results. They use conditional updates, so an out-of-order or repeated event can't move a status backwards or apply twice.
+- **Writers:** the event Lambdas (`builds-events`, `runs-events`, `sessions-events`, `usage-meter`) triggered by EventBridge state-change events, plus `runs-manifest` for work-unit results. They use conditional updates, so an out-of-order or repeated event can't move a status backwards or apply twice.
 - **What isn't stored:** build logs, job logs and package lists. These stay in CloudWatch Logs and S3, and the row only points to them (`buildId`, `logStreamName`, `freezeKey`). The UI fetches them when a user opens them.
 - **No history table:** status history isn't kept. `statusUpdatedAt` is enough to spot stuck work, and the usage ledger records what was billed.
 

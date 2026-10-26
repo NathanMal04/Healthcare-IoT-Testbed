@@ -502,6 +502,11 @@ export default function NewRunForm({ prefill, onCancel }: { prefill: NewRunPrefi
               Budget available this month: {formatMoney(estimate.budget.available)} of {formatMoney(estimate.budget.monthlyLimit)}
               {tooExpensive && " — lower the timeout, size or number of jobs"}
             </p>
+            {estimate.network !== "up" && (
+              <p className="text-xs text-slate-500">
+                The private network is off after a quiet period, so this run starts about 2–3 minutes after you start it.
+              </p>
+            )}
           </>
         )}
       </section>

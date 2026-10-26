@@ -10,7 +10,7 @@ variable "cidr_block" {
 }
 
 variable "az_count" {
-  description = "Availability zones to spread subnets and interface endpoints over. Each interface endpoint costs about $7.30 a month per zone."
+  description = "Availability zones for the private subnets that jobs, sessions and interface endpoints use. Each interface endpoint costs about $0.01 an hour per zone while it exists."
   type        = number
   default     = 1
 }
@@ -30,12 +30,6 @@ variable "data_lake_bucket_arn" {
   type        = string
 }
 
-variable "enable_ecs_endpoints" {
-  description = "Create the ecs, ecs-agent and ecs-telemetry endpoints that EC2 (Heavy) instances need without a NAT."
-  type        = bool
-  default     = false
-}
-
 variable "project" {
   description = "Project tag value."
   type        = string
@@ -44,4 +38,10 @@ variable "project" {
 variable "environment" {
   description = "Environment tag value (dev/staging/prod)."
   type        = string
+}
+
+variable "session_port" {
+  description = "Port JupyterLab listens on in notebook session tasks."
+  type        = number
+  default     = 8888
 }

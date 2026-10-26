@@ -1,13 +1,14 @@
-"""Provisional metering for Batch jobs and CodeBuild builds.
+"""Provisional metering for Batch jobs, CodeBuild builds and notebook sessions.
 
 EventBridge sends every finished job attempt set ("Batch Job State Change",
-SUCCEEDED/FAILED, for array children and single jobs) and every finished
-build. Each becomes one ledger row:
+SUCCEEDED/FAILED, for array children and single jobs), every finished
+build, and every stopped session task ("ECS Task State Change" on the
+sessions cluster). Each becomes one ledger row:
 
   USER#{uid} / USAGE#{period}#{source}#{resourceId}#{eventId}
 
 written in the same transaction as the budget's spentProvisional (and, for
-jobs, the run's costProvisional). The row is only written if it doesn't
+jobs and sessions, the run's or session's costProvisional). The row is only written if it doesn't
 exist yet, so a redelivered event can't bill twice.
 
 Costs use list prices from PRICING; the monthly true-up (a later step)
@@ -40,6 +41,8 @@ def handler(event, context):
         _meter_build(event.get("detail", {}))
     elif event.get("source") == "aws.batch":
         _meter_job(event.get("detail", {}))
+    elif event.get("source") == "aws.ecs":
+        _meter_session(event.get("detail", {}))
 
 
 def _meter_job(detail):
@@ -77,6 +80,48 @@ def _meter_job(detail):
                  "costTags": {"userId": run["createdBy"], "runId": run_id}},
         run_key={"pk": f"RUN#{run_id}", "sk": "METADATA"},
     )
+
+
+def _meter_session(detail):
+    """A stopped notebook session task, billed (like Fargate) from the start
+    of its image pull to when it stopped, at the Fargate on-demand rate."""
+    if detail.get("lastStatus") != "STOPPED":
+        return
+    session_id = detail.get("startedBy") or ""
+    if len(session_id) != 36:
+        return
+    table = dynamodb.Table(TABLE)
+    session = table.get_item(Key={"pk": f"SESSION#{session_id}", "sk": "METADATA"}).get("Item")
+    if session is None:
+        return
+    start = _iso(detail.get("pullStartedAt") or detail.get("startedAt"))
+    stop = _iso(detail.get("stoppedAt") or detail.get("executionStoppedAt"))
+    if not start or not stop:
+        return  # it never got resources, so nothing was billed
+    seconds = max(MIN_BILL_SECONDS, (stop - start).total_seconds())
+
+    rates = PRICING["fargate"]
+    hourly = Decimal(str(rates["vcpuHour"])) * Decimal(session["vcpu"]) + Decimal(str(rates["gbHour"])) * Decimal(session["memoryMiB"]) / 1024
+    task_id = detail["taskArn"].rsplit("/", 1)[-1]
+    _record(
+        user_id=session["createdBy"],
+        period=stop.strftime("%Y-%m"),
+        sk_tail=f"ecs#{session_id}#{task_id}",
+        amount=_money(Decimal(str(seconds)) / 3600 * hourly),
+        details={"resource": f"Notebook {session.get('name')}", "seconds": Decimal(str(round(seconds, 3))),
+                 "sessionId": session_id, "taskId": task_id,
+                 "costTags": {"userId": session["createdBy"], "sessionId": session_id}},
+        run_key={"pk": f"SESSION#{session_id}", "sk": "METADATA"},
+    )
+
+
+def _iso(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        return None
 
 
 def _meter_build(detail):
