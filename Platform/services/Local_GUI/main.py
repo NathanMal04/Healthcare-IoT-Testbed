@@ -343,9 +343,19 @@ class _HostX:
 _hostx = _HostX()
 
 class ToolRunner:
-    """CLI tools use the console. GUI tools run on a nested X screen parented to the viewport."""
+    """One tool session: a CLI console or a GUI viewport with its own process."""
+
+    # Displays handed out to embedded sessions and not yet released.
+    _reserved_displays: set[str] = set()
 
     def __init__(self, parent):
+        self.frame = parent
+        self.title = ""
+        self.running = False
+        self.status_listener = None
+        self._close_requested = False
+        self._stop_requested = False
+        self._destroyed = False
         self.proc = None
         self.output_q = queue.Queue()
         self._poll_job = None
@@ -385,15 +395,54 @@ class ToolRunner:
             widget.bind("<Control-c>", self.send_interrupt)
             widget.bind("<Control-C>", self.send_interrupt)
 
-    def start_tool(self, cmd: list[str], gui: bool = False):
-        """cmd example: ["tshark", "-i", "eth0", "-l"]  ( -l = line buffered)"""
+    def start_tool(self, cmd: list[str], gui: bool = False) -> bool:
+        """Start this session. Returns True when the tool process was launched."""
+        if self._close_requested or self._stop_requested:
+            return False
         if self._busy():
-            messagebox.showwarning("Already running", "Stop the current tool first", parent=self._window())
-            return
+            messagebox.showwarning(
+                "Already running",
+                "This tool is already running.",
+                parent=self._window(),
+            )
+            return False
         if gui:
-            self._start_gui(cmd)
-        else:
-            self._start_cli(cmd)
+            return bool(self._start_gui(cmd))
+        return bool(self._start_cli(cmd))
+
+    def _set_running(self, running: bool):
+        if self.running == running:
+            return
+        self.running = running
+        listener = self.status_listener
+        if listener is None:
+            return
+        try:
+            listener(self)
+        except tk.TclError:
+            pass
+
+    def alive(self) -> bool:
+        if self.proc and self.proc.poll() is None:
+            return True
+        if self._xephyr and self._xephyr.poll() is None:
+            return True
+        return False
+
+    def reveal(self):
+        """Called when this session's tab becomes visible."""
+        try:
+            self.frame.update_idletasks()
+        except tk.TclError:
+            return
+        if self.running and not self.alive():
+            self._set_running(False)
+        if self._xephyr_win is None:
+            return
+        width, height = self.viewport.winfo_width(), self.viewport.winfo_height()
+        if width < 50 or height < 50:
+            return
+        self._fit_xephyr(width, height)
 
     def _cli_env(self):
         env = os.environ.copy()
@@ -455,17 +504,22 @@ class ToolRunner:
             os.close(master)
             os.close(slave)
             messagebox.showerror("Tool error", f"Could not start process:\n{exc}", parent=self._window())
-            return
+            return False
         os.close(slave)
 
         self._pty_master = master
         threading.Thread(target=self._reader_pty, daemon=True).start()
         self._poll_output()
+        if self._close_requested or self._stop_requested:
+            self.stop_tool()
+            return False
+        self._set_running(True)
+        return True
 
     def _start_gui(self, cmd: list[str]):
         self._starting = True
         try:
-            self._start_gui_session(cmd)
+            return self._start_gui_session(cmd)
         finally:
             self._starting = False
 
@@ -477,20 +531,22 @@ class ToolRunner:
                 "Install it with: sudo apt-get install xserver-xephyr",
                 parent=self._window(),
             )
-            return
+            return False
 
         self._show_viewport()
+        if self._close_requested or self._stop_requested:
+            return False
         width, height = self.viewport.winfo_width(), self.viewport.winfo_height()
         if width < 50 or height < 50:
             self._show_console()
             messagebox.showerror("GUI tool", "The tooling pane is not visible yet.", parent=self._window())
-            return
+            return False
 
-        display = self._free_display()
+        display = self._claim_display()
         if display is None:
             self._show_console()
             messagebox.showerror("GUI tool", "No free X display for the embedded session.", parent=self._window())
-            return
+            return False
 
         stderr_lines = []
         try:
@@ -513,9 +569,9 @@ class ToolRunner:
                 start_new_session=True,
             )
         except OSError as exc:
-            self._show_console()
+            self._stop_gui()
             messagebox.showerror("GUI tool", f"Could not start Xephyr: {exc}", parent=self._window())
-            return
+            return False
 
         threading.Thread(target=self._drain, args=(self._xephyr.stderr, stderr_lines), daemon=True).start()
         self._remember(self._xephyr)
@@ -524,7 +580,11 @@ class ToolRunner:
             detail = "".join(stderr_lines).strip() or "Xephyr exited before the embedded display was ready."
             self._stop_gui()
             messagebox.showerror("GUI tool", detail, parent=self._window())
-            return
+            return False
+
+        if self._close_requested or self._stop_requested:
+            self._stop_gui()
+            return False
 
         xephyr_win = self._wait_for_xephyr_window(display, self._xephyr)
         if xephyr_win is None:
@@ -535,7 +595,7 @@ class ToolRunner:
                 "xwininfo is required (package x11-utils).",
                 parent=self._window(),
             )
-            return
+            return False
 
         width, height = self.viewport.winfo_width(), self.viewport.winfo_height()
         try:
@@ -543,7 +603,7 @@ class ToolRunner:
         except OSError as exc:
             self._stop_gui()
             messagebox.showerror("GUI tool", f"Could not embed the tool window: {exc}", parent=self._window())
-            return
+            return False
         self._xephyr_win = xephyr_win
 
         self._gui_display = display
@@ -570,6 +630,12 @@ class ToolRunner:
         except OSError as exc:
             self._stop_gui()
             messagebox.showerror("GUI tool", f"Could not start the tool: {exc}", parent=self._window())
+            return False
+        if self._close_requested or self._stop_requested:
+            self.stop_tool()
+            return False
+        self._set_running(True)
+        return True
 
     def _reader_pty(self):
         master = self._pty_master
@@ -638,12 +704,27 @@ class ToolRunner:
         return "break"  # stop Tk from treating this as Copy
 
     def stop_tool(self):
+        self._stop_requested = True
+        was_alive = self.alive()
         self._cancel_poll()
         if self.proc and self.proc.poll() is None:
             self._terminate(self.proc)
         self.proc = None
         self._close_pty()
         self._stop_gui()
+        if was_alive:
+            self._note("\n--- tool stopped ---\n")
+
+    def _note(self, text: str):
+        try:
+            if not self.console.winfo_exists():
+                return
+            self.console.configure(state="normal")
+            self.ansi.write(text)
+            self.console.configure(state="disabled")
+            self.console.see("end")
+        except tk.TclError:
+            return
 
     def _close_pty(self):
         master = self._pty_master
@@ -663,6 +744,7 @@ class ToolRunner:
         self.ansi.write(b"\n--- process ended ---\n")
         self.console.configure(state="disabled")
         self.proc = None
+        self._set_running(False)
 
     def _busy(self):
         if self._starting:
@@ -676,25 +758,39 @@ class ToolRunner:
         return False
 
     def _show_console(self):
-        self.viewport.pack_forget()
-        if not self.console.winfo_ismapped():
-            self.console.pack(fill="both", expand=True, padx=6, pady=6)
-        if not self.input_entry.winfo_ismapped():
-            self.input_entry.pack(fill="x", padx=6, pady=(0, 6))
+        try:
+            if not self.frame.winfo_exists():
+                return
+            self.viewport.pack_forget()
+            if not self.console.winfo_ismapped():
+                self.console.pack(fill="both", expand=True, padx=6, pady=6)
+            if not self.input_entry.winfo_ismapped():
+                self.input_entry.pack(fill="x", padx=6, pady=(0, 6))
+        except tk.TclError:
+            return
 
     def _show_viewport(self):
-        self.console.pack_forget()
-        self.input_entry.pack_forget()
-        if not self.viewport.winfo_ismapped():
-            self.viewport.pack(fill="both", expand=True, padx=6, pady=6)
-        self.viewport.update_idletasks()
-        self._window().update()
+        try:
+            if not self.frame.winfo_exists():
+                return
+            self.console.pack_forget()
+            self.input_entry.pack_forget()
+            if not self.viewport.winfo_ismapped():
+                self.viewport.pack(fill="both", expand=True, padx=6, pady=6)
+            self.viewport.update_idletasks()
+            self._window().update()
+        except tk.TclError:
+            return
 
     def _window(self):
         return self.viewport.winfo_toplevel()
 
-    def _free_display(self):
+    def _claim_display(self):
+        """Reserve a free X display so concurrent GUI sessions do not collide."""
         for number in range(2, 64):
+            display = f":{number}"
+            if display in ToolRunner._reserved_displays:
+                continue
             socket_path = f"/tmp/.X11-unix/X{number}"
             lock_path = f"/tmp/.X{number}-lock"
             if os.path.exists(socket_path):
@@ -704,7 +800,9 @@ class ToolRunner:
                     os.remove(lock_path)
                 except OSError:
                     continue
-            return f":{number}"
+            ToolRunner._reserved_displays.add(display)
+            self._gui_display = display
+            return display
         return None
 
     def _wait_for_display(self, display, proc, timeout=5.0):
@@ -786,12 +884,17 @@ class ToolRunner:
         groups = self._gui_groups
         procs = self._gui_procs
         self._gui_display = None
+        if display:
+            ToolRunner._reserved_displays.discard(display)
         self._gui_groups = []
         self._gui_procs = []
         self._xephyr = None
         self._xephyr_win = None
         if self._fit_job is not None:
-            self.viewport.after_cancel(self._fit_job)
+            try:
+                self.viewport.after_cancel(self._fit_job)
+            except tk.TclError:
+                pass
             self._fit_job = None
 
         if display:
@@ -802,7 +905,7 @@ class ToolRunner:
             if proc.poll() is None:
                 proc.terminate()
 
-        if display or procs:
+        if procs:
             time.sleep(0.3)
 
         if display:
@@ -813,6 +916,7 @@ class ToolRunner:
             if proc.poll() is None:
                 proc.kill()
 
+        self._set_running(False)
         self._show_console()
 
     def _pids_on_display(self, display):
@@ -872,6 +976,355 @@ class ToolRunner:
         for line in iter(pipe.readline, ""):
             bucket.append(line)
             del bucket[:-30]
+
+
+class ToolWorkspace(tk.Frame):
+    """Tab strip and stacked tool sessions for the tooling pane."""
+
+    def __init__(self, parent):
+        super().__init__(parent, bg=COLORS["bg"])
+        self._sessions: list[ToolRunner] = []
+        self._active: ToolRunner | None = None
+        self._launching = False
+
+        self.rowconfigure(1, weight=1)
+        self.columnconfigure(0, weight=1)
+
+        self.tab_bar = tk.Frame(self, bg=COLORS["bg_raised"])
+        self.tab_bar.grid(row=0, column=0, sticky="ew")
+        self.tab_bar.columnconfigure(0, weight=1)
+
+        self.tab_canvas = tk.Canvas(
+            self.tab_bar,
+            height=48,
+            bg=COLORS["bg_raised"],
+            highlightthickness=0,
+            bd=0,
+        )
+        self.tab_canvas.grid(row=0, column=0, sticky="ew")
+        tk.Frame(self.tab_bar, bg=COLORS["border"], height=1).grid(row=1, column=0, sticky="ew")
+
+        self.tab_inner = tk.Frame(self.tab_canvas, bg=COLORS["bg_raised"])
+        self._tab_window = self.tab_canvas.create_window((0, 0), window=self.tab_inner, anchor="nw")
+        self.tab_canvas.bind("<Configure>", self._on_canvas_configure)
+        self.tab_inner.bind("<Configure>", self._on_tabs_configure)
+        self._bind_tab_scroll(self.tab_canvas)
+        self._bind_tab_scroll(self.tab_inner)
+
+        self.body = tk.Frame(self, bg=COLORS["bg"])
+        self.body.grid(row=1, column=0, sticky="nsew")
+        self.body.rowconfigure(0, weight=1)
+        self.body.columnconfigure(0, weight=1)
+
+        self.placeholder = tk.Frame(self.body, bg=COLORS["bg"])
+        self.placeholder.grid(row=0, column=0, sticky="nsew")
+        self.placeholder.rowconfigure(0, weight=1)
+        self.placeholder.rowconfigure(2, weight=1)
+        self.placeholder.columnconfigure(0, weight=1)
+        tk.Label(
+            self.placeholder,
+            text="No tools open",
+            bg=COLORS["bg"],
+            fg=COLORS["fg"],
+            font=("Arial", 18),
+        ).grid(row=0, column=0, sticky="s", pady=(0, 6))
+        tk.Label(
+            self.placeholder,
+            text="Select a tool and press START TEST",
+            bg=COLORS["bg"],
+            fg=COLORS["fg_muted"],
+            font=("Arial", 12),
+        ).grid(row=1, column=0, sticky="n")
+
+    @property
+    def sessions(self) -> list[ToolRunner]:
+        return list(self._sessions)
+
+    @property
+    def active(self) -> ToolRunner | None:
+        return self._active
+
+    def open_tool(self, name: str, cmd: list[str], gui: bool = False):
+        """Launch a tool in a new tab and switch to it."""
+        if self._launching:
+            return None
+        self._launching = True
+        session = None
+        try:
+            title = self._unique_title(name)
+            frame = tk.Frame(self.body, bg=COLORS["bg"])
+            session = ToolRunner(frame)
+            session.title = title
+            session.status_listener = self._on_status
+            self._sessions.append(session)
+            self._add_tab(session)
+            self.select(session)
+            ok = False
+            try:
+                ok = session.start_tool(cmd, gui=gui)
+            finally:
+                if not session._destroyed and ((not ok) or session._close_requested):
+                    self._destroy_session(session)
+                    session = None
+                elif session is not None and not session._destroyed:
+                    session.reveal()
+                    self._focus_session(session)
+        finally:
+            self._launching = False
+        return session
+
+    def select(self, session: ToolRunner):
+        if session._destroyed or session not in self._sessions:
+            return
+        if self._active is not session:
+            if self._active is not None and not self._active._destroyed:
+                self._active.frame.grid_remove()
+                self._style_tab(self._active, False)
+            self._active = session
+            self.placeholder.grid_remove()
+            session.frame.grid(row=0, column=0, sticky="nsew")
+            self._style_tab(session, True)
+        self.body.update_idletasks()
+        self._scroll_tab_into_view(session)
+        session.reveal()
+        self._focus_session(session)
+
+    def stop_active(self):
+        """Stop the tool in the visible tab and keep its output."""
+        session = self._active
+        if session is None or session._destroyed:
+            return
+        session.stop_tool()
+
+    def _click_tab(self, session: ToolRunner):
+        # Keep the session being launched mapped; other tabs can be selected once it returns.
+        if self._launching:
+            return "break"
+        self.select(session)
+        return "break"
+
+    def _queue_close(self, session: ToolRunner):
+        """Close after the click handler returns so the tab widget is not destroyed mid-event."""
+        if session._destroyed:
+            return "break"
+        self.after_idle(lambda s=session: self.close_session(s))
+        return "break"
+
+    def close_session(self, session: ToolRunner):
+        if session._destroyed:
+            return
+        if session._starting:
+            session._close_requested = True
+            return
+        self._destroy_session(session)
+
+    def close_all(self):
+        for session in list(self._sessions):
+            session._close_requested = True
+            self._destroy_session(session)
+
+    def _destroy_session(self, session: ToolRunner):
+        if session._destroyed:
+            return
+        session._destroyed = True
+        try:
+            index = self._sessions.index(session)
+        except ValueError:
+            index = -1
+        if index >= 0:
+            self._sessions.pop(index)
+        was_active = self._active is session
+        session.status_listener = None
+        session.stop_tool()
+        for widget in (getattr(session, "tab_widget", None), session.frame):
+            if widget is None:
+                continue
+            try:
+                widget.destroy()
+            except tk.TclError:
+                pass
+        if was_active:
+            self._active = None
+            if self._sessions:
+                next_index = len(self._sessions) - 1 if index < 0 else min(index, len(self._sessions) - 1)
+                self.select(self._sessions[next_index])
+            else:
+                self._show_placeholder()
+        self._sync_scrollregion()
+
+    def _show_placeholder(self):
+        if self._active is not None and not self._active._destroyed:
+            try:
+                self._active.frame.grid_remove()
+            except tk.TclError:
+                pass
+        self._active = None
+        self.placeholder.grid(row=0, column=0, sticky="nsew")
+
+    def _unique_title(self, name: str) -> str:
+        titles = {session.title for session in self._sessions}
+        if name not in titles:
+            return name
+        number = 2
+        while f"{name} ({number})" in titles:
+            number += 1
+        return f"{name} ({number})"
+
+    @staticmethod
+    def _tab_text(title: str) -> str:
+        limit = 32
+        if len(title) <= limit:
+            return title
+        return title[: limit - 1] + "…"
+
+    def _add_tab(self, session: ToolRunner):
+        tab = tk.Frame(self.tab_inner, bg=COLORS["bg_sidebar"], cursor="hand2")
+        tab.pack(side="left", fill="y", padx=(6, 0), pady=(4, 0))
+        accent = tk.Frame(tab, bg=COLORS["bg_sidebar"], height=3)
+        accent.pack(side="top", fill="x")
+        row = tk.Frame(tab, bg=COLORS["bg_sidebar"])
+        row.pack(side="top", fill="both")
+        dot = tk.Frame(row, width=8, height=8, bg=COLORS["fg_muted"], highlightthickness=0)
+        dot.pack(side="left", padx=(10, 4))
+        dot.pack_propagate(False)
+        label = tk.Label(
+            row,
+            text=self._tab_text(session.title),
+            bg=COLORS["bg_sidebar"],
+            fg=COLORS["fg"],
+            font=("Arial", 11),
+            anchor="w",
+        )
+        label.pack(side="left", padx=(2, 4), pady=6)
+        close = tk.Label(
+            row,
+            text="×",
+            bg=COLORS["bg_sidebar"],
+            fg=COLORS["fg_muted"],
+            font=("Arial", 14),
+            cursor="hand2",
+        )
+        close.pack(side="left", padx=(2, 8))
+
+        session.tab_widget = tab
+        session.tab_accent = accent
+        session.tab_row = row
+        session.tab_dot = dot
+        session.tab_label = label
+        session.tab_close = close
+
+        for widget in (tab, accent, row, dot, label):
+            widget.bind("<Button-1>", lambda _e, s=session: self._click_tab(s))
+            widget.bind("<Button-2>", lambda _e, s=session: self._queue_close(s))
+        close.bind("<Button-1>", lambda _e, s=session: self._queue_close(s))
+        close.bind("<Button-2>", lambda _e, s=session: self._queue_close(s))
+        close.bind("<Enter>", lambda _e, s=session: self._hover_close(s, True))
+        close.bind("<Leave>", lambda _e, s=session: self._hover_close(s, False))
+        self._bind_tree_scroll(tab)
+        self._style_tab(session, active=(session is self._active))
+
+    def _hover_close(self, session: ToolRunner, hovering: bool):
+        if session._destroyed:
+            return
+        try:
+            if hovering:
+                session.tab_close.configure(fg="#ffffff", bg=COLORS["danger"])
+            else:
+                self._style_tab(session, active=(session is self._active))
+        except tk.TclError:
+            pass
+
+    def _on_status(self, session: ToolRunner):
+        if session._destroyed:
+            return
+        self._style_tab(session, active=(session is self._active))
+
+    def _style_tab(self, session: ToolRunner, active: bool):
+        try:
+            if not session.tab_widget.winfo_exists():
+                return
+        except (tk.TclError, AttributeError):
+            return
+        if active:
+            bg = COLORS["bg"]
+            fg = "#ffffff"
+            accent = COLORS["accent"]
+            close_fg = COLORS["fg"]
+        else:
+            bg = COLORS["bg_sidebar"]
+            fg = COLORS["fg"] if session.running else COLORS["fg_muted"]
+            accent = bg
+            close_fg = COLORS["fg_muted"]
+        dot = COLORS["accent"] if session.running else COLORS["fg_muted"]
+        session.tab_widget.configure(bg=bg)
+        session.tab_accent.configure(bg=accent)
+        session.tab_row.configure(bg=bg)
+        session.tab_dot.configure(bg=dot)
+        session.tab_label.configure(bg=bg, fg=fg, text=self._tab_text(session.title))
+        session.tab_close.configure(bg=bg, fg=close_fg)
+
+    def _focus_session(self, session: ToolRunner):
+        try:
+            if session.input_entry.winfo_ismapped():
+                session.input_entry.focus_set()
+            elif session.viewport.winfo_ismapped():
+                session.viewport.focus_set()
+        except tk.TclError:
+            pass
+
+    def _on_canvas_configure(self, event):
+        self.tab_canvas.itemconfigure(self._tab_window, height=event.height)
+        self._sync_scrollregion()
+
+    def _on_tabs_configure(self, _event):
+        self._sync_scrollregion()
+
+    def _sync_scrollregion(self):
+        bbox = self.tab_canvas.bbox("all")
+        if bbox:
+            self.tab_canvas.configure(scrollregion=bbox)
+
+    def _scroll_tab_into_view(self, session: ToolRunner):
+        tab = getattr(session, "tab_widget", None)
+        if tab is None:
+            return
+        try:
+            self.tab_canvas.update_idletasks()
+            x = tab.winfo_x()
+            width = tab.winfo_width()
+            view = self.tab_canvas.winfo_width()
+            total = max(self.tab_inner.winfo_reqwidth(), 1)
+            if width <= 1 or view <= 1:
+                return
+            if total <= view:
+                self.tab_canvas.xview_moveto(0)
+                return
+            left = self.tab_canvas.canvasx(0)
+            if x < left:
+                self.tab_canvas.xview_moveto(x / total)
+            elif x + width > left + view:
+                self.tab_canvas.xview_moveto((x + width - view) / total)
+        except tk.TclError:
+            pass
+
+    def _bind_tree_scroll(self, widget):
+        self._bind_tab_scroll(widget)
+        for child in widget.winfo_children():
+            self._bind_tree_scroll(child)
+
+    def _bind_tab_scroll(self, widget):
+        widget.bind("<Button-4>", self._on_tab_scroll, add="+")
+        widget.bind("<Button-5>", self._on_tab_scroll, add="+")
+        widget.bind("<MouseWheel>", self._on_mousewheel, add="+")
+
+    def _on_tab_scroll(self, event):
+        self.tab_canvas.xview_scroll(-3 if event.num == 4 else 3, "units")
+        return "break"
+
+    def _on_mousewheel(self, event):
+        step = -1 if event.delta > 0 else 1
+        self.tab_canvas.xview_scroll(step * 3, "units")
+        return "break"
 
 
 def apply_dark_window_frame(window: tk.Tk) -> None:
@@ -1063,6 +1516,8 @@ local_gui.rowconfigure(0, weight=1)
 
 tooling = tk.Frame(master=local_gui, bg=COLORS["bg"])
 tooling.grid(row=0, column=0, sticky="nsew", padx=(6, 6), pady=12)
+tooling.rowconfigure(0, weight=1)
+tooling.columnconfigure(0, weight=1)
 
 sidebar = tk.Frame(master=local_gui, bg=COLORS["bg_sidebar"])
 sidebar.grid(row=0, column=1, sticky="nsew", padx=(0, 6), pady=12)
@@ -1389,10 +1844,11 @@ style.map(
     background=[("active", COLORS["danger_active"])],
     foreground=[("active", "#ffffff")],
 )
-button = ttk.Button(sidebar, text="STOP APPLICATION", style="button.TButton")
+button = ttk.Button(sidebar, text="STOP TOOL", style="button.TButton")
 button.grid(row=10, column=0, sticky="ew", padx=10, pady=(0, 10), ipady=22)
 
-runner = ToolRunner(tooling)
+workspace = ToolWorkspace(tooling)
+workspace.grid(row=0, column=0, sticky="nsew")
 rebuild_tools_menu()
 
 
@@ -1427,15 +1883,15 @@ def on_start():
         messagebox.showerror("Tool error", f"{tool.name} produced an empty command.", parent=local_gui)
         return
 
-    runner.start_tool(cmd, gui=tool.gui)
+    workspace.open_tool(tool.name, cmd, gui=tool.gui)
 
 
 button1.configure(command=on_start)
-button.configure(command=runner.stop_tool)
+button.configure(command=workspace.stop_active)
 
 
 def on_close():
-    runner.stop_tool()
+    workspace.close_all()
     local_gui.destroy()
 
 
