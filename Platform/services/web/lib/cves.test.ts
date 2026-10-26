@@ -16,6 +16,7 @@ vi.mock("@/lib/api", () => {
 });
 
 import { ApiError } from "@/lib/api";
+import { cvesForDevice } from "@/lib/dashboard";
 import {
   EMPTY_CVE_FORM,
   EMPTY_FILTERS,
@@ -250,6 +251,35 @@ describe("filterCves", () => {
     expect(ids("dev-pump")).toEqual([]);
     const unknown = filterCves([cve({ deviceIds: ["dev-gone"] })], { ...EMPTY_FILTERS, text: "unknown" }, names);
     expect(unknown).toEqual([]);
+  });
+});
+
+// A device's CVEs tab browses cvesForDevice(...) with the same filters.
+describe("filterCves on a device's CVEs", () => {
+  const names = new Map([["dev-pump", "Infusion Pump X100"], ["dev-icu", "ICU Heart Monitor"]]);
+  const a = cve({ cveRecordId: "a", severity: "critical", deviceIds: ["dev-pump"] });
+  const b = cve({ cveRecordId: "b", cveId: "CVE-2020-26652", severity: "high", description: "DoS in rtl80211_send_chandef.",
+                  deviceIds: ["dev-icu", "dev-pump"] });
+  const c = cve({ cveRecordId: "c", cveId: "CVE-2022-26445", severity: "high", deviceIds: [] });
+  const icu = (extra: Partial<typeof EMPTY_FILTERS> = {}) =>
+    filterCves(cvesForDevice([a, b, c], "dev-icu"), { ...EMPTY_FILTERS, ...extra }, names).map((x) => x.cveRecordId);
+
+  it("lists only the device's CVEs", () => {
+    expect(icu()).toEqual(["b"]);
+  });
+
+  it("never brings in a matching CVE of another device or of none", () => {
+    expect(icu({ text: "37584" })).toEqual([]);
+    expect(icu({ text: "26445" })).toEqual([]);
+    expect(icu({ severity: "critical" })).toEqual([]);
+    expect(icu({ device: NO_DEVICES })).toEqual([]);
+  });
+
+  it("narrows by search, severity and another linked device", () => {
+    expect(icu({ text: "infusion pump" })).toEqual(["b"]);
+    expect(icu({ text: "chandef", severity: "high" })).toEqual(["b"]);
+    expect(icu({ device: "dev-pump" })).toEqual(["b"]);
+    expect(icu({ severity: "low" })).toEqual([]);
   });
 });
 

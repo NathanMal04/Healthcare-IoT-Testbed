@@ -1,9 +1,15 @@
 // Links to pages that take their subject from the query string (the site is
 // a static export, so there are no dynamic route segments).
 
-export function deviceHref(deviceId: string, tab?: string): string {
+/** `cve` opens that linked CVE's details on the device's CVEs tab. */
+export function deviceHref(deviceId: string, tab?: string, options: { cve?: string } = {}): string {
   const params = new URLSearchParams({ id: deviceId });
-  if (tab) params.set("tab", tab);
+  if (options.cve) {
+    params.set("tab", "cves");
+    params.set("cve", options.cve);
+  } else if (tab) {
+    params.set("tab", tab);
+  }
   return `/devices/view?${params.toString()}`;
 }
 

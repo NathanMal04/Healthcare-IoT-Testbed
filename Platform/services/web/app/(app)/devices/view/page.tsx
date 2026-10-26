@@ -1,11 +1,27 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Cpu, Download, Eye, FolderArchive, Link2, Microchip, Pencil, ShieldAlert, Unlink, Upload } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronRight,
+  Cpu,
+  Download,
+  ExternalLink,
+  Eye,
+  FolderArchive,
+  Link2,
+  Microchip,
+  Pencil,
+  ShieldAlert,
+  Unlink,
+  Upload,
+} from "lucide-react";
 import {
   DEVICE_DETAIL_FIELDS,
   getDevice,
+  getDevices,
   updateDeviceReverseEngineeringStatus,
   type Device,
   type ReverseEngineeringStatus,
@@ -38,6 +54,8 @@ import EditDeviceDialog from "@/app/components/EditDeviceDialog";
 import FirmwareUploadDialog from "@/app/components/firmware/FirmwareUploadDialog";
 import ArtifactUploader from "@/app/components/ArtifactUploader";
 import ArtifactTypeChips from "@/app/components/ArtifactTypeChips";
+import CveDetails from "@/app/components/CveDetails";
+import CveList from "@/app/components/CveList";
 import {
   FirmwareRetryDialog,
   FirmwareTable,
@@ -57,13 +75,11 @@ import {
   PageHeader,
   RowActionsMenu,
   ScopeLabel,
-  SeverityBadge,
   StatusBadge,
   TabPanel,
   Tabs,
   Toolbar,
   formatDate,
-  formatDay,
   selectClass,
   type Column,
 } from "@/app/components/ui";
@@ -85,7 +101,11 @@ function DeviceViewRoute() {
   const { scope, scopeReady } = useWorkspace();
   const deviceId = searchParams.get("id") ?? "";
   const tabParam = searchParams.get("tab");
-  const initialTab: TabId = TABS.includes(tabParam as TabId) ? (tabParam as TabId) : "overview";
+  const initialTab: TabId = searchParams.get("cve")
+    ? "cves"
+    : TABS.includes(tabParam as TabId)
+      ? (tabParam as TabId)
+      : "overview";
 
   if (!scopeReady) return <LoadingState label="Loading workspace…" />;
   if (!deviceId) {
@@ -108,6 +128,8 @@ function DeviceViewRoute() {
 
 function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: TabId }) {
   const router = useRouter();
+  // A linked CVE opened from the CVEs tab; in the URL so Back returns to the list.
+  const openCveId = useSearchParams().get("cve");
   const { scope, reportWorkspaceUnavailable } = useWorkspace();
   const workspaceId = scopeWorkspaceId(scope);
 
@@ -116,6 +138,10 @@ function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: Ta
   const [loadError, setLoadError] = useState<string | null>(null);
   const [cves, setCves] = useState<CveSummary[] | null>(null);
   const [cveError, setCveError] = useState<string | null>(null);
+  const [cvesLoading, setCvesLoading] = useState(false);
+  // The scope's devices name the other devices a CVE is linked to.
+  const [scopeDevices, setScopeDevices] = useState<Device[] | null>(null);
+  const [scopeDevicesError, setScopeDevicesError] = useState<string | null>(null);
   const [firmware, setFirmware] = useState<Artifact[] | null>(null);
   const [firmwareError, setFirmwareError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>(initialTab);
@@ -129,37 +155,55 @@ function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: Ta
     };
   }, []);
 
+  // Only the latest CVE load may update the page (e.g. Refresh overtaking the first load).
+  const cveLoadIdRef = useRef(0);
+
+  const loadCves = useCallback(async () => {
+    const loadId = ++cveLoadIdRef.current;
+    setCvesLoading(true);
+    const [cveResult, deviceResult] = await Promise.allSettled([listCves(workspaceId), getDevices(workspaceId)]);
+    if (!isMountedRef.current || loadId !== cveLoadIdRef.current) return;
+    if (cveResult.status === "fulfilled") {
+      setCves(cveResult.value);
+      setCveError(null);
+    } else {
+      setCveError(cveErrorMessage(cveResult.reason, "Couldn't load vulnerabilities"));
+      // The CVE list is the workspace-scoped request here, so it is what
+      // shows the workspace has gone.
+      if (workspaceId && isWorkspaceUnavailable(cveResult.reason)) reportWorkspaceUnavailable();
+    }
+    if (deviceResult.status === "fulfilled") {
+      setScopeDevices(deviceResult.value);
+      setScopeDevicesError(null);
+    } else {
+      setScopeDevices(null);
+      setScopeDevicesError("Device names couldn't be loaded.");
+    }
+    setCvesLoading(false);
+  }, [workspaceId, reportWorkspaceUnavailable]);
+
   // The device is shown only in its own scope: one of another scope (or one
   // the caller can't use) is treated as not found here.
   useEffect(() => {
     let active = true;
-    Promise.allSettled([getDevice(deviceId), listCves(workspaceId)]).then(([deviceResult, cveResult]) => {
-      if (!active) return;
-      if (deviceResult.status === "fulfilled") {
-        const found = deviceResult.value.workspaceId === workspaceId ? deviceResult.value : null;
-        setDevice(found);
-        setNotFound(!found);
-      } else if (
-        deviceResult.reason instanceof ApiError &&
-        [400, 403, 404].includes(deviceResult.reason.status)
-      ) {
-        setNotFound(true);
-      } else {
-        setLoadError(deviceResult.reason instanceof Error ? deviceResult.reason.message : "Failed to load the device");
+    getDevice(deviceId).then(
+      (found) => {
+        if (!active) return;
+        const inScope = found.workspaceId === workspaceId ? found : null;
+        setDevice(inScope);
+        setNotFound(!inScope);
+      },
+      (err) => {
+        if (!active) return;
+        if (err instanceof ApiError && [400, 403, 404].includes(err.status)) setNotFound(true);
+        else setLoadError(err instanceof Error ? err.message : "Failed to load the device");
       }
-      if (cveResult.status === "fulfilled") {
-        setCves(cveResult.value);
-      } else {
-        setCveError(cveErrorMessage(cveResult.reason, "Couldn't load vulnerabilities"));
-        // The CVE list is the workspace-scoped request here, so it is what
-        // shows the workspace has gone.
-        if (workspaceId && isWorkspaceUnavailable(cveResult.reason)) reportWorkspaceUnavailable();
-      }
-    });
+    );
+    void loadCves();
     return () => {
       active = false;
     };
-  }, [workspaceId, deviceId, reportWorkspaceUnavailable]);
+  }, [deviceId, workspaceId, loadCves]);
 
   const reloadFirmware = useCallback(async () => {
     try {
@@ -274,13 +318,34 @@ function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: Ta
           />
         )}
         {tab === "artifacts" && <ArtifactsTab device={device} />}
-        {tab === "cves" && (
+        {tab === "cves" && openCveId && (
+          <CveDetails
+            key={openCveId}
+            cveRecordId={openCveId}
+            Frame={DeviceCveFrame}
+            backAction={
+              <ButtonLink href={deviceHref(deviceId, "cves")} variant="secondary" size="sm">
+                Back to CVEs
+              </ButtonLink>
+            }
+            onChanged={upsertCve}
+            onDeleted={(cveRecordId) => {
+              removeCve(cveRecordId);
+              router.push(deviceHref(deviceId, "cves"));
+            }}
+          />
+        )}
+        {tab === "cves" && !openCveId && (
           <CvesTab
             device={device}
             scope={scope}
             allCves={cves}
             deviceCves={deviceCves}
             error={cveError}
+            devices={scopeDevices}
+            devicesError={scopeDevicesError}
+            refreshing={cvesLoading}
+            onRefresh={() => void loadCves()}
             onChanged={upsertCve}
             onRemoved={removeCve}
           />
@@ -682,6 +747,10 @@ function CvesTab({
   allCves,
   deviceCves,
   error,
+  devices,
+  devicesError,
+  refreshing,
+  onRefresh,
   onChanged,
   onRemoved,
 }: {
@@ -690,10 +759,13 @@ function CvesTab({
   allCves: CveSummary[] | null;
   deviceCves: CveSummary[];
   error: string | null;
+  devices: Device[] | null;
+  devicesError: string | null;
+  refreshing: boolean;
+  onRefresh: () => void;
   onChanged: (cve: Cve) => void;
   onRemoved: (cveRecordId: string) => void;
 }) {
-  const router = useRouter();
   const [toLink, setToLink] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -744,48 +816,6 @@ function CvesTab({
     }
   }
 
-  const columns: Column<CveSummary>[] = [
-    {
-      key: "cve",
-      header: "CVE ID",
-      className: "whitespace-nowrap",
-      cell: (cve) => <span className="font-mono text-[13px] font-medium text-brand-700">{cve.cveId}</span>,
-    },
-    { key: "severity", header: "Severity", cell: (cve) => <SeverityBadge severity={cve.severity} /> },
-    {
-      key: "cvss",
-      header: "CVSS",
-      className: "whitespace-nowrap tabular-nums text-slate-700",
-      cell: (cve) => (cve.cvssScore === null ? <span className="text-slate-300">—</span> : cve.cvssScore),
-    },
-    {
-      key: "updated",
-      header: "Updated",
-      hideBelow: "md",
-      className: "whitespace-nowrap text-slate-500",
-      cell: (cve) => formatDay(cve.updatedAt),
-    },
-    {
-      key: "actions",
-      header: "Actions",
-      headerClassName: "text-right",
-      className: "text-right whitespace-nowrap",
-      cell: (cve) =>
-        busy === `unlink:${cve.cveRecordId}` ? (
-          <span className="text-xs text-slate-500">Unlinking…</span>
-        ) : (
-          <RowActionsMenu
-            label={`Actions for ${cve.cveId}`}
-            disabled={busy !== null}
-            actions={[
-              { label: "View details", icon: Eye, href: cveHref(cve.cveRecordId) },
-              { label: "Unlink from device", icon: Unlink, onSelect: () => void unlink(cve) },
-            ]}
-          />
-        ),
-    },
-  ];
-
   return (
     <Card className="overflow-hidden">
       <CardHeader
@@ -832,22 +862,81 @@ function CvesTab({
           {actionError}
         </Alert>
       )}
-      {error ? (
-        <ErrorState title="Couldn't load vulnerabilities" message={error} />
-      ) : allCves === null ? (
-        <LoadingState label="Loading vulnerabilities…" />
-      ) : deviceCves.length === 0 ? (
-        <EmptyState icon={ShieldAlert} title="No CVEs linked to this device" description="Link a recorded CVE above, or record a new one on Vulnerabilities." />
-      ) : (
-        <DataTable
-          columns={columns}
-          rows={deviceCves}
-          rowKey={(cve) => cve.cveRecordId}
-          onRowClick={(cve) => router.push(cveHref(cve.cveRecordId))}
-          rowLabel={(cve) => `Open ${cve.cveId}`}
-          minWidth="30rem"
-        />
-      )}
+      {/* Only this device's CVEs: search and filters narrow them, never widen. */}
+      <CveList
+        cves={allCves === null ? null : deviceCves}
+        error={error}
+        devices={devices}
+        devicesError={devicesError}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        openHref={(cve) => deviceHref(device.deviceId, "cves", { cve: cve.cveRecordId })}
+        actions={(cve) =>
+          busy === `unlink:${cve.cveRecordId}` ? (
+            <span className="text-xs text-slate-500 whitespace-nowrap">Unlinking…</span>
+          ) : (
+            <RowActionsMenu
+              label={`Actions for ${cve.cveId}`}
+              disabled={busy !== null}
+              actions={[
+                { label: "View details", icon: Eye, href: deviceHref(device.deviceId, "cves", { cve: cve.cveRecordId }) },
+                { label: "Unlink from device", icon: Unlink, onSelect: () => void unlink(cve) },
+              ]}
+            />
+          )
+        }
+        empty={
+          <EmptyState
+            icon={ShieldAlert}
+            title="No CVEs linked to this device"
+            description="Link a recorded CVE above, or record a new one on Vulnerabilities."
+          />
+        }
+      />
     </Card>
+  );
+}
+
+/** Keeps a linked CVE's details inside the device: the way back is its CVE list. */
+function DeviceCveFrame({ cveId, children }: { cveId?: string; children: React.ReactNode }) {
+  const searchParams = useSearchParams();
+  const deviceId = searchParams.get("id") ?? "";
+  const cveRecordId = searchParams.get("cve") ?? "";
+  const listHref = deviceHref(deviceId, "cves");
+  return (
+    <div>
+      <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1 text-xs text-slate-400">
+        <Link href={listHref} className="hover:text-brand-700">
+          CVEs
+        </Link>
+        {cveId && (
+          <>
+            <ChevronRight className="h-3.5 w-3.5 text-slate-300" aria-hidden="true" />
+            <span className="font-mono text-slate-600" aria-current="page">
+              {cveId}
+            </span>
+          </>
+        )}
+      </nav>
+      <div className="flex flex-wrap items-center justify-between gap-2 mt-3 mb-4">
+        <Link
+          href={listHref}
+          className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-brand-700"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+          Back to CVEs
+        </Link>
+        {cveRecordId && (
+          <Link
+            href={cveHref(cveRecordId)}
+            className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-brand-700"
+          >
+            Open in Vulnerabilities
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+          </Link>
+        )}
+      </div>
+      {children}
+    </div>
   );
 }
