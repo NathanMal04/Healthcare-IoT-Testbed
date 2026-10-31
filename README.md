@@ -435,8 +435,7 @@ for assets, `no-cache` for HTML), and invalidates the CloudFront distribution. O
 
 | Secret | Description |
 |---|---|
-| `AWS_ROLE_ARN` | IAM role ARN with S3 + CloudFront permissions
-<<<<<<< main
+| `AWS_ROLE_ARN` | IAM role ARN with S3 + CloudFront permissions |
 | `AWS_REGION` | AWS region (e.g. `us-east-2`) |
 
 ### Pull Request Checks
@@ -446,14 +445,13 @@ for assets, `no-cache` for HTML), and invalidates the CloudFront distribution. O
 | `frontend-pr-check.yml` | PRs touching `Platform/services/web/**` | Build the frontend |
 
 All five workflows authenticate via the same OIDC role.
-=======
-| `AWS_REGION` | AWS region (e.g. `us-east-1`) |
 
 ---
 
 ## BLE Sniffing (Adafruit Bluefruit LE Sniffer)
 
 This project includes a Python API wrapper for [Adafruit's Bluefruit LE Sniffer](https://www.adafruit.com/product/2269), used to capture Bluetooth LE traffic from nearby IoT devices.
+It lives in `Platform/services/bluetooth-sniffer/Adafruit_BLESniffer_Python-master/`.
 
 ### Requirements
 - **Python 2.7**
