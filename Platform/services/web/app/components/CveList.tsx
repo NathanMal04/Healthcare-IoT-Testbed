@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { RefreshCw, ShieldAlert } from "lucide-react";
@@ -19,6 +19,7 @@ import {
 } from "@/lib/cves";
 import {
   Alert,
+  Badge,
   Button,
   DataTable,
   EmptyState,
@@ -33,12 +34,22 @@ import {
 } from "@/app/components/ui";
 
 // The CVE browsing list (search, filters, table, count), shared by the
-// Vulnerabilities page and a device's CVEs tab. The host gives it the CVEs
-// to browse, where a CVE opens, and each row's actions; search and filters
-// only ever narrow the CVEs it was given.
+// Vulnerabilities page, a device's CVEs tab and the device's Link CVEs
+// explorer. The host gives it the CVEs to browse, how a CVE opens, and each
+// row's actions; search and filters only ever narrow the CVEs it was given.
+// With a selection, rows get checkboxes and a click toggles the row instead.
 
 const MAX_CHIPS_SHOWN = 3;
 const MAX_DEVICES_SHOWN = 2;
+
+/** Multi-select over the list's rows, by cveRecordId. */
+export interface CveSelection {
+  selected: ReadonlySet<string>;
+  onChange: (next: Set<string>) => void;
+  /** Why a row can't be selected (shown as a badge on it), or null when it can. */
+  blocked: (cve: CveSummary) => string | null;
+  disabled?: boolean;
+}
 
 export default function CveList({
   cves,
@@ -48,8 +59,11 @@ export default function CveList({
   refreshing,
   onRefresh,
   openHref,
+  onOpen,
   actions,
   empty,
+  selection,
+  autoFocusSearch,
 }: {
   /** The CVEs to browse; null while loading. */
   cves: CveSummary[] | null;
@@ -60,11 +74,15 @@ export default function CveList({
   refreshing: boolean;
   onRefresh: () => void;
   /** Where a CVE opens, from its ID or its row. */
-  openHref: (cve: CveSummary) => string;
+  openHref?: (cve: CveSummary) => string;
+  /** Opens a CVE in place instead of navigating (used when openHref isn't given). */
+  onOpen?: (cve: CveSummary) => void;
   /** The row's actions cell. */
   actions: (cve: CveSummary) => React.ReactNode;
   /** Shown when there are no CVEs at all. */
   empty: React.ReactNode;
+  selection?: CveSelection;
+  autoFocusSearch?: boolean;
 }) {
   const router = useRouter();
   const [filters, setFilters] = useState<CveFilters>(EMPTY_FILTERS);
@@ -81,22 +99,44 @@ export default function CveList({
   }, [cves]);
   const visible = useMemo(() => filterCves(cves ?? [], filters, deviceNames), [cves, filters, deviceNames]);
 
+  function open(cve: CveSummary) {
+    if (openHref) router.push(openHref(cve));
+    else onOpen?.(cve);
+  }
+
+  const idClass = "font-mono text-[13px] font-medium text-brand-700 hover:text-brand-800 hover:underline whitespace-nowrap";
   const columns: Column<CveSummary>[] = [
+    ...(selection ? [selectColumn(selection, visible)] : []),
     {
       key: "cve",
       header: "CVE ID",
-      cell: (cve) => (
-        <div className="min-w-0 max-w-[16rem] sm:max-w-xs lg:max-w-sm">
-          <Link
-            href={openHref(cve)}
-            onClick={(e) => e.stopPropagation()}
-            className="font-mono text-[13px] font-medium text-brand-700 hover:text-brand-800 hover:underline whitespace-nowrap"
-          >
-            {cve.cveId}
-          </Link>
-          <DescriptionLine description={cve.description} query={filters.text} />
-        </div>
-      ),
+      cell: (cve) => {
+        const blocked = selection?.blocked(cve);
+        return (
+          <div className="min-w-0 max-w-[16rem] sm:max-w-xs lg:max-w-sm">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              {openHref ? (
+                <Link href={openHref(cve)} onClick={(e) => e.stopPropagation()} className={idClass}>
+                  {cve.cveId}
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpen?.(cve);
+                  }}
+                  className={idClass}
+                >
+                  {cve.cveId}
+                </button>
+              )}
+              {blocked && <Badge>{blocked}</Badge>}
+            </div>
+            <DescriptionLine description={cve.description} query={filters.text} />
+          </div>
+        );
+      },
     },
     { key: "severity", header: "Severity", cell: (cve) => <SeverityBadge severity={cve.severity} /> },
     {
@@ -142,9 +182,18 @@ export default function CveList({
       header: "Actions",
       headerClassName: "text-right",
       className: "text-right",
-      cell: actions,
+      // Actions are their own controls, never a row click.
+      cell: (cve) => <div onClick={(e) => e.stopPropagation()}>{actions(cve)}</div>,
     },
   ];
+
+  function toggle(cve: CveSummary) {
+    if (!selection || selection.disabled || selection.blocked(cve)) return;
+    const next = new Set(selection.selected);
+    if (next.has(cve.cveRecordId)) next.delete(cve.cveRecordId);
+    else next.add(cve.cveRecordId);
+    selection.onChange(next);
+  }
 
   return (
     <>
@@ -154,6 +203,7 @@ export default function CveList({
           onChange={(text) => setFilters((f) => ({ ...f, text }))}
           placeholder="Search CVE, description, chipset, device"
           ariaLabel="Search CVEs"
+          autoFocus={autoFocusSearch}
         />
         <FilterSelect
           value={filters.severity}
@@ -218,8 +268,17 @@ export default function CveList({
           columns={columns}
           rows={visible}
           rowKey={(cve) => cve.cveRecordId}
-          onRowClick={(cve) => router.push(openHref(cve))}
-          rowLabel={(cve) => `Open ${cve.cveId}`}
+          onRowClick={selection ? toggle : open}
+          rowLabel={(cve) =>
+            selection ? `${selection.selected.has(cve.cveRecordId) ? "Deselect" : "Select"} ${cve.cveId}` : `Open ${cve.cveId}`
+          }
+          rowClassName={(cve) =>
+            selection?.blocked(cve)
+              ? "bg-surface-muted/60 [&>td]:opacity-70 cursor-default"
+              : selection?.selected.has(cve.cveRecordId)
+                ? "bg-brand-50/60"
+                : ""
+          }
           minWidth="36rem"
         />
       )}
@@ -230,6 +289,82 @@ export default function CveList({
         </p>
       )}
     </>
+  );
+}
+
+/** The checkbox column; its header selects or clears every selectable row shown. */
+function selectColumn(selection: CveSelection, visible: CveSummary[]): Column<CveSummary> {
+  const selectable = visible.filter((cve) => !selection.blocked(cve));
+  const selectedCount = selectable.filter((cve) => selection.selected.has(cve.cveRecordId)).length;
+  const all = selectable.length > 0 && selectedCount === selectable.length;
+  return {
+    key: "select",
+    header: (
+      <Checkbox
+        checked={all}
+        indeterminate={selectedCount > 0 && !all}
+        disabled={selection.disabled || selectable.length === 0}
+        label={all ? "Deselect all shown CVEs" : "Select all shown CVEs"}
+        onChange={() => {
+          const next = new Set(selection.selected);
+          for (const cve of selectable) {
+            if (all) next.delete(cve.cveRecordId);
+            else next.add(cve.cveRecordId);
+          }
+          selection.onChange(next);
+        }}
+      />
+    ),
+    headerClassName: "w-10",
+    className: "w-10",
+    cell: (cve) => {
+      const blocked = selection.blocked(cve);
+      const selected = !blocked && selection.selected.has(cve.cveRecordId);
+      return (
+        <Checkbox
+          checked={selected}
+          disabled={selection.disabled || blocked !== null}
+          label={blocked ? `${cve.cveId}: ${blocked}` : `Select ${cve.cveId}`}
+          onChange={() => {
+            const next = new Set(selection.selected);
+            if (selected) next.delete(cve.cveRecordId);
+            else next.add(cve.cveRecordId);
+            selection.onChange(next);
+          }}
+        />
+      );
+    },
+  };
+}
+
+function Checkbox({
+  checked,
+  indeterminate = false,
+  disabled,
+  label,
+  onChange,
+}: {
+  checked: boolean;
+  indeterminate?: boolean;
+  disabled?: boolean;
+  label: string;
+  onChange: () => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      checked={checked}
+      disabled={disabled}
+      aria-label={label}
+      onChange={onChange}
+      onClick={(e) => e.stopPropagation()}
+      className="h-4 w-4 mt-0.5 accent-brand-600 cursor-pointer disabled:opacity-50 disabled:cursor-default"
+    />
   );
 }
 

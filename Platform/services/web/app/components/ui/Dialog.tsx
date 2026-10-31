@@ -5,57 +5,74 @@ import { X } from "lucide-react";
 import { Alert } from "./States";
 import { buttonClass } from "./styles";
 
-const DIALOG_WIDTHS = { sm: "sm:max-w-sm", lg: "sm:max-w-lg", xl: "sm:max-w-2xl", "2xl": "sm:max-w-4xl" } as const;
+const DIALOG_WIDTHS = {
+  sm: "sm:max-w-sm",
+  lg: "sm:max-w-lg",
+  xl: "sm:max-w-2xl",
+  "2xl": "sm:max-w-4xl",
+  full: "sm:max-w-6xl",
+} as const;
 
 /**
  * A modal with a title and a close button. Clicking the backdrop or pressing
- * Escape calls onClose, which callers guard while work is in progress.
+ * Escape calls onClose, which callers guard while work is in progress;
+ * onEscape replaces it for Escape alone (e.g. to step back first).
  * `wide` is the same as size "lg". `aside` adds a dark side panel on the left
- * (hidden on small screens).
+ * (hidden on small screens). With a `footer`, the title and footer stay put
+ * and only the (unpadded) children scroll between them.
  */
 export function Dialog({
   title,
   subtitle,
   onClose,
+  onEscape,
   wide,
   size,
   aside,
+  footer,
   children,
 }: {
   title: React.ReactNode;
   subtitle?: React.ReactNode;
   onClose: () => void;
+  onEscape?: () => void;
   wide?: boolean;
   size?: keyof typeof DIALOG_WIDTHS;
   aside?: React.ReactNode;
+  footer?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const width = DIALOG_WIDTHS[size ?? (wide ? "lg" : "sm")];
+  const escape = onEscape ?? onClose;
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") escape();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [escape]);
+
+  const header = (
+    <div className={`flex items-start justify-between gap-4 ${footer ? "px-5 sm:px-6 py-4 border-b border-line" : "mb-5"}`}>
+      <div className="min-w-0">
+        <h2 className="text-lg font-semibold text-slate-900 tracking-tight break-words">{title}</h2>
+        {subtitle && <p className="text-slate-500 text-sm mt-1">{subtitle}</p>}
+      </div>
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close"
+        className="shrink-0 -mr-1 p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-surface-sunken"
+      >
+        <X className="h-5 w-5" aria-hidden="true" />
+      </button>
+    </div>
+  );
 
   const body = (
     <>
-      <div className="mb-5 flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h2 className="text-lg font-semibold text-slate-900 tracking-tight break-words">{title}</h2>
-          {subtitle && <p className="text-slate-500 text-sm mt-1">{subtitle}</p>}
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          className="shrink-0 -mr-1 p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-surface-sunken"
-        >
-          <X className="h-5 w-5" aria-hidden="true" />
-        </button>
-      </div>
+      {header}
       {children}
     </>
   );
@@ -70,11 +87,17 @@ export function Dialog({
       <div
         role="dialog"
         aria-modal="true"
-        className={`w-full ${width} bg-white rounded-t-2xl sm:rounded-xl border border-line shadow-pop max-h-[90vh] overflow-y-auto ${
-          aside ? "md:flex" : "p-5 sm:p-6"
-        }`}
+        className={`w-full ${width} bg-white rounded-t-2xl sm:rounded-xl border border-line shadow-pop ${
+          footer ? "h-[92vh] sm:h-[85vh] flex flex-col overflow-hidden" : "max-h-[90vh] overflow-y-auto"
+        } ${aside ? "md:flex" : footer ? "" : "p-5 sm:p-6"}`}
       >
-        {aside ? (
+        {footer ? (
+          <>
+            {header}
+            <div className="flex-1 min-h-0 overflow-y-auto">{children}</div>
+            <div className="shrink-0 border-t border-line bg-surface-muted px-5 sm:px-6 py-3">{footer}</div>
+          </>
+        ) : aside ? (
           <>
             <aside className="hidden md:flex md:w-64 shrink-0 flex-col bg-navy-900 text-white p-6 sm:rounded-l-xl">
               {aside}

@@ -555,6 +555,59 @@ export async function createCveWithDevices(
   return { cve: outcome.cve ?? created, failed: outcome.failed };
 }
 
+// --- Link CVEs to a device ----------------------------------------------------------
+
+/** Why a CVE can't be linked to the device, or null when it can. */
+export type CveLinkBlocker = "linked" | "full";
+
+export function cveLinkBlocker(cve: CveSummary, deviceId: string): CveLinkBlocker | null {
+  if (cve.deviceIds.includes(deviceId)) return "linked";
+  if (cve.deviceIds.length >= MAX_DEVICES_PER_CVE) return "full";
+  return null;
+}
+
+export interface CveLinkFailure {
+  cveRecordId: string;
+  message: string;
+}
+
+export interface DeviceLinkOutcome {
+  /** Each CVE linked (or found already linked), as the backend returned it. */
+  linked: Cve[];
+  failed: CveLinkFailure[];
+}
+
+/**
+ * Links several CVEs to one device through the per-CVE endpoint, one at a
+ * time: each link re-checks the same device row inside its transaction, so
+ * parallel links of one device would conflict. Failures are collected instead
+ * of stopping, and linking is idempotent, so a retry may repeat linked CVEs.
+ */
+export async function linkCvesToDevice(
+  deviceId: string,
+  cveRecordIds: string[],
+  options: { onProgress?: (done: number, total: number) => void; api?: Pick<CveWriteApi, "linkCveDevice"> } = {}
+): Promise<DeviceLinkOutcome> {
+  const api = options.api ?? DEFAULT_API;
+  const ids = [...new Set(cveRecordIds)];
+  const outcome: DeviceLinkOutcome = { linked: [], failed: [] };
+  for (const [index, cveRecordId] of ids.entries()) {
+    options.onProgress?.(index, ids.length);
+    try {
+      outcome.linked.push((await api.linkCveDevice(cveRecordId, deviceId)).cve);
+    } catch (err) {
+      outcome.failed.push({
+        cveRecordId,
+        message: isNotFound(err)
+          ? "This CVE or the device is no longer available."
+          : cveErrorMessage(err, "Couldn't link the CVE"),
+      });
+    }
+  }
+  options.onProgress?.(ids.length, ids.length);
+  return outcome;
+}
+
 // --- Errors -------------------------------------------------------------------
 
 /** The existing record's id when creating failed because the CVE ID is already recorded in the scope. */

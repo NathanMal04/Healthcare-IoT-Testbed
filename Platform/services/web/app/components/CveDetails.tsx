@@ -22,6 +22,7 @@ import {
   validateCveForm,
   type Cve,
   type CveFormValues,
+  type CveSummary,
   type Severity,
 } from "@/lib/cves";
 import { CveFormFields, DeleteCveDialog, isConcurrentChange } from "@/app/components/CveDialogs";
@@ -533,7 +534,8 @@ function KeyInformation({ cve, scope, createdBy }: { cve: Cve; scope: Scope; cre
   );
 }
 
-function CvssScore({ cve }: { cve: Cve }) {
+/** The score out of 10 with a severity-coloured bar; also used by the Link CVEs preview. */
+export function CvssScore({ cve }: { cve: CveSummary }) {
   if (cve.cvssScore === null) return <span className="text-slate-400">Not scored</span>;
   return (
     <span className="block">

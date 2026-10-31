@@ -26,10 +26,12 @@ import {
   cveChanges,
   cveFormValues,
   cveIdError,
+  cveLinkBlocker,
   descriptionPreview,
   duplicateCveRecordId,
   filterCves,
   isWebUrl,
+  linkCvesToDevice,
   linkDevices,
   normalizeCveId,
   toNewCve,
@@ -414,5 +416,68 @@ describe("createCveWithDevices", () => {
     expect(api.linkCveDevice).not.toHaveBeenCalled();
     // Other 409s (e.g. the 40-device limit) aren't duplicates.
     expect(duplicateCveRecordId(new ApiError("A CVE can be linked to at most 40 devices", 409))).toBeNull();
+  });
+});
+
+describe("cveLinkBlocker", () => {
+  it("allows a CVE not yet linked to the device", () => {
+    expect(cveLinkBlocker(cve({ deviceIds: ["other"] }), "dev-1")).toBeNull();
+  });
+
+  it("blocks a CVE already linked to the device", () => {
+    expect(cveLinkBlocker(cve({ deviceIds: ["dev-1"] }), "dev-1")).toBe("linked");
+  });
+
+  it("blocks a CVE at the device limit, unless it is this device's", () => {
+    const full = Array.from({ length: 40 }, (_, i) => `d${i}`);
+    expect(cveLinkBlocker(cve({ deviceIds: full }), "dev-1")).toBe("full");
+    expect(cveLinkBlocker(cve({ deviceIds: [...full.slice(1), "dev-1"] }), "dev-1")).toBe("linked");
+  });
+});
+
+describe("linkCvesToDevice", () => {
+  function fakeApi(failing: Record<string, Error> = {}) {
+    return {
+      linkCveDevice: vi.fn(async (rid: string, deviceId: string) => {
+        if (failing[rid]) throw failing[rid];
+        return { cve: cve({ cveRecordId: rid, deviceIds: [deviceId] }), changed: true };
+      }),
+    };
+  }
+
+  it("links each CVE in order, one at a time, without repeats", async () => {
+    const api = fakeApi();
+    const progress: Array<[number, number]> = [];
+    const result = await linkCvesToDevice("dev-1", ["a", "b", "a"], {
+      api,
+      onProgress: (done, total) => progress.push([done, total]),
+    });
+    expect(result.failed).toEqual([]);
+    expect(result.linked.map((c) => c.cveRecordId)).toEqual(["a", "b"]);
+    expect(api.linkCveDevice.mock.calls).toEqual([["a", "dev-1"], ["b", "dev-1"]]);
+    expect(progress).toEqual([[0, 2], [1, 2], [2, 2]]);
+  });
+
+  it("keeps going after a failure and reports each one", async () => {
+    const api = fakeApi({
+      b: new ApiError("CVE not found", 404),
+      c: new ApiError("A CVE can be linked to at most 40 devices", 409),
+      d: new ApiError("Internal error", 500),
+    });
+    const result = await linkCvesToDevice("dev-1", ["a", "b", "c", "d", "e"], { api });
+    expect(result.linked.map((c) => c.cveRecordId)).toEqual(["a", "e"]);
+    expect(result.failed).toEqual([
+      { cveRecordId: "b", message: "This CVE or the device is no longer available." },
+      { cveRecordId: "c", message: "A CVE can be linked to at most 40 devices" },
+      { cveRecordId: "d", message: "Couldn't link the CVE. Please try again." },
+    ]);
+  });
+
+  it("counts an already-linked CVE as linked", async () => {
+    const api = {
+      linkCveDevice: vi.fn(async (rid: string) => ({ cve: cve({ cveRecordId: rid, deviceIds: ["dev-1"] }), changed: false })),
+    };
+    const result = await linkCvesToDevice("dev-1", ["a"], { api });
+    expect(result).toEqual({ linked: [cve({ cveRecordId: "a", deviceIds: ["dev-1"] })], failed: [] });
   });
 });

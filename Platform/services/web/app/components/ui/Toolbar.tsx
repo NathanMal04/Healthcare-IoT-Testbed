@@ -12,12 +12,14 @@ export function SearchInput({
   placeholder,
   ariaLabel,
   className = "",
+  autoFocus,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
   ariaLabel: string;
   className?: string;
+  autoFocus?: boolean;
 }) {
   return (
     <div className={`relative w-full sm:w-72 ${className}`}>
@@ -28,6 +30,7 @@ export function SearchInput({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         aria-label={ariaLabel}
+        autoFocus={autoFocus}
         className="w-full h-9 pl-9 pr-3 rounded-lg border border-line bg-white text-sm text-slate-800 placeholder:text-slate-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
       />
     </div>

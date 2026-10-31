@@ -36,10 +36,8 @@ import {
   type ArtifactType,
 } from "@/lib/artifacts";
 import {
-  MAX_DEVICES_PER_CVE,
   cveErrorMessage,
   isNotFound,
-  linkCveDevice,
   listCves,
   unlinkCveDevice,
   type Cve,
@@ -56,6 +54,7 @@ import ArtifactUploader from "@/app/components/ArtifactUploader";
 import ArtifactTypeChips from "@/app/components/ArtifactTypeChips";
 import CveDetails from "@/app/components/CveDetails";
 import CveList from "@/app/components/CveList";
+import CveLinkExplorer from "@/app/components/CveLinkExplorer";
 import {
   FirmwareRetryDialog,
   FirmwareTable,
@@ -80,7 +79,6 @@ import {
   Tabs,
   Toolbar,
   formatDate,
-  selectClass,
   type Column,
 } from "@/app/components/ui";
 
@@ -766,38 +764,22 @@ function CvesTab({
   onChanged: (cve: Cve) => void;
   onRemoved: (cveRecordId: string) => void;
 }) {
-  const [toLink, setToLink] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [linkNotice, setLinkNotice] = useState<string | null>(null);
+  const [exploring, setExploring] = useState(false);
 
   // A link change belongs to this scope; keep it from changing mid-request.
   useScopeLock(busy !== null);
 
-  const linkable = (allCves ?? [])
-    .filter((c) => !c.deviceIds.includes(device.deviceId))
-    .sort((a, b) => a.cveId.localeCompare(b.cveId));
+  function openExplorer() {
+    setActionError(null);
+    setLinkNotice(null);
+    setExploring(true);
+  }
 
   // The existing association endpoints; "changed: false" (already linked or
   // already unlinked) counts as success.
-  async function link() {
-    const cveRecordId = toLink;
-    if (!cveRecordId || busy) return;
-    setBusy("link");
-    setActionError(null);
-    try {
-      onChanged((await linkCveDevice(cveRecordId, device.deviceId)).cve);
-      setToLink("");
-    } catch (err) {
-      setActionError(
-        isNotFound(err)
-          ? "That CVE or this device is no longer available."
-          : cveErrorMessage(err, "Couldn't link the CVE")
-      );
-    } finally {
-      setBusy(null);
-    }
-  }
-
   async function unlink(cve: CveSummary) {
     if (busy) return;
     setBusy(`unlink:${cve.cveRecordId}`);
@@ -822,40 +804,20 @@ function CvesTab({
         title="Linked vulnerabilities"
         description={`CVEs recorded in ${scope.kind === "workspace" ? scope.name : "Personal"} that affect this device`}
         actions={
-          <ButtonLink href="/vulnerabilities" variant="secondary" size="sm">
-            All vulnerabilities
-          </ButtonLink>
+          <>
+            <ButtonLink href="/vulnerabilities" variant="secondary" size="sm">
+              All vulnerabilities
+            </ButtonLink>
+            <Button size="sm" icon={Link2} onClick={openExplorer} disabled={busy !== null}>
+              Link CVEs
+            </Button>
+          </>
         }
       />
-      {allCves && (
-        <div className="px-5 py-3 border-b border-line flex flex-wrap items-center gap-2">
-          {linkable.length ? (
-            <>
-              <select
-                value={toLink}
-                onChange={(e) => setToLink(e.target.value)}
-                disabled={busy !== null}
-                aria-label="CVE to link"
-                className={`${selectClass} w-full sm:w-72`}
-              >
-                <option value="">Link a recorded CVE…</option>
-                {linkable.map((cve) => (
-                  <option key={cve.cveRecordId} value={cve.cveRecordId} disabled={cve.deviceIds.length >= MAX_DEVICES_PER_CVE}>
-                    {cve.cveId}
-                    {cve.deviceIds.length >= MAX_DEVICES_PER_CVE ? " (40 devices already)" : ""}
-                  </option>
-                ))}
-              </select>
-              <Button size="sm" variant="secondary" icon={Link2} onClick={() => void link()} disabled={!toLink || busy !== null}>
-                {busy === "link" ? "Linking…" : "Link"}
-              </Button>
-            </>
-          ) : (
-            <p className="text-xs text-slate-500">
-              {allCves.length ? "Every recorded CVE is already linked to this device." : "No CVEs recorded in this scope yet."}
-            </p>
-          )}
-        </div>
+      {linkNotice && (
+        <Alert tone="success" className="mx-5 mt-3" onDismiss={() => setLinkNotice(null)}>
+          {linkNotice}
+        </Alert>
       )}
       {actionError && (
         <Alert tone="error" className="mx-5 mt-3" onDismiss={() => setActionError(null)}>
@@ -889,10 +851,33 @@ function CvesTab({
           <EmptyState
             icon={ShieldAlert}
             title="No CVEs linked to this device"
-            description="Link a recorded CVE above, or record a new one on Vulnerabilities."
+            description="Choose from the CVEs recorded in this scope, or record a new one on Vulnerabilities."
+            action={
+              <Button size="sm" icon={Link2} onClick={openExplorer}>
+                Link CVEs
+              </Button>
+            }
           />
         }
       />
+
+      {exploring && (
+        <CveLinkExplorer
+          device={device}
+          cves={allCves}
+          error={error}
+          devices={devices}
+          devicesError={devicesError}
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          onLinked={(linked) => linked.forEach(onChanged)}
+          onDone={(count) => {
+            setExploring(false);
+            setLinkNotice(`Linked ${count} CVE${count === 1 ? "" : "s"} to ${device.name}.`);
+          }}
+          onClose={() => setExploring(false)}
+        />
+      )}
     </Card>
   );
 }
