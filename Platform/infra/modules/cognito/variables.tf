@@ -36,3 +36,9 @@ variable "post_confirmation_lambda_arn" {
   type        = string
   default     = null
 }
+
+variable "custom_message_lambda_arn" {
+  description = "ARN of the CustomMessage Lambda trigger (branded verification emails). Null keeps Cognito's default messages."
+  type        = string
+  default     = null
+}

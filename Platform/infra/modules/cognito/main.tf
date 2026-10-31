@@ -25,9 +25,11 @@ resource "aws_cognito_user_pool" "this" {
   }
 
   dynamic "lambda_config" {
-    for_each = var.post_confirmation_lambda_arn != null ? [1] : []
+    for_each = var.post_confirmation_lambda_arn != null || var.custom_message_lambda_arn != null ? [1] : []
     content {
       post_confirmation = var.post_confirmation_lambda_arn
+      # Branded sign-up verification email (CustomMessage_SignUp / _ResendCode).
+      custom_message = var.custom_message_lambda_arn
     }
   }
 

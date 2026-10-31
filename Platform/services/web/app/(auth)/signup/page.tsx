@@ -7,6 +7,7 @@ import Link from "next/link";
 import "@/lib/amplify";
 import { Alert, Button, inputClass, labelClass } from "@/app/components/ui";
 import { AuthHeading, PASSWORD_HINT } from "@/app/components/AuthForm";
+import { savePendingVerification } from "@/lib/verification";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -20,8 +21,15 @@ export default function SignupPage() {
     setError("");
     setLoading(true);
     try {
-      await signUp({ username: email, password, options: { userAttributes: { email } } });
-      router.push(`/confirm?email=${encodeURIComponent(email)}`);
+      const { nextStep } = await signUp({ username: email, password, options: { userAttributes: { email } } });
+      if (nextStep.signUpStep === "DONE") {
+        router.push("/login");
+        return;
+      }
+      // Cognito just emailed a code: remember the address (not the password)
+      // and start the resend cooldown, so /confirm survives a browser restart.
+      savePendingVerification(email, { codeSentAt: Date.now() });
+      router.push("/confirm");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Sign up failed.");
     } finally {

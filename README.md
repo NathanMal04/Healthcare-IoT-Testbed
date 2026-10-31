@@ -141,7 +141,20 @@ Authentication is handled by **AWS Cognito** using the Amplify v6 library.
 
 - Sign up / sign in via custom forms at `/signup` and `/login`
 - Email is used as the username
-- Email verification required via 6-digit code (`/confirm`)
+- Email verification required via 6-digit code (`/confirm`):
+  - Signing in to an unconfirmed account (Amplify's `CONFIRM_SIGN_UP` step, i.e. Cognito's
+    `UserNotConfirmedException`) redirects to `/confirm`
+  - The pending email (never the password or code) and the last send time are kept in `localStorage`
+    (`vzoniq.pendingVerification`, dropped after 7 days or on success), so verification resumes after
+    the browser is closed; `/confirm` also accepts a typed email
+  - "Resend verification code" calls `ResendConfirmationCode` with a 60-second UI cooldown that survives
+    reloads; Cognito's own per-user and account limits (`LimitExceededException`,
+    `TooManyRequestsException`) are the server-side guard and are shown as a wait message
+  - Sign-up codes are valid for 24 hours (fixed by Cognito); a new code replaces the old one
+- A **CustomMessage** Lambda (`cognito-custom-message`) brands the sign-up and resend emails
+  ("Verify your Vzoniq account"). Every other message, including password reset (1-hour codes),
+  keeps Cognito's default. Mail is sent with Cognito's default sender (`COGNITO_DEFAULT`,
+  `no-reply@verificationemail.com`, about 50 emails/day)
 - Session state managed via `AuthContext` — unauthenticated users are redirected to `/login`
 - The user pool client uses **SRP** (`ALLOW_USER_SRP_AUTH`); the Cognito hosted UI is **not** configured,
   so the `callback_urls` / `logout_urls` variables are currently inert

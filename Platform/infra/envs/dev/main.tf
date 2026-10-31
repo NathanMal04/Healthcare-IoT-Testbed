@@ -39,6 +39,7 @@ module "auth" {
   logout_urls   = var.cognito_logout_urls
 
   post_confirmation_lambda_arn = module.post_confirmation_create_user_fn.function_arn
+  custom_message_lambda_arn    = module.cognito_custom_message_fn.function_arn
 
   project     = var.name
   environment = "dev"
@@ -133,6 +134,29 @@ resource "aws_lambda_permission" "allow_cognito_post_confirmation" {
   statement_id  = "AllowCognitoPostConfirmationInvoke"
   action        = "lambda:InvokeFunction"
   function_name = module.post_confirmation_create_user_fn.function_name
+  principal     = "cognito-idp.amazonaws.com"
+  source_arn    = module.auth.user_pool_arn
+}
+
+# Cognito CustomMessage trigger: the branded "Verify your Vzoniq account"
+# email for sign-up and resent codes. Other messages keep Cognito's defaults.
+# Cognito waits at most 5 s for a trigger; it needs no AWS permissions.
+module "cognito_custom_message_fn" {
+  source        = "../../modules/lambda"
+  function_name = "${var.name}-cognito-custom-message"
+  source_dir    = "../../../services/lambdas/cognito-custom-message"
+  handler       = "lambda_function.handler"
+  runtime       = "python3.12"
+  timeout       = 5
+
+  project     = var.name
+  environment = "dev"
+}
+
+resource "aws_lambda_permission" "allow_cognito_custom_message" {
+  statement_id  = "AllowCognitoCustomMessageInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = module.cognito_custom_message_fn.function_name
   principal     = "cognito-idp.amazonaws.com"
   source_arn    = module.auth.user_pool_arn
 }
