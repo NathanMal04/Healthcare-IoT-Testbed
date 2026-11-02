@@ -1,5 +1,11 @@
 import { ApiError, apiRequest } from "@/lib/api";
-import { listDeviceArtifacts, type Artifact, type ArtifactPage } from "@/lib/artifacts";
+import {
+  listDeviceArtifacts,
+  sendSingleUpload,
+  sha256File,
+  type Artifact,
+  type ArtifactPage,
+} from "@/lib/artifacts";
 
 // Device images: photographs from teardowns and reverse engineering. On the
 // backend an image is an ordinary artifact with type "image" (same upload
@@ -124,6 +130,135 @@ export function applyImageUpdate(image: ImageArtifact, updated: UpdatedImage): I
     capturedAt: updated.capturedAt,
     updatedAt: updated.updatedAt,
   };
+}
+
+// --- Replacing an image's file ---------------------------------------------------
+//
+// The artifact (id, title, description, capture date, tags, devices, scope)
+// is kept and only its file changes. The new file is uploaded beside the old
+// one and verified by the backend like a first upload; only then does the
+// artifact switch to it and the old file get deleted, permanently. There is
+// no version history.
+
+/** POST /artifacts/{id}/replacement */
+export interface ImageReplacementStart {
+  artifactId: string;
+  replacementId: string;
+  upload: { mode: "single"; url: string; fields: Record<string, string> };
+}
+
+/** The image after a replacement: its new file, and its unchanged details. */
+export interface ReplacedImage {
+  artifactId: string;
+  attemptId: string;
+  status: Artifact["status"];
+  sha256: string;
+  sizeBytes: number;
+  originalFilename: string;
+  uploadedAt: string | null;
+  title: string;
+  description: string | null;
+  mimeType: ImageMimeType;
+  capturedAt: string | null;
+  updatedAt: string | null;
+}
+
+/** POST /artifacts/{id}/replacement/complete */
+export interface ImageReplacementResult {
+  artifactId: string;
+  replacementId: string;
+  image: ReplacedImage;
+  /** The old file couldn't be deleted yet; the backend keeps it tracked and retries. */
+  cleanupPending: boolean;
+}
+
+export type ReplacementStage = "hashing" | "uploading" | "verifying";
+
+export function startImageReplacement(
+  artifactId: string,
+  body: { originalFilename: string; sizeBytes: number; sha256: string; mimeType: ImageMimeType; expectedAttemptId: string }
+): Promise<ImageReplacementStart> {
+  return apiRequest("POST", `/artifacts/${encodeURIComponent(artifactId)}/replacement`, { body });
+}
+
+export function completeImageReplacement(artifactId: string, replacementId: string): Promise<ImageReplacementResult> {
+  return apiRequest("POST", `/artifacts/${encodeURIComponent(artifactId)}/replacement/complete`, {
+    body: { replacementId },
+  });
+}
+
+/** A 409 from completing that clears up by itself (the upload isn't visible yet, or S3 was busy). */
+function isRetryableCompletion(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 409 && /not found yet|try again$/i.test(err.message) &&
+    !/start again/i.test(err.message);
+}
+
+/**
+ * Replaces the image's file with `file` (already checked with checkImageFile):
+ * hash, start (against the attempt the caller saw, so a file someone else
+ * replaced meanwhile is never overwritten unseen), upload, complete. Throws
+ * on any failure, in which case the current image is still the live one.
+ */
+export async function replaceImageFile(
+  image: ImageArtifact,
+  file: File,
+  mimeType: ImageMimeType,
+  options: {
+    onStage?: (stage: ReplacementStage) => void;
+    /** 0..1 within the current stage (hashing or uploading). */
+    onProgress?: (fraction: number) => void;
+    signal?: AbortSignal;
+    retryDelayMs?: number;
+  } = {}
+): Promise<ImageReplacementResult> {
+  const { onStage, onProgress, signal, retryDelayMs = 1500 } = options;
+  const fraction = (bytes: number) => onProgress?.(file.size ? Math.min(1, bytes / file.size) : 1);
+
+  onStage?.("hashing");
+  const sha256 = await sha256File(file, fraction, signal);
+  if (sha256 === image.sha256) throw new Error("This is the same file as the current image.");
+
+  const started = await startImageReplacement(image.artifactId, {
+    originalFilename: file.name || "image",
+    sizeBytes: file.size,
+    sha256,
+    mimeType,
+    expectedAttemptId: image.attemptId,
+  });
+
+  onStage?.("uploading");
+  await sendSingleUpload(file, started.upload, fraction, signal);
+
+  // Past this point the upload can't be cancelled: completing it swaps it in.
+  onStage?.("verifying");
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await completeImageReplacement(image.artifactId, started.replacementId);
+    } catch (err) {
+      if (attempt >= 3 || !isRetryableCompletion(err)) throw err;
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs * attempt));
+    }
+  }
+}
+
+/** The image with its replaced file; everything the user wrote about it is unchanged. */
+export function applyImageReplacement(image: ImageArtifact, replaced: ReplacedImage): ImageArtifact {
+  return {
+    ...image,
+    attemptId: replaced.attemptId,
+    status: replaced.status,
+    sha256: replaced.sha256,
+    sizeBytes: replaced.sizeBytes,
+    originalFilename: replaced.originalFilename,
+    uploadedAt: replaced.uploadedAt,
+    mimeType: replaced.mimeType,
+    updatedAt: replaced.updatedAt,
+  };
+}
+
+/** The <img> identity of an image's current file: changes when the file is replaced. */
+export function imageFileKey(image: Pick<ImageArtifact, "artifactId" | "attemptId">): string {
+  return `${image.artifactId}:${image.attemptId}`;
 }
 
 // --- File checks (before anything is uploaded) ---------------------------------
@@ -362,6 +497,8 @@ type Entry =
 export class ImageUrlCache {
   private entries = new Map<string, Entry>();
   private inFlight = new Map<string, Promise<void>>();
+  /** Bumped by invalidate(), so an answer to an older request is ignored. */
+  private generations = new Map<string, number>();
   private listeners = new Set<() => void>();
   // Ids waiting for this tick's batch, and the promise of that batch.
   private queued: string[] = [];
@@ -451,9 +588,21 @@ export class ImageUrlCache {
     return this.batch;
   }
 
-  /** Forgets an entry so the next ensure() fetches a new URL. */
+  /**
+   * Forgets an entry so the next ensure() fetches a new URL. A request
+   * already in flight for it is disowned: its answer may predate whatever
+   * made the entry wrong (e.g. the image's file being replaced), so it is
+   * dropped instead of overwriting the next one.
+   */
   invalidate(artifactId: string) {
-    if (this.entries.delete(artifactId)) this.emit();
+    this.generations.set(artifactId, this.generation(artifactId) + 1);
+    const had = this.entries.delete(artifactId);
+    this.inFlight.delete(artifactId);
+    if (had) this.emit();
+  }
+
+  private generation(artifactId: string): number {
+    return this.generations.get(artifactId) ?? 0;
   }
 
   /** Milliseconds since the entry's URL was fetched (to tell a stale URL from a broken image). */
@@ -472,7 +621,12 @@ export class ImageUrlCache {
   }
 
   private fetch(ids: string[]): Promise<void> {
-    const run = (async () => {
+    // Ids invalidated while this request runs keep whatever came after it.
+    const asked = new Map(ids.map((id) => [id, this.generation(id)]));
+    const current = (id: string) => asked.get(id) === this.generation(id);
+    // Assigned before the request settles, so `finally` can compare against it.
+    let run: Promise<void> | undefined = undefined;
+    run = (async () => {
       try {
         const results = await this.fetchUrls(ids);
         const fetchedAt = this.now();
@@ -480,6 +634,7 @@ export class ImageUrlCache {
         for (const result of results) {
           if (!result.artifactId) continue;
           answered.add(result.artifactId);
+          if (!current(result.artifactId)) continue;
           this.entries.set(
             result.artifactId,
             result.ok
@@ -488,15 +643,18 @@ export class ImageUrlCache {
           );
         }
         for (const id of ids) {
-          if (!answered.has(id)) this.entries.set(id, { status: "unavailable", error: "Image unavailable", fetchedAt });
+          if (!answered.has(id) && current(id)) {
+            this.entries.set(id, { status: "unavailable", error: "Image unavailable", fetchedAt });
+          }
         }
       } catch (err) {
         // The whole request failed (network, expired session...): the entries
         // are dropped, not marked unavailable, so a later ensure() tries again.
-        for (const id of ids) this.entries.delete(id);
+        for (const id of ids) if (current(id)) this.entries.delete(id);
         throw err;
       } finally {
-        for (const id of ids) this.inFlight.delete(id);
+        // A newer request for an invalidated id stays in flight.
+        for (const id of ids) if (this.inFlight.get(id) === run) this.inFlight.delete(id);
         this.emit();
       }
     })();

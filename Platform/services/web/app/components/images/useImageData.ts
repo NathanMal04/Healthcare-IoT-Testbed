@@ -115,6 +115,11 @@ export interface ImageUrls {
   error: string | null;
   /** Asks again for every image: failed requests, unavailable and broken ones included. */
   retry: () => void;
+  /**
+   * Forgets one image's URL and error state and fetches a new URL, e.g. after
+   * its file was replaced: the old URL would show (or no longer find) the old file.
+   */
+  refresh: (artifactId: string) => void;
 }
 
 /**
@@ -174,6 +179,21 @@ export function useImageUrls(artifactIds: string[]): ImageUrls {
     ensure(key ? key.split(",") : []);
   }, [cache, broken, ensure, key]);
 
+  const refresh = useCallback(
+    (artifactId: string) => {
+      retriedRef.current.delete(artifactId);
+      setBroken((current) => {
+        if (!current.has(artifactId)) return current;
+        const next = new Set(current);
+        next.delete(artifactId);
+        return next;
+      });
+      cache.invalidate(artifactId);
+      ensure([artifactId]);
+    },
+    [cache, ensure]
+  );
+
   return {
     get: (artifactId) => cache.get(artifactId),
     ensure,
@@ -182,5 +202,6 @@ export function useImageUrls(artifactIds: string[]): ImageUrls {
     problemCount: cache.unavailableCount() + broken.size,
     error,
     retry,
+    refresh,
   };
 }

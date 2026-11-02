@@ -21,6 +21,12 @@ vi.mock("@/context/WorkspaceContext", () => ({
   useScopeLock: () => undefined,
 }));
 vi.mock("@/context/AuthContext", () => ({ useAuth: () => ({ user: null, loading: false }) }));
+// Hashing (wasm) and the S3 transfer (XHR) of a replacement are stubbed.
+vi.mock("@/lib/artifacts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/artifacts")>()),
+  sha256File: vi.fn(async () => "b".repeat(64)),
+  sendSingleUpload: vi.fn(async () => undefined),
+}));
 
 import { ApiError, apiRequest } from "@/lib/api";
 import type { Device } from "@/lib/devices";
@@ -188,6 +194,71 @@ describe("DeviceImageGallery", () => {
     fireEvent.keyDown(document, { key: "ArrowRight" });
     await waitFor(() => expect(within(dialog).getByText("3 of 3")).toBeTruthy());
     expect(within(dialog).getByRole("heading", { name: "Photo 3" })).toBeTruthy();
+  });
+
+  it("replaces an image's file from the viewer and shows the new file, not a cached old one", async () => {
+    // jsdom's Blob has no arrayBuffer() (every browser does).
+    if (!Blob.prototype.arrayBuffer) {
+      Blob.prototype.arrayBuffer = function arrayBuffer(this: Blob) {
+        return new Promise<ArrayBuffer>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as ArrayBuffer);
+          reader.readAsArrayBuffer(this);
+        });
+      };
+    }
+    URL.createObjectURL = vi.fn(() => "blob:new-preview");
+    URL.revokeObjectURL = vi.fn();
+    serve({
+      pages: { first: { artifacts: range(1, 2) } },
+      // Each view-URL request signs a different URL, as the real endpoint does.
+      viewUrls: (ids, call) =>
+        ids.map((artifactId) => ({ ...okUrls([artifactId])[0], url: `https://s3.example/${artifactId}?call=${call}` } as ViewUrlResult)),
+    });
+    const routed = request.getMockImplementation()!;
+    request.mockImplementation(async (method, path, options) => {
+      if (path === "/artifacts/img-01/replacement") {
+        return { artifactId: "img-01", replacementId: "r-1", upload: { mode: "single", url: "https://s3", fields: {} } };
+      }
+      if (path === "/artifacts/img-01/replacement/complete") {
+        return {
+          artifactId: "img-01", replacementId: "r-1", cleanupPending: false,
+          image: { ...image(1), attemptId: "r-1", sha256: "b".repeat(64), sizeBytes: 12, originalFilename: "hires.png",
+                   uploadedAt: "2026-11-02T00:00:00+00:00", updatedAt: "2026-11-02T00:00:00+00:00" },
+        };
+      }
+      return routed(method, path, options);
+    });
+    render(<DeviceImageGallery device={DEVICE} />);
+    await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(2));
+    const oldSrc = screen.getByAltText("Photo 1").getAttribute("src");
+
+    fireEvent.click(screen.getByRole("button", { name: "View Photo 1" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Replace image" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText(/permanently deletes the current file/)).toBeTruthy();
+    const input = within(dialog).getByLabelText("New image file");
+    const png = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])], "hires.png",
+      { type: "image/png" });
+    Object.defineProperty(input, "files", { value: [png], configurable: true });
+    fireEvent.change(input);
+    await waitFor(() => expect(within(dialog).getByAltText("New file for Photo 1")).toBeTruthy());
+    fireEvent.click(within(dialog).getByRole("checkbox"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Replace image" }));
+
+    await waitFor(() => expect(screen.getByText(/Replaced the file of Photo 1\. The original file was permanently deleted/)).toBeTruthy());
+    // A new URL was asked for this image alone, and both the grid and the
+    // reopened viewer show it rather than the old file's.
+    await waitFor(() => expect(viewUrlRequests().at(-1)).toEqual(["img-01"]));
+    await waitFor(() => {
+      const shown = screen.getAllByAltText("Photo 1").map((img) => img.getAttribute("src"));
+      expect(shown.length).toBe(2);
+      for (const src of shown) expect(src).not.toBe(oldSrc);
+    });
+    const viewer = screen.getByRole("dialog");
+    expect(within(viewer).getByRole("heading", { name: "Photo 1" })).toBeTruthy();
+    expect(within(viewer).getByText(/hires\.png · PNG/)).toBeTruthy();
+    expect(screen.getAllByAltText("Photo 2")[0].getAttribute("src")).toBe("https://s3.example/img-02?call=1");
   });
 
   it("shows empty and error states", async () => {

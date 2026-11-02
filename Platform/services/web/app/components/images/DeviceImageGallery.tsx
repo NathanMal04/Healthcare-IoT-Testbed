@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Download, ImageIcon, Maximize2, Pencil, RefreshCw, Upload } from "lucide-react";
+import { Download, ImageIcon, Maximize2, Pencil, RefreshCw, Replace, Upload } from "lucide-react";
 import { getArtifactDownloadUrl } from "@/lib/artifacts";
 import { IMAGE_TYPE, imageErrorMessage, imageTitle, type ImageArtifact } from "@/lib/images";
 import type { Device } from "@/lib/devices";
@@ -19,6 +19,7 @@ import {
   type RowAction,
 } from "@/app/components/ui";
 import EditImageDialog from "./EditImageDialog";
+import ReplaceImageDialog from "./ReplaceImageDialog";
 import { ImageGrid } from "./ImageGrid";
 import ImageLightbox from "./ImageLightbox";
 import { useDeviceImages, useImageUrls } from "./useImageData";
@@ -26,7 +27,7 @@ import { useDeviceImages, useImageUrls } from "./useImageData";
 /**
  * A device's photographs: upload (the shared uploader, fixed to this device
  * and to images, so uploads land in the device's scope), a paged grid, a
- * full-size viewer and metadata editing.
+ * full-size viewer, metadata editing and replacing an image's file.
  *
  * `extraActions` adds per-image actions to the card menu; Phase 3's
  * "Set as profile image" goes there once the device API supports it.
@@ -46,6 +47,7 @@ export default function DeviceImageGallery({
   const [uploading, setUploading] = useState(false);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [editing, setEditing] = useState<ImageArtifact | null>(null);
+  const [replacing, setReplacing] = useState<ImageArtifact | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -67,6 +69,27 @@ export default function DeviceImageGallery({
     setNotice(null);
     setActionError(null);
     setEditing(image);
+  }
+
+  function openReplace(image: ImageArtifact) {
+    setNotice(null);
+    setActionError(null);
+    setReplacing(image);
+  }
+
+  function onReplaced(updated: ImageArtifact, cleanupPending: boolean) {
+    // Same artifact, new file: update it in place (keeping the loaded pages
+    // and the viewer's position) and drop its cached URL, which points at
+    // the old file. The image views are keyed by the file, so they reload.
+    replace(updated);
+    urls.refresh(updated.artifactId);
+    setReplacing(null);
+    setNotice(
+      `Replaced the file of ${imageTitle(updated)}. ` +
+        (cleanupPending
+          ? "The original file couldn't be deleted yet; it will be removed automatically."
+          : "The original file was permanently deleted.")
+    );
   }
 
   const uploadButton = (
@@ -181,6 +204,7 @@ export default function DeviceImageGallery({
                   actions={[
                     { label: "View full size", icon: Maximize2, onSelect: () => setViewerIndex(index) },
                     { label: "Edit details", icon: Pencil, onSelect: () => openEditor(image) },
+                    image.status === "ready" && { label: "Replace image", icon: Replace, onSelect: () => openReplace(image) },
                     { label: "Download original", icon: Download, onSelect: () => void downloadFromCard(image) },
                     ...(extraActions?.(image) ?? []),
                   ]}
@@ -204,8 +228,8 @@ export default function DeviceImageGallery({
         )}
       </Card>
 
-      {/* The lightbox steps aside while its image is edited, so Escape closes only the editor. */}
-      {viewerIndex !== null && images && !editing && (
+      {/* The lightbox steps aside while its image is edited or replaced, so Escape closes only the dialog. */}
+      {viewerIndex !== null && images && !editing && !replacing && (
         <ImageLightbox
           images={images}
           index={Math.min(viewerIndex, images.length - 1)}
@@ -216,6 +240,7 @@ export default function DeviceImageGallery({
           loadError={error}
           onClose={() => setViewerIndex(null)}
           onEdit={openEditor}
+          onReplace={openReplace}
           onDownload={download}
         />
       )}
@@ -231,6 +256,9 @@ export default function DeviceImageGallery({
             setNotice(`Saved the details of ${imageTitle(updated)}.`);
           }}
         />
+      )}
+      {replacing && (
+        <ReplaceImageDialog image={replacing} urls={urls} onClose={() => setReplacing(null)} onReplaced={onReplaced} />
       )}
     </div>
   );

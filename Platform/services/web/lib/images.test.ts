@@ -393,6 +393,35 @@ describe("ImageUrlCache", () => {
     expect(fetchUrls).toHaveBeenLastCalledWith(["id-24", "id-25"]);
   });
 
+  it("ignores the answer to a request made before the entry was invalidated (a replaced file)", async () => {
+    const pending: { ids: string[]; resolve: (results: ViewUrlResult[]) => void }[] = [];
+    const fetchUrls = vi.fn(
+      (ids: string[]) => new Promise<ViewUrlResult[]>((resolve) => pending.push({ ids, resolve }))
+    );
+    const answer = (index: number, url: string) =>
+      pending[index].resolve(pending[index].ids.map((id) => ok(id, id === "a" ? url : undefined)));
+    const cache = new ImageUrlCache(fetchUrls, clock);
+
+    for (const order of [[0, 1], [1, 0]]) {
+      pending.length = 0;
+      cache.clear();
+      const before = cache.ensure(["a", "b"]);
+      await vi.waitFor(() => expect(pending).toHaveLength(1));
+      // The file is replaced while the first request (signed for the old file) is out.
+      cache.invalidate("a");
+      const after = cache.ensure(["a"]);
+      await vi.waitFor(() => expect(pending).toHaveLength(2));
+      expect(pending[1].ids).toEqual(["a"]);
+      for (const index of order) {
+        answer(index, index === 0 ? "https://s3/a?old-file" : "https://s3/a?new-file");
+        await (index === 0 ? before : after);
+      }
+      expect(cache.url("a")).toBe("https://s3/a?new-file");
+      // Other ids in the old request are unaffected.
+      expect(cache.url("b")).toBe("https://s3/b?sig=1");
+    }
+  });
+
   it("asks again for unavailable images once they are forgotten", async () => {
     const fetchUrls = vi
       .fn<(ids: string[]) => Promise<ViewUrlResult[]>>()

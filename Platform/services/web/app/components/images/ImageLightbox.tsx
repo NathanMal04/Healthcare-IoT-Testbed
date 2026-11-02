@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, Download, LoaderCircle, Pencil } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, LoaderCircle, Pencil, Replace } from "lucide-react";
 import { formatBytes } from "@/lib/artifacts";
-import { formatCapturedAt, imageTitle, lightboxStep, type ImageArtifact } from "@/lib/images";
+import { formatCapturedAt, imageFileKey, imageTitle, lightboxStep, type ImageArtifact } from "@/lib/images";
 import { Alert, Button, Dialog, formatDate } from "@/app/components/ui";
 import { ImageView } from "./ImageGrid";
 import type { ImageUrls } from "./useImageData";
@@ -24,6 +24,7 @@ export default function ImageLightbox({
   loadError,
   onClose,
   onEdit,
+  onReplace,
   onDownload,
 }: {
   images: ImageArtifact[];
@@ -36,6 +37,8 @@ export default function ImageLightbox({
   loadError?: string | null;
   onClose: () => void;
   onEdit?: (image: ImageArtifact) => void;
+  /** Replaces the image's file (ready images only). */
+  onReplace?: (image: ImageArtifact) => void;
   onDownload?: (image: ImageArtifact) => Promise<void>;
 }) {
   const [loadingMore, setLoadingMore] = useState(false);
@@ -105,8 +108,8 @@ export default function ImageLightbox({
     <Dialog title={title} subtitle={position} size="full" onClose={onClose}>
       <div className="space-y-4">
         <div className="relative rounded-lg bg-navy-950 overflow-hidden flex items-center justify-center h-[50vh] sm:h-[62vh]">
-          {/* Keyed so a new image never briefly shows the previous one. */}
-          <ImageView key={image.artifactId} image={image} urls={urls} fit="contain" lazy={false} className="h-full w-full bg-navy-950" />
+          {/* Keyed by the file, so neither another image nor a replaced file briefly shows the old one. */}
+          <ImageView key={imageFileKey(image)} image={image} urls={urls} fit="contain" lazy={false} className="h-full w-full bg-navy-950" />
           <button type="button" onClick={() => void step(-1)} disabled={!canPrev || loadingMore} aria-label="Previous image" className={`${navButton} left-2 sm:left-3`}>
             <ChevronLeft className="h-5 w-5" aria-hidden="true" />
           </button>
@@ -140,6 +143,11 @@ export default function ImageLightbox({
             {onEdit && (
               <Button variant="secondary" size="sm" icon={Pencil} onClick={() => onEdit(image)}>
                 Edit details
+              </Button>
+            )}
+            {onReplace && image.status === "ready" && (
+              <Button variant="secondary" size="sm" icon={Replace} onClick={() => onReplace(image)}>
+                Replace image
               </Button>
             )}
             {onDownload && (

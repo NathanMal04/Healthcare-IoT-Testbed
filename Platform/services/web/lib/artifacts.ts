@@ -419,6 +419,31 @@ async function sendWithRetry(
   }
 }
 
+/**
+ * Sends a file with a presigned POST, retrying network errors and 5xx
+ * responses. Unlike transferArtifact it never re-issues the POST through the
+ * retry endpoint, so it also suits uploads that aren't a new artifact's
+ * attempt (an image replacement); an expired POST (403) is reported.
+ */
+export async function sendSingleUpload(
+  file: File,
+  upload: { url: string; fields: Record<string, string> },
+  onProgress?: (bytesSent: number) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  await sendWithRetry(
+    () => {
+      const formData = new FormData();
+      for (const [key, value] of Object.entries(upload.fields)) formData.append(key, value);
+      // The file field must come last; S3 ignores fields after it.
+      formData.append("file", file);
+      return xhrSend({ method: "POST", url: upload.url, body: formData, payloadBytes: file.size, onProgress, signal });
+    },
+    undefined,
+    signal
+  );
+}
+
 const PART_GROUP_SIZE = 20;
 const PART_CONCURRENCY = 4;
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Check, ImageOff, LoaderCircle } from "lucide-react";
-import { formatCapturedAt, imageTitle, type ImageArtifact } from "@/lib/images";
+import { formatCapturedAt, imageFileKey, imageTitle, type ImageArtifact } from "@/lib/images";
 import type { ImageUrls } from "./useImageData";
 
 /**
@@ -124,7 +124,8 @@ export function ImageGrid({
               aria-pressed={selection ? selected : undefined}
               className="relative block w-full aspect-[4/3] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-inset"
             >
-              <ImageView image={image} urls={urls} className="absolute inset-0 h-full w-full" />
+              {/* Keyed by the file, so a replaced file never keeps showing the old one. */}
+              <ImageView key={imageFileKey(image)} image={image} urls={urls} className="absolute inset-0 h-full w-full" />
               {selection && selected && (
                 <span className="absolute top-2 right-2 h-6 w-6 rounded-full bg-brand-600 text-white flex items-center justify-center shadow">
                   <Check className="h-4 w-4" aria-hidden="true" />
