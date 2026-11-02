@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useId, useRef } from "react";
 import { X } from "lucide-react";
 import { Alert } from "./States";
 import { buttonClass } from "./styles";
+import { useFocusTrap } from "./useFocusTrap";
 
 const DIALOG_WIDTHS = {
   sm: "sm:max-w-sm",
@@ -20,6 +21,10 @@ const DIALOG_WIDTHS = {
  * `wide` is the same as size "lg". `aside` adds a dark side panel on the left
  * (hidden on small screens). With a `footer`, the title and footer stay put
  * and only the (unpadded) children scroll between them.
+ *
+ * Accessibility: the dialog is named by its title (and described by its
+ * subtitle), keeps keyboard focus inside while open, and returns focus to
+ * where it was when it closes.
  */
 export function Dialog({
   title,
@@ -44,6 +49,10 @@ export function Dialog({
 }) {
   const width = DIALOG_WIDTHS[size ?? (wide ? "lg" : "sm")];
   const escape = onEscape ?? onClose;
+  const titleId = useId();
+  const subtitleId = useId();
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useFocusTrap(panelRef);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -56,8 +65,14 @@ export function Dialog({
   const header = (
     <div className={`flex items-start justify-between gap-4 ${footer ? "px-5 sm:px-6 py-4 border-b border-line" : "mb-5"}`}>
       <div className="min-w-0">
-        <h2 className="text-lg font-semibold text-slate-900 tracking-tight break-words">{title}</h2>
-        {subtitle && <p className="text-slate-500 text-sm mt-1">{subtitle}</p>}
+        <h2 id={titleId} className="text-lg font-semibold text-slate-900 tracking-tight break-words">
+          {title}
+        </h2>
+        {subtitle && (
+          <p id={subtitleId} className="text-slate-500 text-sm mt-1">
+            {subtitle}
+          </p>
+        )}
       </div>
       <button
         type="button"
@@ -85,8 +100,11 @@ export function Dialog({
       }}
     >
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={subtitle ? subtitleId : undefined}
         className={`w-full ${width} bg-white rounded-t-2xl sm:rounded-xl border border-line shadow-pop ${
           footer ? "h-[92vh] sm:h-[85vh] flex flex-col overflow-hidden" : "max-h-[90vh] overflow-y-auto"
         } ${aside ? "md:flex" : footer ? "" : "p-5 sm:p-6"}`}

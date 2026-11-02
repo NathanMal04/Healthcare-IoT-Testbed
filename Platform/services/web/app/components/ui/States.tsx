@@ -9,25 +9,36 @@ export function LoadingState({ label = "Loading…", className = "" }: { label?:
   );
 }
 
+/** The heading level of a state's title, to fit the page's outline. */
+export type StateHeadingLevel = 2 | 3 | 4;
+
+function StateTitle({ level, children }: { level: StateHeadingLevel; children: React.ReactNode }) {
+  const Tag = `h${level}` as "h2" | "h3" | "h4";
+  return <Tag className="text-sm font-medium text-slate-800">{children}</Tag>;
+}
+
 export function EmptyState({
   icon: Icon,
   title,
   description,
   action,
   className = "",
+  headingLevel = 3,
 }: {
   icon: LucideIcon;
   title: string;
   description?: React.ReactNode;
   action?: React.ReactNode;
   className?: string;
+  /** Its title is a heading (default h3, inside a page section or card). */
+  headingLevel?: StateHeadingLevel;
 }) {
   return (
     <div className={`flex flex-col items-center text-center px-6 py-12 ${className}`}>
       <span className="h-11 w-11 rounded-xl bg-surface-sunken text-slate-400 flex items-center justify-center mb-3">
         <Icon className="h-5 w-5" aria-hidden="true" />
       </span>
-      <p className="text-sm font-medium text-slate-800">{title}</p>
+      <StateTitle level={headingLevel}>{title}</StateTitle>
       {description && <p className="text-sm text-slate-500 mt-1 max-w-md">{description}</p>}
       {action && <div className="mt-4">{action}</div>}
     </div>
@@ -39,21 +50,42 @@ export function ErrorState({
   message,
   action,
   className = "",
+  headingLevel = 3,
 }: {
   title?: string;
   message: React.ReactNode;
   action?: React.ReactNode;
   className?: string;
+  headingLevel?: StateHeadingLevel;
 }) {
   return (
     <div className={`flex flex-col items-center text-center px-6 py-10 ${className}`} role="alert">
       <span className="h-11 w-11 rounded-xl bg-red-50 text-red-500 flex items-center justify-center mb-3">
         <TriangleAlert className="h-5 w-5" aria-hidden="true" />
       </span>
-      <p className="text-sm font-medium text-slate-800">{title}</p>
-      <p className="text-sm text-slate-500 mt-1 max-w-md break-words">{message}</p>
+      <StateTitle level={headingLevel}>{title}</StateTitle>
+      <div className="text-sm text-slate-500 mt-1 max-w-md break-words">{message}</div>
       {action && <div className="mt-4">{action}</div>}
     </div>
+  );
+}
+
+/**
+ * A placeholder block while content loads (decorative: the region that
+ * loads should say so with aria-busy or a LoadingState).
+ */
+export function Skeleton({ className = "" }: { className?: string }) {
+  return <span aria-hidden="true" className={`block rounded-md bg-surface-sunken motion-safe:animate-pulse ${className}`} />;
+}
+
+/** A few lines of placeholder text. */
+export function SkeletonText({ lines = 3, className = "" }: { lines?: number; className?: string }) {
+  return (
+    <span aria-hidden="true" className={`block space-y-2 ${className}`}>
+      {Array.from({ length: lines }, (_, i) => (
+        <Skeleton key={i} className={`h-3 ${i === lines - 1 && lines > 1 ? "w-2/3" : "w-full"}`} />
+      ))}
+    </span>
   );
 }
 

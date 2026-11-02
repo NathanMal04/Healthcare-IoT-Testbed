@@ -21,6 +21,8 @@ export { formatDate, formatDay, initials } from "@/lib/format";
 export {
   buttonClass,
   cardClass,
+  focusRing,
+  typography,
   dangerButton,
   inputClass,
   labelClass,
@@ -34,8 +36,28 @@ export { Button, ButtonLink } from "./Button";
 export { Badge, ReStatusBadge, SeverityBadge, StatusBadge, type BadgeTone } from "./Badge";
 export { Card, CardHeader, MetricCard } from "./Card";
 export { PageHeader, ScopeLabel } from "./PageHeader";
-export { Alert, EmptyState, ErrorState, LoadingState } from "./States";
-export { DataTable, type Column } from "./DataTable";
+export { Alert, EmptyState, ErrorState, LoadingState, Skeleton, SkeletonText, type StateHeadingLevel } from "./States";
+export {
+  DataTable,
+  nextSort,
+  type Column,
+  type SortDirection,
+  type SortState,
+  type TableDensity,
+} from "./DataTable";
+export {
+  DescriptionList,
+  PageContainer,
+  PageSection,
+  type ContentWidth,
+  type DescriptionItem,
+} from "./Layout";
+export { Sheet } from "./Sheet";
+export { SplitView, DETAIL_LIMITS } from "./SplitView";
+export { ResizeHandle } from "./ResizeHandle";
+export { useFocusTrap, focusableIn } from "./useFocusTrap";
+export { useMediaQuery, LARGE_SCREEN } from "./useMediaQuery";
+export { useLatestRequest, type LatestRequest } from "./useLatestRequest";
 export { FilterSelect, SearchInput, Toolbar } from "./Toolbar";
 export { TabPanel, Tabs, type TabItem } from "./Tabs";
 export { ConfirmDialog, Dialog, TextModal } from "./Dialog";
