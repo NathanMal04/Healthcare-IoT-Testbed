@@ -6,6 +6,8 @@ import { fetchUserAttributes } from "aws-amplify/auth";
 import { ChevronDown, LogOut } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { initials } from "@/lib/format";
+import { discardNotebookWork, flushNotebookWork, hasUnsavedNotebookWork } from "@/lib/reNotebookDrafts";
+import { Button, Dialog } from "@/app/components/ui";
 
 /** Avatar initials and a menu with the signed-in email and Sign out. */
 export default function UserMenu() {
@@ -14,6 +16,7 @@ export default function UserMenu() {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
+  const [unsavedNotebook, setUnsavedNotebook] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   // The Cognito username is an opaque id; the email is read from the user's
@@ -49,9 +52,17 @@ export default function UserMenu() {
     };
   }, [open]);
 
-  async function handleSignOut() {
+  async function handleSignOut(discardUnsaved = false) {
     setSigningOut(true);
     try {
+      // Signing out removes this browser's RE Notebook drafts, so open
+      // entries are saved first; if that isn't possible, the user decides.
+      if (!discardUnsaved && hasUnsavedNotebookWork() && !(await flushNotebookWork())) {
+        setUnsavedNotebook(true);
+        return;
+      }
+      // Leaving anyway: nothing unsaved is sent or kept after signing out.
+      if (discardUnsaved) discardNotebookWork();
       await signOut();
       router.push("/login");
     } finally {
@@ -93,6 +104,30 @@ export default function UserMenu() {
             {signingOut ? "Signing out…" : "Sign out"}
           </button>
         </div>
+      )}
+      {unsavedNotebook && (
+        <Dialog title="Unsaved RE Notebook changes" onClose={() => setUnsavedNotebook(false)}>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              An open RE Notebook entry has changes that couldn&apos;t be saved. Signing out removes them from this
+              browser.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setUnsavedNotebook(false)}>
+                Stay signed in
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  setUnsavedNotebook(false);
+                  void handleSignOut(true);
+                }}
+              >
+                Sign out and discard them
+              </Button>
+            </div>
+          </div>
+        </Dialog>
       )}
     </div>
   );

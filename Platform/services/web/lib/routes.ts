@@ -2,11 +2,15 @@
 // a static export, so there are no dynamic route segments).
 
 /** `cve` opens that linked CVE's details on the device's CVEs tab. */
-export function deviceHref(deviceId: string, tab?: string, options: { cve?: string } = {}): string {
+export function deviceHref(deviceId: string, tab?: string, options: { cve?: string; entry?: string } = {}): string {
   const params = new URLSearchParams({ id: deviceId });
   if (options.cve) {
     params.set("tab", "cves");
     params.set("cve", options.cve);
+  } else if (options.entry) {
+    // An RE Notebook entry.
+    params.set("tab", "notebook");
+    params.set("entry", options.entry);
   } else if (tab) {
     params.set("tab", tab);
   }

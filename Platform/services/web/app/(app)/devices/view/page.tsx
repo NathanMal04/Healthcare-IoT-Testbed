@@ -2,6 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
@@ -62,6 +63,12 @@ import DeviceProfilePicture from "@/app/components/images/DeviceProfilePicture";
 import { useImageUrls } from "@/app/components/images/useImageData";
 import { useProfileImage } from "@/app/components/images/useProfileImage";
 import { imageTitle } from "@/lib/images";
+
+// The RE Notebook loads its editor (Tiptap) only when its tab is opened.
+const DeviceNotebook = dynamic(() => import("@/app/components/renotebook/DeviceNotebook"), {
+  ssr: false,
+  loading: () => <LoadingState label="Loading the RE Notebook…" />,
+});
 import {
   FirmwareRetryDialog,
   FirmwareTable,
@@ -89,7 +96,7 @@ import {
   type Column,
 } from "@/app/components/ui";
 
-const TABS = ["overview", "firmware", "artifacts", "images", "cves"] as const;
+const TABS = ["overview", "firmware", "artifacts", "images", "cves", "notebook"] as const;
 type TabId = (typeof TABS)[number];
 
 export default function DeviceViewPage() {
@@ -128,10 +135,25 @@ function DeviceViewRoute() {
   }
   // Keyed on the scope and device: switching workspace remounts the view, so
   // nothing from the previous scope carries over.
-  return <DeviceView key={`${scopeKey(scope)}:${deviceId}`} deviceId={deviceId} initialTab={initialTab} />;
+  return (
+    <DeviceView
+      key={`${scopeKey(scope)}:${deviceId}`}
+      deviceId={deviceId}
+      initialTab={initialTab}
+      initialEntryId={searchParams.get("entry")}
+    />
+  );
 }
 
-function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: TabId }) {
+function DeviceView({
+  deviceId,
+  initialTab,
+  initialEntryId,
+}: {
+  deviceId: string;
+  initialTab: TabId;
+  initialEntryId: string | null;
+}) {
   const router = useRouter();
   // A linked CVE opened from the CVEs tab; in the URL so Back returns to the list.
   const openCveId = useSearchParams().get("cve");
@@ -348,6 +370,7 @@ function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: Ta
           { id: "artifacts", label: "Artifacts" },
           { id: "images", label: "Images" },
           { id: "cves", label: "CVEs", count: cves ? deviceCves.length : undefined },
+          { id: "notebook", label: "RE Notebook" },
         ]}
       />
 
@@ -393,6 +416,15 @@ function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: Ta
               // the picture being chosen again.
               if (image.artifactId === device.profileImageArtifactId) refreshProfileFile(image.artifactId);
             }}
+          />
+        )}
+        {tab === "notebook" && (
+          <DeviceNotebook
+            device={device}
+            initialEntryId={initialEntryId}
+            onEntryChange={(entryId) =>
+              router.replace(deviceHref(deviceId, "notebook", { entry: entryId ?? undefined }), { scroll: false })
+            }
           />
         )}
         {tab === "cves" && openCveId && (

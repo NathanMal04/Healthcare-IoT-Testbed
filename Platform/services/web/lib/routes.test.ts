@@ -12,6 +12,11 @@ describe("deviceHref", () => {
     expect(deviceHref("d1", "overview", { cve: "c1" })).toBe("/devices/view?id=d1&tab=cves&cve=c1");
   });
 
+  it("opens an RE Notebook entry on the device's notebook tab", () => {
+    expect(deviceHref("d1", "notebook", { entry: "e1" })).toBe("/devices/view?id=d1&tab=notebook&entry=e1");
+    expect(deviceHref("d1", undefined, { entry: "e1" })).toBe("/devices/view?id=d1&tab=notebook&entry=e1");
+  });
+
   it("encodes ids", () => {
     expect(deviceHref("a b", undefined, { cve: "x&y" })).toBe("/devices/view?id=a+b&tab=cves&cve=x%26y");
   });

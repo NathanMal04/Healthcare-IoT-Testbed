@@ -26,3 +26,53 @@
     scroll-behavior: smooth;
   }
 }
+
+/* RE Notebook documents (the editor and read-only views). Only the formatting
+   the notebook supports exists, so only that is styled. */
+@layer components {
+  .re-notebook-doc {
+    @apply text-sm leading-relaxed text-slate-800 break-words;
+  }
+  .re-notebook-doc > * + * {
+    @apply mt-3;
+  }
+  .re-notebook-doc h1 {
+    @apply text-xl font-semibold text-slate-900 tracking-tight mt-5;
+  }
+  .re-notebook-doc h2 {
+    @apply text-lg font-semibold text-slate-900 mt-5;
+  }
+  .re-notebook-doc h3 {
+    @apply text-base font-semibold text-slate-900 mt-4;
+  }
+  .re-notebook-doc > :first-child {
+    @apply mt-0;
+  }
+  .re-notebook-doc ul {
+    @apply list-disc pl-6 space-y-1;
+  }
+  .re-notebook-doc ol {
+    @apply list-decimal pl-6 space-y-1;
+  }
+  .re-notebook-doc li > p + * {
+    @apply mt-1;
+  }
+  .re-notebook-doc blockquote {
+    @apply border-l-4 border-line pl-4 text-slate-600;
+  }
+  .re-notebook-doc a {
+    @apply text-brand-700 underline underline-offset-2;
+  }
+  .re-notebook-doc code {
+    @apply rounded bg-surface-sunken px-1 py-0.5 font-mono text-[0.85em] text-slate-800;
+  }
+  .re-notebook-doc pre {
+    @apply rounded-lg bg-navy-900 text-slate-100 px-4 py-3 overflow-x-auto font-mono text-xs leading-relaxed;
+  }
+  .re-notebook-doc pre code {
+    @apply bg-transparent p-0 text-inherit;
+  }
+  .re-notebook-doc[contenteditable="true"] {
+    @apply cursor-text;
+  }
+}
