@@ -204,6 +204,11 @@ It is chosen from the gallery ("Set as profile picture") or by uploading a new p
 from the picture's menu on the device page, where its file can also be replaced or the picture removed. Changing or
 removing the picture never deletes an image. See
 [Device profile pictures](Platform/infra/DATABASE.md#device-profile-pictures).
+Each device has one **RE Notebook** (its page's "RE Notebook" tab): sections of reverse-engineering research
+entries, written in a rich-text editor that saves automatically. Everyone who can see the device can read and
+contribute; saves are versioned, so a change someone else made meanwhile is shown next to yours rather than
+overwritten, and unsaved changes are kept in the browser until they are saved. Deleted entries are kept in the
+database (there is no restore option in the app yet). See [RE Notebook](Platform/infra/DATABASE.md#re-notebook).
 An image's file can be **replaced** (from its card menu or the viewer) while the image keeps its id, details,
 tags and device links. The new file is verified before it goes live, and the old file is then **permanently
 deleted** (the bucket is unversioned and there is no version history). A job that was already given a URL for the

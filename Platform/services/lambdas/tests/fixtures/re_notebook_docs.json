@@ -1,0 +1,100 @@
+{
+  "_comment": "RE Notebook documents shared by the backend validator tests (test_re_notebook_doc.py) and the web app tests (lib/reNotebookDoc.test.ts), so both sides accept and refuse exactly the same documents. 'editorHtml' cases are also loaded into the real editor, whose normalized output must equal 'doc'.",
+  "valid": [
+    {
+      "name": "empty document",
+      "doc": {"type": "doc", "content": [{"type": "paragraph"}]}
+    },
+    {
+      "name": "every supported format",
+      "editorHtml": "<h2>T</h2><p>a <strong>b</strong> <em>c</em> <code>d</code> <a href=\"https://x.org\">l</a><br>n</p><ul><li><p>u</p></li></ul><ol start=\"3\"><li><p>o</p></li></ol><blockquote><p>q</p></blockquote><pre><code class=\"language-python\">x=1</code></pre><p></p>",
+      "doc": {"type": "doc", "content": [
+        {"type": "heading", "attrs": {"level": 2}, "content": [{"type": "text", "text": "T"}]},
+        {"type": "paragraph", "content": [
+          {"type": "text", "text": "a "},
+          {"type": "text", "marks": [{"type": "bold"}], "text": "b"},
+          {"type": "text", "text": " "},
+          {"type": "text", "marks": [{"type": "italic"}], "text": "c"},
+          {"type": "text", "text": " "},
+          {"type": "text", "marks": [{"type": "code"}], "text": "d"},
+          {"type": "text", "text": " "},
+          {"type": "text", "marks": [{"type": "link", "attrs": {"href": "https://x.org"}}], "text": "l"},
+          {"type": "hardBreak"},
+          {"type": "text", "text": "n"}
+        ]},
+        {"type": "bulletList", "content": [{"type": "listItem", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "u"}]}]}]},
+        {"type": "orderedList", "attrs": {"start": 3}, "content": [{"type": "listItem", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "o"}]}]}]},
+        {"type": "blockquote", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "q"}]}]},
+        {"type": "codeBlock", "attrs": {"language": "python"}, "content": [{"type": "text", "text": "x=1"}]},
+        {"type": "paragraph"}
+      ]}
+    },
+    {
+      "name": "headings 1 to 3, combined marks and a mailto link",
+      "editorHtml": "<h1>One</h1><h3>Three</h3><p><a href=\"mailto:lab@example.org\"><strong><em>mail</em></strong></a></p>",
+      "doc": {"type": "doc", "content": [
+        {"type": "heading", "attrs": {"level": 1}, "content": [{"type": "text", "text": "One"}]},
+        {"type": "heading", "attrs": {"level": 3}, "content": [{"type": "text", "text": "Three"}]},
+        {"type": "paragraph", "content": [{"type": "text", "marks": [{"type": "link", "attrs": {"href": "mailto:lab@example.org"}}, {"type": "bold"}, {"type": "italic"}], "text": "mail"}]}
+      ]}
+    },
+    {
+      "name": "nested lists, a quote with a list and a plain code block",
+      "editorHtml": "<ul><li><p>a</p><ol><li><p>b</p></li></ol></li></ul><blockquote><ul><li><p>c</p></li></ul></blockquote><pre><code>raw\n\tline</code></pre>",
+      "doc": {"type": "doc", "content": [
+        {"type": "bulletList", "content": [{"type": "listItem", "content": [
+          {"type": "paragraph", "content": [{"type": "text", "text": "a"}]},
+          {"type": "orderedList", "attrs": {"start": 1}, "content": [{"type": "listItem", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "b"}]}]}]}
+        ]}]},
+        {"type": "blockquote", "content": [{"type": "bulletList", "content": [{"type": "listItem", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "c"}]}]}]}]},
+        {"type": "codeBlock", "content": [{"type": "text", "text": "raw\n\tline"}]}
+      ]}
+    },
+    {
+      "name": "a bold line break and an empty heading",
+      "doc": {"type": "doc", "content": [
+        {"type": "paragraph", "content": [{"type": "text", "marks": [{"type": "bold"}], "text": "x"}, {"type": "hardBreak", "marks": [{"type": "bold"}]}]},
+        {"type": "heading", "attrs": {"level": 2}}
+      ]}
+    }
+  ],
+  "invalid": [
+    {"name": "HTML string", "doc": "<p>hi</p>"},
+    {"name": "not a document", "doc": {"type": "paragraph"}},
+    {"name": "document without blocks", "doc": {"type": "doc", "content": []}},
+    {"name": "document without content", "doc": {"type": "doc"}},
+    {"name": "unknown node", "doc": {"type": "doc", "content": [{"type": "image", "attrs": {"src": "https://x.org/a.png"}}]}},
+    {"name": "horizontal rule (switched off)", "doc": {"type": "doc", "content": [{"type": "horizontalRule"}]}},
+    {"name": "underline (switched off)", "doc": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "marks": [{"type": "underline"}], "text": "x"}]}]}},
+    {"name": "strike (switched off)", "doc": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "marks": [{"type": "strike"}], "text": "x"}]}]}},
+    {"name": "javascript link", "doc": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "marks": [{"type": "link", "attrs": {"href": "javascript:alert(1)"}}], "text": "x"}]}]}},
+    {"name": "mixed-case javascript link", "doc": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "marks": [{"type": "link", "attrs": {"href": "JaVaScRiPt:alert(1)"}}], "text": "x"}]}]}},
+    {"name": "data link", "doc": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "marks": [{"type": "link", "attrs": {"href": "data:text/html,<script>alert(1)</script>"}}], "text": "x"}]}]}},
+    {"name": "relative link", "doc": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "marks": [{"type": "link", "attrs": {"href": "/devices"}}], "text": "x"}]}]}},
+    {"name": "link with leading space", "doc": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "marks": [{"type": "link", "attrs": {"href": " https://x.org"}}], "text": "x"}]}]}},
+    {"name": "link without host", "doc": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "marks": [{"type": "link", "attrs": {"href": "https://"}}], "text": "x"}]}]}},
+    {"name": "link with extra attributes", "doc": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "marks": [{"type": "link", "attrs": {"href": "https://x.org", "target": "_self"}}], "text": "x"}]}]}},
+    {"name": "heading level 4", "doc": {"type": "doc", "content": [{"type": "heading", "attrs": {"level": 4}, "content": [{"type": "text", "text": "x"}]}]}},
+    {"name": "heading level as a string", "doc": {"type": "doc", "content": [{"type": "heading", "attrs": {"level": "2"}, "content": [{"type": "text", "text": "x"}]}]}},
+    {"name": "heading level as a boolean", "doc": {"type": "doc", "content": [{"type": "heading", "attrs": {"level": true}, "content": [{"type": "text", "text": "x"}]}]}},
+    {"name": "heading without a level", "doc": {"type": "doc", "content": [{"type": "heading", "content": [{"type": "text", "text": "x"}]}]}},
+    {"name": "empty text node", "doc": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": ""}]}]}},
+    {"name": "control character in text", "doc": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "a\u0000b"}]}]}},
+    {"name": "marks in a code block", "doc": {"type": "doc", "content": [{"type": "codeBlock", "content": [{"type": "text", "marks": [{"type": "bold"}], "text": "x"}]}]}},
+    {"name": "inline code with another mark", "doc": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "marks": [{"type": "bold"}, {"type": "code"}], "text": "x"}]}]}},
+    {"name": "the same mark twice", "doc": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "marks": [{"type": "bold"}, {"type": "bold"}], "text": "x"}]}]}},
+    {"name": "mark with attributes", "doc": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "marks": [{"type": "bold", "attrs": {"x": 1}}], "text": "x"}]}]}},
+    {"name": "list item starting with a heading", "doc": {"type": "doc", "content": [{"type": "bulletList", "content": [{"type": "listItem", "content": [{"type": "heading", "attrs": {"level": 2}, "content": [{"type": "text", "text": "x"}]}]}]}]}},
+    {"name": "empty list", "doc": {"type": "doc", "content": [{"type": "bulletList", "content": []}]}},
+    {"name": "empty quote", "doc": {"type": "doc", "content": [{"type": "blockquote"}]}},
+    {"name": "paragraph inside a paragraph", "doc": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "paragraph"}]}]}},
+    {"name": "text at the top level", "doc": {"type": "doc", "content": [{"type": "text", "text": "x"}]}},
+    {"name": "node with an html field", "doc": {"type": "doc", "content": [{"type": "paragraph", "html": "<b>x</b>"}]}},
+    {"name": "paragraph with attributes", "doc": {"type": "doc", "content": [{"type": "paragraph", "attrs": {"textAlign": "left"}}]}},
+    {"name": "ordered list with a type", "doc": {"type": "doc", "content": [{"type": "orderedList", "attrs": {"start": 1, "type": "a"}, "content": [{"type": "listItem", "content": [{"type": "paragraph"}]}]}]}},
+    {"name": "ordered list starting below zero", "doc": {"type": "doc", "content": [{"type": "orderedList", "attrs": {"start": -1}, "content": [{"type": "listItem", "content": [{"type": "paragraph"}]}]}]}},
+    {"name": "code block language with a space", "doc": {"type": "doc", "content": [{"type": "codeBlock", "attrs": {"language": "py thon"}}]}},
+    {"name": "line break with content", "doc": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "hardBreak", "content": []}]}]}},
+    {"name": "marks on a block", "doc": {"type": "doc", "content": [{"type": "paragraph", "marks": [{"type": "bold"}]}]}}
+  ]
+}

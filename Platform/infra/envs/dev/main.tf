@@ -509,7 +509,7 @@ module "api" {
 
 # Integrations defined with the api_lambda_method / api_cors_preflight
 # modules: GET and PATCH /devices/{deviceId} below, plus artifacts.tf, builds.tf,
-# runs.tf, usage.tf, workspaces.tf, cves.tf and sessions.tf.
+# runs.tf, usage.tf, workspaces.tf, cves.tf, sessions.tf and re_notebook.tf.
 locals {
   module_route_integration_ids = concat(
     [
@@ -524,6 +524,7 @@ locals {
     local.workspaces_integration_ids,
     local.cves_integration_ids,
     local.sessions_integration_ids,
+    local.re_notebook_integration_ids,
   )
 }
 

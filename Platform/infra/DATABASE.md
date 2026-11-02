@@ -5,7 +5,7 @@ The platform stores its records in two DynamoDB tables. The sample model for bot
 | Table | Keys | Holds |
 |---|---|---|
 | `healthcare-iot-testbed-dev-users` | `userId` | One row per Cognito user: `email`, `fullName`, `role` (`admin` / `user`), `status`, timestamps. Written by the post-confirmation Lambda. |
-| `healthcare-iot-testbed-dev-metadata` | `pk` + `sk` | Everything else, in a single-table design: devices, artifacts, upload batches, scripts (modules), environments, runs, sessions, workspaces and their members, CVE records, ownership links, budgets and the usage ledger. |
+| `healthcare-iot-testbed-dev-metadata` | `pk` + `sk` | Everything else, in a single-table design: devices, artifacts, upload batches, scripts (modules), environments, runs, sessions, workspaces and their members, CVE records, RE notebooks, ownership links, budgets and the usage ledger. |
 
 The metadata table is single-table so that one `Query` on a partition returns a record and everything hanging off it: a run with its children, results and outputs, or a user with everything they own. The table has no secondary indexes. Every access pattern below is a `GetItem`, or a `Query` on `pk` with an optional `begins_with` on `sk`.
 
@@ -447,6 +447,32 @@ A CVE is linked to any number (up to 40) of devices **of its own scope**, and a 
 
 **Devices are never deleted yet.** A future device delete must remove its `DEVICE#{did} / CVE#{rid}` rows, the mirrors and the id from each CVE's `deviceIds` (one transaction per CVE, as a device can be linked to many).
 
+### RE Notebook: `RENOTEBOOK#{deviceId}`
+
+<a id="re-notebook"></a>Each device has exactly **one** reverse-engineering notebook: ordered **sections**, each holding ordered research **entries**, whose content is a structured rich-text document. It is served by `re-notebook-api` under `/devices/{deviceId}/notebook` (see `re_notebook.tf`) and edited in the device page's **RE Notebook** tab. It has nothing to do with the Jupyter notebooks of the Notebooks page.
+
+The notebook is one partition, keyed by the device id:
+
+| sk | entity | Holds |
+|---|---|---|
+| `METADATA` | `re-notebook` | `deviceId`, `sectionIds` (L, the section order), `orderVersion`, authorship. Written with the first section; a device without one has an empty notebook |
+| `SECTION#{sid}` | `re-notebook-section` | `sectionId` (UUIDv7), `title`, `entryIds` (L, the entry order; may be empty), `version` (title), `orderVersion` (entry order), authorship |
+| `ENTRY#{eid}` | `re-notebook-entry` | `entryId` (UUIDv7), `sectionId`, `title`, `version` (title and placement), `contentVersion`, `textLength`, authorship, `contentUpdatedBy` / `contentUpdatedByName` / `contentUpdatedAt`; when deleted also `deletedAt`, `deletedBy`, `deletedByName`. **No document** |
+| `CONTENT#{eid}` | `re-notebook-content` | `doc` (S: the document as compact JSON), `schemaVersion` (1), `contentVersion`, `updatedAt`, `updatedBy` |
+
+*Authorship* is `createdBy`, `createdByName`, `createdAt`, `updatedBy`, `updatedByName`, `updatedAt`: the Cognito `sub` and a display name taken from the caller's ID token (`name`, else `email`), never from the request. Ids are UUIDv7; timestamps have microseconds.
+
+- **Scope and access.** Nothing in the partition records a scope: every request is authorized against `DEVICE#{deviceId} / METADATA` with the device-edit rule (`testbed_authz.require_resource(..., "DEVICE", ...)`: the owner of a personal device, any member of a workspace device's workspace, never a leftover `USER#/DEVICE#` row), with the same `404` whether the device is missing or not the caller's. Every write is a `TransactWriteItems` that also re-checks, with `ConditionCheck`s, that the device is still in the scope it was authorized in and that the caller is still its owner or a member. Section and entry ids are only ever looked up inside the authorized device's partition, so an id from another device or workspace names nothing.
+- **Documents** are the web editor's (Tiptap/ProseMirror) JSON restricted to paragraphs, headings 1-3, bold, italic, inline code, links (`http`, `https`, `mailto` only), bullet and numbered lists, quotes, code blocks and line breaks; never HTML. `re-notebook-api/re_notebook_doc.py` refuses anything else (unknown nodes, marks or attributes, other link schemes, structure the editor can't produce), more than 300 KB of JSON (UTF-8), more than 40 levels of nesting or 60,000 nodes. The web app normalizes and checks documents with the same rules (`lib/reNotebookDoc.ts`); both are tested against the same documents (`lambdas/tests/fixtures/re_notebook_docs.json`). The document is stored as a String so ProseMirror's nesting never meets DynamoDB's 32-level limit on maps.
+- **Concurrency.** Titles are versioned (`version`), documents separately (`contentVersion`), order lists by `orderVersion`. Requests carry the version they started from (`expectedVersion`, `expectedContentVersion`, `expectedOrderVersion`) and get `409` with the current state (`code: conflict` or `stale_order`, plus the entry, document or notebook) when it moved on, so a change is never silently overwritten. Order lists the server derives itself (adding, moving or deleting an entry, adding or deleting a section) are re-read and retried up to 3 times instead, conditional on the `orderVersion` read; a lasting clash is `409` `code: busy`.
+- **Autosave** (`PUT …/entries/{eid}/content`) updates `CONTENT#` and `ENTRY#` in one transaction, both conditional on `contentVersion = expectedContentVersion`, and the entry on not being deleted.
+- **Soft delete.** `DELETE …/entries/{eid}` (conditional on both versions) sets `deletedAt`, `deletedBy`, `deletedByName` and removes the id from its section's `entryIds`; both rows, document included, are kept. Every entry write requires `attribute_not_exists(deletedAt)`, and an order list must be a permutation of the live entries, so a stale request can neither edit nor restore a deleted entry. A deleted entry answers `404` with `code: deleted` and who deleted it. There is no restore endpoint yet.
+- **Sections** can be deleted only when empty (`size(entryIds) = 0` in the condition): entries are deleted or moved first, never with their section. Soft-deleted entries keep their `sectionId` even after the section is gone.
+- **Moving** an entry to another section is one transaction: the entry's `sectionId` (conditional on its `version` and current section) and both sections' `entryIds`.
+- **Limits:** 50 sections, 200 entries per section, titles of 1-200 characters without control characters.
+- **Later phases** (images from the device gallery, artifact and CVE references, revision history, PDF export) add document node types that reference records by id (`artifactId`, `cveRecordId`), never copies; revision rows can be keyed by `contentVersion` (`REVISION#{eid}#{contentVersion}`).
+- **Devices are never deleted yet.** A future device delete must remove the `RENOTEBOOK#{deviceId}` partition too.
+
 ### Budget: `USER#{uid}` / `BUDGET`
 
 Created with defaults (`DEFAULT_MONTHLY_LIMIT`, $25; Heavy off) the first time it's needed. Admins change it with `Platform/scripts/set_budget.py`.
@@ -499,6 +525,7 @@ erDiagram
     USER ||--o{ CVE : owns
     WORKSPACE |o--o{ CVE : "workspace CVE"
     DEVICE }o--o{ CVE : "linked (same scope)"
+    DEVICE ||--o| RENOTEBOOK : "RE notebook (sections, entries)"
     WORKSPACE |o--o{ RUN : "workspace run"
     DEVICE }o--o{ RUN : "optional link"
     MODULE ||--|{ MODULE_VERSION : has
@@ -563,6 +590,8 @@ erDiagram
 | A device's CVEs | `Query pk = DEVICE#{did}, sk begins_with CVE#` (no endpoint yet) |
 | Is this device linked to this CVE? | `GetItem pk = CVE#{rid}, sk = DEVICE#{did}` |
 | Everything to delete with a CVE | `Query pk = CVE#{rid}` (consistent read), plus the claim |
+| A device's RE Notebook (structure) | `GetItem RENOTEBOOK#{did} / METADATA`, `Query pk = RENOTEBOOK#{did}, sk begins_with SECTION#` and `… ENTRY#` (consistent reads; documents aren't read) |
+| One notebook entry's document | `GetItem RENOTEBOOK#{did} / CONTENT#{eid}` |
 
 ## Status tracking
 
@@ -575,5 +604,5 @@ Each status-bearing row stores its **current** status (`status`, `statusReason`,
 
 - **Firmware:** the old `/devices/{id}/firmware` routes only serve personal devices: they refuse a workspace device, even for a member or with a leftover `USER#/DEVICE#` row. The web app now uploads firmware as `ARTIFACT#` records (`type = firmware`) with device links and a `FWVER#` guard. The old firmware Lambdas (`presign-firmware`, `complete-firmware`, `list-firmware`) and their `DEVICE#{did} / FIRMWARE#{version}` rows are still deployed but no longer used by the UI. [`Platform/scripts/migrate_firmware_to_artifacts.py`](../scripts/migrate_firmware_to_artifacts.py) copies the old rows into artifacts (dry run by default, `--apply` to write; safe to re-run). The S3 objects stay where they are. Once it has run, the old Lambdas and routes can be removed. `FIRMWARE#` rows are deliberately left out of the model.
 - **Old model:** `OUTPUT#`, `MODULE# / SCRIPT|TOOL` and the run-style `SESSION#` rows from the April model have been replaced by the entities above. Modules no longer have a `kind`: tools come from environments or L3 Dockerfiles.
-- **Device images:** Phase 1 (backend) is in place: [Image artifacts](#image-artifacts). Still to come: the device gallery in the web app, a device profile image (a `profileImageId` on the device, pointing at one of its images), deleting or archiving images, and a per-device reverse-engineering notebook whose entries reference artifacts by `artifactId` (no copies).
+- **Device images:** Phase 1 (backend) is in place: [Image artifacts](#image-artifacts). Still to come: the device gallery in the web app, a device profile image (a `profileImageId` on the device, pointing at one of its images), deleting or archiving images, and, in the per-device [RE Notebook](#re-notebook), entries that reference images and artifacts by `artifactId` (no copies).
 - **Groups and sharing:** only `role = owner` is used today. A later user-groups system can add a `GROUP#{gid}` principal with the same two-way link shape (`GROUP#/X#` and `X#/GROUP#`) and more roles, without changing existing rows.
