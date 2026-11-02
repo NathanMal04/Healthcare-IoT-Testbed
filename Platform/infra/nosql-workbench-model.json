@@ -570,6 +570,18 @@
         {
           "AttributeName": "pendingNameSync",
           "AttributeType": "S"
+        },
+        {
+          "AttributeName": "mimeType",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "title",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "capturedAt",
+          "AttributeType": "S"
         }
       ],
       "TableFacets": [
@@ -1202,6 +1214,85 @@
                   "dev-003"
                 ]
               }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-008"
+              },
+              "sk": {
+                "S": "METADATA"
+              },
+              "entity": {
+                "S": "artifact"
+              },
+              "name": {
+                "S": "bp_a_pcb_top.jpg"
+              },
+              "type": {
+                "S": "image"
+              },
+              "sha256": {
+                "S": "8f14e45f"
+              },
+              "sizeBytes": {
+                "N": "3145728"
+              },
+              "originalFilename": {
+                "S": "bp_a_pcb_top.jpg"
+              },
+              "s3Bucket": {
+                "S": "healthcare-iot-testbed-dev-data-lake"
+              },
+              "s3Key": {
+                "S": "artifacts/art-008/att-008"
+              },
+              "attemptId": {
+                "S": "att-008"
+              },
+              "status": {
+                "S": "ready"
+              },
+              "statusUpdatedAt": {
+                "S": "2026-09-12T09:00:00Z"
+              },
+              "createdBy": {
+                "S": "user-001"
+              },
+              "createdAt": {
+                "S": "2026-09-12T09:00:00Z"
+              },
+              "updatedAt": {
+                "S": "2026-09-13T08:15:00Z"
+              },
+              "origin": {
+                "S": "upload"
+              },
+              "uploadMode": {
+                "S": "single"
+              },
+              "uploadBatchId": {
+                "S": "batch-003"
+              },
+              "uploadedAt": {
+                "S": "2026-09-12T09:00:00Z"
+              },
+              "deviceIds": {
+                "SS": [
+                  "dev-001"
+                ]
+              },
+              "mimeType": {
+                "S": "image/jpeg"
+              },
+              "title": {
+                "S": "Main PCB, top side"
+              },
+              "description": {
+                "S": "UART test pads (TX/RX/GND) next to the MCU; debug header unpopulated."
+              },
+              "capturedAt": {
+                "S": "2026-08-28"
+              }
             }
           ],
           "NonKeyAttributes": [
@@ -1230,7 +1321,11 @@
             "partSize",
             "partCount",
             "derivedFromRun",
-            "derivedFromArtifacts"
+            "derivedFromArtifacts",
+            "mimeType",
+            "title",
+            "capturedAt",
+            "description"
           ],
           "DataAccess": {
             "MySql": {}
@@ -1463,6 +1558,23 @@
               },
               "type": {
                 "S": "firmware"
+              }
+            },
+            {
+              "pk": {
+                "S": "BATCH#batch-003"
+              },
+              "sk": {
+                "S": "ARTIFACT#art-008"
+              },
+              "entity": {
+                "S": "batch-artifact"
+              },
+              "name": {
+                "S": "bp_a_pcb_top.jpg"
+              },
+              "type": {
+                "S": "image"
               }
             }
           ],
@@ -3848,6 +3960,29 @@
               "createdAt": {
                 "S": "2026-09-10T16:00:00Z"
               }
+            },
+            {
+              "pk": {
+                "S": "USER#user-001"
+              },
+              "sk": {
+                "S": "ARTIFACT#art-008"
+              },
+              "entity": {
+                "S": "user-artifact"
+              },
+              "role": {
+                "S": "owner"
+              },
+              "name": {
+                "S": "bp_a_pcb_top.jpg"
+              },
+              "type": {
+                "S": "image"
+              },
+              "createdAt": {
+                "S": "2026-09-12T09:00:00Z"
+              }
             }
           ],
           "NonKeyAttributes": [
@@ -4176,6 +4311,20 @@
               "role": {
                 "S": "owner"
               }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-008"
+              },
+              "sk": {
+                "S": "USER#user-001"
+              },
+              "entity": {
+                "S": "artifact-user"
+              },
+              "role": {
+                "S": "owner"
+              }
             }
           ],
           "NonKeyAttributes": [
@@ -4311,6 +4460,23 @@
               "status": {
                 "S": "completed"
               }
+            },
+            {
+              "pk": {
+                "S": "DEVICE#dev-001"
+              },
+              "sk": {
+                "S": "ARTIFACT#image#art-008"
+              },
+              "entity": {
+                "S": "device-artifact"
+              },
+              "name": {
+                "S": "bp_a_pcb_top.jpg"
+              },
+              "type": {
+                "S": "image"
+              }
             }
           ],
           "NonKeyAttributes": [
@@ -4423,6 +4589,20 @@
               },
               "entity": {
                 "S": "run-device"
+              },
+              "name": {
+                "S": "Blood Pressure Monitor A"
+              }
+            },
+            {
+              "pk": {
+                "S": "ARTIFACT#art-008"
+              },
+              "sk": {
+                "S": "DEVICE#dev-001"
+              },
+              "entity": {
+                "S": "artifact-device"
               },
               "name": {
                 "S": "Blood Pressure Monitor A"

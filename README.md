@@ -177,6 +177,8 @@ checks that the caller owns the device or artifact before acting on it.
 | `GET` | `/devices/{deviceId}/artifacts` | `artifacts-list` | List a device's artifacts (`type`, `tag`, `limit`, `nextToken`) |
 | `GET` | `/artifacts/{artifactId}` | `artifacts-get` | Artifact details and linked devices |
 | `GET` | `/artifacts/{artifactId}/download` | `artifacts-get` | Short-lived presigned download URL |
+| `PATCH` | `/artifacts/{artifactId}` | `artifacts-update` | Firmware `reverseEngineeringStatus`; image `title`, `description`, `capturedAt` |
+| `POST` | `/artifacts/view-urls` | `artifacts-get` | Short-lived inline URLs for up to 100 ready images |
 
 `artifacts-verify` has no route: `artifacts-complete` invokes it asynchronously to check multipart uploads.
 
@@ -186,8 +188,12 @@ deployed but no longer used by the web app; firmware now goes through the artifa
 
 ### Artifacts
 
-An **artifact** is any stored file: `firmware`, `pcap`, `log`, `binary` or `other`. Each one can carry tags
-and be linked to any number of the caller's devices. Firmware needs a version, which is unique per device.
+An **artifact** is any stored file: `firmware`, `pcap`, `log`, `binary`, `kernel_module`, `report`, `image` or
+`other`. Each one can carry tags and be linked to any number of the caller's devices. Firmware needs a version,
+which is unique per device. An **image** (JPEG, PNG or WebP, at most 25 MiB) also has a `mimeType`, a `title`,
+an optional `description` and an optional `capturedAt` (when the photo was taken, not when it was uploaded);
+its file signature is checked on completion and it is displayed through `/artifacts/view-urls`. See
+[Image artifacts](Platform/infra/DATABASE.md#image-artifacts).
 Files sent together form an **upload batch**, which can be listed on its own. Records and keys are described
 in [`Platform/infra/DATABASE.md`](Platform/infra/DATABASE.md).
 
@@ -226,6 +232,7 @@ Limits and timings are Lambda environment variables in `Platform/infra/envs/dev/
 | `PART_URL_EXPIRES_SEC` | 900 | Presigned part URL lifetime |
 | `VERIFY_STALE_SEC` | 1200 | When a `verifying` upload counts as stalled |
 | `DOWNLOAD_EXPIRES_SEC` | 300 | Download URL lifetime |
+| `VIEW_URL_EXPIRES_SEC` | 300 | Inline image URL lifetime (`/artifacts/view-urls`) |
 
 The data lake bucket has two lifecycle rules: incomplete multipart uploads are aborted after **1 day**, and
 objects under `artifacts/` still tagged `upload-state=pending` are deleted after **7 days**. That removes

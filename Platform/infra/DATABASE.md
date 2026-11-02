@@ -75,12 +75,12 @@ A device is either **personal** or belongs to exactly one **workspace**, decided
 
 ### Artifact: `ARTIFACT#{id}` / `METADATA`
 
-Any stored file: uploaded firmware, pcaps, logs and binaries, plus every file a run produces.
+Any stored file: uploaded firmware, pcaps, logs, binaries and images, plus every file a run produces.
 
 | Attribute | Type | Meaning |
 |---|---|---|
 | `name` | S | Display name (defaults to the file name) |
-| `type` | S | What the file is: `firmware` / `pcap` / `log` / `binary` / `kernel_module` / `report` / `other`. A run's output uses the same types, so an output pcap matches `type = pcap` queries. |
+| `type` | S | What the file is: `firmware` / `pcap` / `log` / `binary` / `kernel_module` / `report` / `image` / `other`. A run's output uses the same types, so an output pcap matches `type = pcap` queries. `image` is upload-only (see [Image artifacts](#image-artifacts)). |
 | `origin` | S | `upload` (sent from the web app) / `run` (written by a run) |
 | `version` | S | Firmware version; required when `type = firmware`, not allowed otherwise |
 | `sha256` | S | Full-file SHA-256, declared by the uploader. Only a verified hash is trusted, e.g. as a run-result key. |
@@ -97,6 +97,10 @@ Any stored file: uploaded firmware, pcaps, logs and binaries, plus every file a 
 | `statusReason` | S | Why the upload failed |
 | `statusUpdatedAt` | S | Time of the last status change |
 | `tags` | SS | Free-form labels, used in run input queries |
+| `mimeType` | S | **Images only.** `image/jpeg` / `image/png` / `image/webp`, declared at presign time; the S3 object is stored with it and its file signature is checked against it. Never changed |
+| `title` | S | **Images only.** Display title, at most 200 characters, no control characters. Defaults to `name` (cut to 200). Editable, not removable |
+| `description` | S | **Images only.** *Optional.* At most 2000 characters; may contain line breaks and tabs. Editable, removable |
+| `capturedAt` | S | **Images only.** *Optional.* When the photograph was taken, which can be days or weeks before the upload (`createdAt` / `uploadedAt`): a date (`YYYY-MM-DD`) or a UTC date-time (`…+00:00`). Editable, removable |
 | `derivedFromRun` | S | For `origin = run`: the run that produced the file |
 | `derivedFromArtifacts` | SS | For `origin = run`: the input artifact ids |
 | `migratedFromFirmwareId` | S | Set on records copied from the old `FIRMWARE#` rows |
@@ -112,6 +116,19 @@ Lifecycle:
 Device links are **optional**, and an artifact can link to several devices (only devices the uploader may use, all of one scope; see below):
 - `DEVICE#{did} / ARTIFACT#{type}#{id}` (`device-artifact`): `name`, `type`. The type is in the sort key, so "this device's firmware" is a single `begins_with`.
 - `ARTIFACT#{id} / DEVICE#{did}` (`artifact-device`): `name` of the device, kept up to date when the device is renamed (see [Device names](#device-names)).
+
+#### Image artifacts
+
+Images (photographs from device teardowns and reverse engineering) are **ordinary artifacts** with `type = image`. There is no separate image entity or image storage: an image has the same `ARTIFACT#{aid} / METADATA` record, S3 key (`artifacts/{aid}/{attemptId}`), ownership or workspace rows, batch row, device links (`DEVICE#{did} / ARTIFACT#image#{aid}`), lifecycle and [scope](#artifact-scope) as any other artifact, plus the image attributes above. The field rules live in `_shared/python/image_fields.py` (shared Lambda layer).
+
+- **Formats and size.** `mimeType` must be `image/jpeg`, `image/png` or `image/webp`; everything else, including SVG, GIF, HEIC and `image/jpg`, is refused at presign (`400` for that file). An image is at most **25 MiB** and always uses the single presigned POST (never multipart). `version` isn't allowed; `mimeType`, `title`, `description` and `capturedAt` are refused on every other type.
+- **Upload.** `POST /artifacts/presign` with `type: "image"`, `mimeType` and optionally `title`, `description`, `capturedAt`. The presigned POST policy pins `Content-Type` to the declared `mimeType` (other artifacts stay `application/octet-stream`), on top of the exact size, SHA-256 and pending tag. A retry keeps it.
+- **Verification.** `POST /artifacts/complete` first does the usual size and SHA-256 check, then for an image checks that the stored `Content-Type` is the declared `mimeType` and reads the first 12 bytes (`Range` GET) to check the file signature (PNG `89 50 4E 47 0D 0A 1A 0A`, JPEG `FF D8 FF`, WebP `RIFF….WEBP`). On a mismatch the artifact becomes `failed` (`422`, with `statusReason`) and the object keeps its `upload-state=pending` tag, so the lifecycle rule deletes it. An image record that isn't a single upload is refused the same way. If the first bytes can't be read (object not visible yet, S3 throttling or a server error), complete returns `409` for that item and the image stays `pending`, so complete can simply be called again.
+- **Editing.** `PATCH /artifacts/{aid}` accepts any of `title`, `description` and `capturedAt` for an image (`null` or `""` removes `description` / `capturedAt`; `title` can't be removed) and sets `updatedAt`. `createdAt`, `uploadedAt`, `mimeType` and the file can't change. Same rule as firmware status: the owner of a personal image, or any member of a workspace image's workspace; `404` otherwise. The update is conditional on `type = image`.
+- **Reading.** `GET /artifacts`, `GET /devices/{did}/artifacts` (a device's gallery: `?type=image`, the `ARTIFACT#image#` prefix, newest first, `limit` / `nextToken` as usual) and `GET /artifacts/{aid}` return `title`, `description`, `mimeType`, `capturedAt` and `updatedAt` for images (always present, `null` when unset). Other types' responses are unchanged. Listings never contain object URLs.
+- **Viewing.** `POST /artifacts/view-urls` (`artifacts-get`) with `{"artifactIds": [...]}` (1 to 100) returns one result per distinct id, in request order: `{artifactId, ok: true, url, mimeType, expiresIn}` or `{artifactId, ok: false, status, error}`. Each id is authorized on its own with the read rule of `GET /artifacts/{aid}`. A URL is only issued for a **ready image with an allowed `mimeType`**; an id that doesn't exist, isn't visible to the caller (including another workspace's), isn't an image or isn't ready gets the same `404` / `"Image not found"`, so ids can't be probed; a malformed id gets `400`. The URL is a presigned S3 `GetObject` valid for `VIEW_URL_EXPIRES_SEC` (300 s), with `Content-Type` set to the stored `mimeType`, `Content-Disposition: inline` and `Cache-Control: private`. The bucket stays private. `GET /artifacts/{aid}/download` still returns an `attachment` URL for images.
+- **Runs.** Images are never taken as run inputs by a batch, device, run or type/tag selection (`runs-api` drops them, and they don't count as matched or not-ready files); a run uses an image only when it's chosen by id in `artifactIds`, with the usual scope checks. `image` isn't accepted as a run `type` filter.
+- **References.** Anything that shows an image (the device gallery, a future reverse-engineering notebook entry) stores only its `artifactId` and asks `view-urls` for a fresh URL when it renders, so an image is never copied. The same applies to references to artifacts of every other type.
 
 **Firmware version guard:** `DEVICE#{did} / FWVER#{version}` (`device-firmware-version`): `artifactId`, `version`. Written in the same transaction as the artifact, one per linked device, with `attribute_not_exists`, so a firmware version is unique per device (whoever in a workspace uploads it).
 
@@ -487,6 +504,7 @@ erDiagram
 | Ownership check before any read or write | `GetItem pk = USER#{uid}, sk = X#{id}` |
 | Owners of a resource | `Query pk = X#{id}, sk begins_with USER#` |
 | A device's firmware | `Query pk = DEVICE#{did}, sk begins_with ARTIFACT#firmware#` |
+| A device's images (gallery) | `Query pk = DEVICE#{did}, sk begins_with ARTIFACT#image#`, newest first, then `BatchGetItem` of the `METADATA`, keeping those of the device's scope |
 | Is this firmware version taken on the device? | `GetItem pk = DEVICE#{did}, sk = FWVER#{version}` |
 | Files in an upload batch | `Query pk = BATCH#{bid}, sk begins_with ARTIFACT#` |
 | All of a device's artifacts / runs | `Query pk = DEVICE#{did}, sk begins_with ARTIFACT#` / `RUN#` |
@@ -538,4 +556,5 @@ Each status-bearing row stores its **current** status (`status`, `statusReason`,
 
 - **Firmware:** the old `/devices/{id}/firmware` routes only serve personal devices: they refuse a workspace device, even for a member or with a leftover `USER#/DEVICE#` row. The web app now uploads firmware as `ARTIFACT#` records (`type = firmware`) with device links and a `FWVER#` guard. The old firmware Lambdas (`presign-firmware`, `complete-firmware`, `list-firmware`) and their `DEVICE#{did} / FIRMWARE#{version}` rows are still deployed but no longer used by the UI. [`Platform/scripts/migrate_firmware_to_artifacts.py`](../scripts/migrate_firmware_to_artifacts.py) copies the old rows into artifacts (dry run by default, `--apply` to write; safe to re-run). The S3 objects stay where they are. Once it has run, the old Lambdas and routes can be removed. `FIRMWARE#` rows are deliberately left out of the model.
 - **Old model:** `OUTPUT#`, `MODULE# / SCRIPT|TOOL` and the run-style `SESSION#` rows from the April model have been replaced by the entities above. Modules no longer have a `kind`: tools come from environments or L3 Dockerfiles.
+- **Device images:** Phase 1 (backend) is in place: [Image artifacts](#image-artifacts). Still to come: the device gallery in the web app, a device profile image (a `profileImageId` on the device, pointing at one of its images), deleting or archiving images, and a per-device reverse-engineering notebook whose entries reference artifacts by `artifactId` (no copies).
 - **Groups and sharing:** only `role = owner` is used today. A later user-groups system can add a `GROUP#{gid}` principal with the same two-way link shape (`GROUP#/X#` and `X#/GROUP#`) and more roles, without changing existing rows.

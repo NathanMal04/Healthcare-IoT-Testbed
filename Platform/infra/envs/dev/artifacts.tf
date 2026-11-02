@@ -11,7 +11,12 @@
 #   GET  /devices/{deviceId}/artifacts       -> artifacts-list     (?type, tag, limit, nextToken)
 #   GET  /artifacts/{artifactId}             -> artifacts-get
 #   GET  /artifacts/{artifactId}/download    -> artifacts-get
-#   PATCH /artifacts/{artifactId}            -> artifacts-update   (firmware reverseEngineeringStatus)
+#   POST /artifacts/view-urls                -> artifacts-get      (inline URLs for up to 100 ready images)
+#   PATCH /artifacts/{artifactId}            -> artifacts-update   (firmware reverseEngineeringStatus,
+#                                                                   image title/description/capturedAt)
+#
+# Images are ordinary artifacts with type = image (JPEG, PNG or WebP, at most
+# 25 MiB, single upload only); see _shared/python/image_fields.py.
 #
 # artifacts-verify has no route: artifacts-complete invokes it asynchronously
 # to check the full SHA-256 of multipart uploads.
@@ -110,6 +115,7 @@ module "artifacts_get_fn" {
   environment_variables = {
     METADATA_TABLE_NAME  = module.metadata_table.table_name
     DOWNLOAD_EXPIRES_SEC = "300"
+    VIEW_URL_EXPIRES_SEC = "300"
   }
 
   project     = var.name
@@ -176,7 +182,8 @@ resource "aws_iam_policy" "artifacts_complete" {
         Resource = module.metadata_table.table_arn
       },
       {
-        # GetObject covers HeadObject; PutObject covers
+        # GetObject covers HeadObject and the ranged read of an image's
+        # first bytes (file signature check); PutObject covers
         # CompleteMultipartUpload. s3:ListBucket is deliberately not granted
         # (see complete-firmware).
         Effect = "Allow"
@@ -326,6 +333,12 @@ resource "aws_api_gateway_resource" "artifacts_batches" {
   path_part   = "batches"
 }
 
+resource "aws_api_gateway_resource" "artifacts_view_urls" {
+  rest_api_id = module.api.rest_api_id
+  parent_id   = aws_api_gateway_resource.artifacts.id
+  path_part   = "view-urls"
+}
+
 resource "aws_api_gateway_resource" "artifacts_complete" {
   rest_api_id = module.api.rest_api_id
   parent_id   = aws_api_gateway_resource.artifacts.id
@@ -389,6 +402,12 @@ locals {
       method      = "POST"
       path        = "artifacts/complete"
       fn          = module.artifacts_complete_fn
+    }
+    "artifacts-view-urls-POST" = {
+      resource_id = aws_api_gateway_resource.artifacts_view_urls.id
+      method      = "POST"
+      path        = "artifacts/view-urls"
+      fn          = module.artifacts_get_fn
     }
     "artifacts-id-GET" = {
       resource_id = aws_api_gateway_resource.artifacts_artifact_id.id

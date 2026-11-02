@@ -613,5 +613,102 @@ class PrivateScriptTests(RunsTestCase):
         self.assertNotIn((f"USER#{USER}", f"MODULE#{MOD_MEMBER}"), self.table.items)
 
 
+# --- 10. Image artifacts are only used when chosen by id ------------------------------
+
+
+IMAGE_SHA = "ab" * 32  # differs from SHA, so a map unit is never deduplicated away
+
+
+class ImageInputTests(RunsTestCase):
+    """Device photographs (type = image) share devices, batches and tags with
+    the files a run analyses, but a batch, device, run or type/tag selection
+    never picks them up; only inputs.artifactIds does."""
+
+    def upload_pair(self, user, device_ids, ready=True):
+        """One presign (so one batch, one tag) of a pcap and an image; returns
+        (pcap id, image id, batch id)."""
+        files = [
+            {"clientRef": "cap.pcap", "originalFilename": "cap.pcap", "sizeBytes": 10, "sha256": SHA,
+             "type": "pcap"},
+            {"clientRef": "board.png", "originalFilename": "board.png", "sizeBytes": 10, "sha256": IMAGE_SHA,
+             "type": "image", "mimeType": "image/png"},
+        ]
+        resp = self.presign(user, files, deviceIds=device_ids, tags=["day-1"])
+        self.assertEqual(resp["statusCode"], 200, resp["body"])
+        body = wa.response_body(resp)
+        pcap, image = (r["artifactId"] for r in body["results"])
+        if ready:
+            for aid in (pcap, image):
+                self.table.items[(f"ARTIFACT#{aid}", "METADATA")]["status"] = "ready"
+        return pcap, image, body["uploadBatchId"]
+
+    def estimate(self, user, inputs, workspace_id=None, module_id=MOD_USER):
+        status, body = self.runs(user, "POST", "/runs/estimate", self.run_body(inputs, module_id, workspace_id))
+        self.assertEqual(status, 200, (inputs, body))
+        return body
+
+    def selections(self, device, batch):
+        return ({"batchId": batch}, {"deviceId": device}, {}, {"tag": "day-1"}, {"type": "pcap"})
+
+    def test_personal_selections_skip_images(self):
+        pcap, image, batch = self.upload_pair(USER, [DP])
+        for inputs in self.selections(DP, batch):
+            body = self.estimate(USER, inputs)
+            self.assertEqual((body["inputCount"], body["matched"]), (1, 1), inputs)
+        rid = self.start(USER, {"deviceId": DP})["runId"]
+        self.assertIn((f"RUN#{rid}", f"ARTIFACT#{pcap}"), self.table.items)
+        self.assertNotIn((f"RUN#{rid}", f"ARTIFACT#{image}"), self.table.items)
+
+    def test_workspace_selections_skip_images(self):
+        pcap, image, batch = self.upload_pair(MEMBER, [D1])
+        for inputs in self.selections(D1, batch):
+            body = self.estimate(MEMBER, inputs, W1, MOD_MEMBER)
+            self.assertEqual((body["inputCount"], body["matched"]), (1, 1), inputs)
+        rid = self.start(MEMBER, {"batchId": batch}, MOD_MEMBER, W1)["runId"]
+        self.assertIn((f"RUN#{rid}", f"ARTIFACT#{pcap}"), self.table.items)
+        self.assertNotIn((f"RUN#{rid}", f"ARTIFACT#{image}"), self.table.items)
+
+    def test_pending_images_are_not_reported_as_not_ready(self):
+        _, _, batch = self.upload_pair(USER, [DP], ready=False)
+        body = self.estimate(USER, {"batchId": batch})
+        self.assertEqual((body["matched"], body["notReadyCount"]), (1, 1))
+        self.assertNotIn("board.png", [a["name"] for a in body["notReady"]])
+
+    def test_selection_of_only_images_matches_nothing(self):
+        spec = {"clientRef": "board.png", "originalFilename": "board.png", "sizeBytes": 10,
+                "sha256": IMAGE_SHA, "type": "image", "mimeType": "image/png"}
+        body = wa.response_body(self.presign(USER, [spec], deviceIds=[D2]))
+        image = body["results"][0]["artifactId"]
+        self.table.items[(f"ARTIFACT#{image}", "METADATA")]["status"] = "ready"
+        for inputs in ({"deviceId": D2}, {"batchId": body["uploadBatchId"]}, {}):
+            result = self.estimate(USER, inputs, W1)
+            self.assertEqual((result["inputCount"], result["matched"]), (0, 0), inputs)
+
+    def test_explicit_image_ids_are_still_accepted(self):
+        pcap, image, _ = self.upload_pair(USER, [DP])
+        self.assertEqual(self.estimate(USER, {"artifactIds": [image]})["inputCount"], 1)
+        self.assertEqual(self.estimate(USER, {"artifactIds": [pcap, image]})["inputCount"], 2)
+        rid = self.start(USER, {"artifactIds": [image]})["runId"]
+        self.assertIn((f"RUN#{rid}", f"ARTIFACT#{image}"), self.table.items)
+        ws_pcap, ws_image, _ = self.upload_pair(MEMBER, [D1])
+        body = self.estimate(MEMBER, {"artifactIds": [ws_pcap, ws_image]}, W1, MOD_MEMBER)
+        self.assertEqual(body["inputCount"], 2)
+
+    def test_explicit_image_ids_keep_scope_checks(self):
+        personal_image = self.upload_pair(USER, [DP])[1]
+        ws_pcap, _, _ = self.upload_pair(MEMBER, [D1])
+        status, body = self.runs(MEMBER, "POST", "/runs/estimate",
+                                 self.run_body({"artifactIds": [ws_pcap, personal_image]}, MOD_MEMBER, W1))
+        self.assertEqual((status, body["error"]), (400, "1 of the selected files aren't in this workspace"))
+        # Another user's personal image is silently out of scope, as for every type.
+        self.assertEqual(self.estimate(MEMBER, {"artifactIds": [personal_image]}, None, MOD_MEMBER)["inputCount"], 0)
+
+    def test_image_type_filter_is_still_refused(self):
+        self.upload_pair(USER, [DP])
+        for inputs in ({"type": "image"}, {"deviceId": DP, "type": "image"}):
+            status, body = self.runs(USER, "POST", "/runs/estimate", self.run_body(inputs))
+            self.assertEqual((status, body), (400, {"error": "type is invalid"}), inputs)
+
+
 if __name__ == "__main__":
     unittest.main()

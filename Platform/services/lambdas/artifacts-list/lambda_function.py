@@ -3,6 +3,7 @@ import json
 import os
 import re
 import boto3
+import image_fields
 import testbed_authz
 from boto3.dynamodb.conditions import Key
 
@@ -12,7 +13,7 @@ TABLE = os.environ["METADATA_TABLE_NAME"]
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 100
-ARTIFACT_TYPES = {"firmware", "pcap", "log", "binary", "kernel_module", "report", "other"}
+ARTIFACT_TYPES = {"firmware", "pcap", "log", "binary", "kernel_module", "report", "image", "other"}
 
 UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
@@ -243,6 +244,10 @@ def _public_view(item):
         # Firmware stored before the field existed reads as not started.
         value = item.get("reverseEngineeringStatus")
         view["reverseEngineeringStatus"] = value if value in RE_STATUSES else DEFAULT_RE_STATUS
+    if item.get("type") == image_fields.IMAGE_TYPE:
+        # title, description, mimeType, capturedAt, updatedAt; only on images,
+        # so responses for other types are unchanged.
+        view.update(image_fields.public_fields(item))
     return view
 
 

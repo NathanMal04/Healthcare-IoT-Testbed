@@ -23,6 +23,7 @@ Request body for estimate/start:
     "moduleId": "...", "version": 3,                      # version optional: newest ready
     "inputs": {"batchId": "..."} | {"deviceId": "...", "type": "pcap"} | {"runId": "..."}
               | {"artifactIds": [...]} | {"type": "log", "tag": "day-1"},
+              (image artifacts are only taken from artifactIds)
     "mode": "map" | "chunk" | "all" | "groupBy",
     "chunkSize": 10,                                      # chunk
     "groupBy": {"by": "folder"|"stem"|"regex"|"tag", "depth": 0, "ignoreCase": false,
@@ -82,6 +83,10 @@ CLASSES = {
 }
 MODES = ("map", "chunk", "all", "groupBy")
 ARTIFACT_TYPES = {"firmware", "pcap", "log", "binary", "kernel_module", "report", "other"}
+# Types a run only takes when they are chosen by id (inputs.artifactIds):
+# device photographs are never swept in by a batch, device, run or type/tag
+# selection.
+EXPLICIT_ONLY_TYPES = {"image"}
 TERMINAL = {"completed", "failed", "cancelled", "stopped"}
 
 UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -269,6 +274,8 @@ def _resolve_inputs(table, user_id, inputs, workspace_id=None):
         items = in_scope
     else:
         items = [i for i in items if i.get("createdBy") == user_id and "workspaceId" not in i]
+    if not inputs.get("artifactIds"):
+        items = [i for i in items if i.get("type") not in EXPLICIT_ONLY_TYPES]
     if artifact_type:
         items = [i for i in items if i.get("type") == artifact_type]
     if tag:

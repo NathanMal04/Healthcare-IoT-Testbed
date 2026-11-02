@@ -3,9 +3,10 @@ import json
 import os
 import re
 import boto3
+import image_fields
 import testbed_authz
 from datetime import datetime, timedelta, timezone
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 s3 = boto3.client("s3")
 lambda_client = boto3.client("lambda")
@@ -19,6 +20,9 @@ VERIFY_STALE_SEC = int(os.environ.get("VERIFY_STALE_SEC", "1200"))
 
 MAX_ITEMS_PER_REQUEST = 100
 COMMITTED_TAGSET = [{"Key": "upload-state", "Value": "committed"}]
+# S3 errors worth retrying (throttling, server-side failures) when reading an
+# image's first bytes; the image stays pending and complete can be called again.
+TRANSIENT_S3_ERRORS = {"SlowDown", "ServiceUnavailable", "InternalError", "RequestTimeout", "500", "503"}
 
 UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
@@ -90,6 +94,11 @@ def _complete(table, user_id, artifact_id, attempt_id):
         return item
 
     # status == "pending"
+    if item.get("type") == image_fields.IMAGE_TYPE and item.get("uploadMode") != "single":
+        # artifacts-presign only issues single uploads for images; only that
+        # path checks the image signature, so anything else is refused.
+        _mark_failed(table, key, item, "Images must be uploaded in a single request")
+        raise ItemError(422, "Images must be uploaded in a single request")
     if item.get("uploadMode") == "multipart":
         return _complete_multipart(table, key, item)
     return _complete_single(table, key, item)
@@ -113,8 +122,57 @@ def _complete_single(table, key, item):
         _mark_failed(table, key, item, "Uploaded object does not match the declared size and SHA-256")
         raise ItemError(422, "Uploaded object does not match the declared size and SHA-256")
 
+    if item.get("type") == image_fields.IMAGE_TYPE:
+        problem = _image_problem(item, head)
+        if problem:
+            # Not committed: the object keeps its pending tag, so the
+            # lifecycle rule deletes it.
+            _mark_failed(table, key, item, problem)
+            raise ItemError(422, problem)
+
     _commit_object(item)
     return _transition(table, key, item, "pending", "ready", uploaded=True)
+
+
+def _image_problem(item, head):
+    """Why a completed image upload is unacceptable, or None.
+
+    S3 already confirmed the size and SHA-256. This checks that the object is
+    stored with the declared image MIME type (the presigned POST policy pins
+    it) and that its first bytes are that format's file signature, so a file
+    of another kind (an SVG, HTML, an executable...) can't become an image
+    that is later served inline.
+    """
+    mime_type = item.get("mimeType")
+    if mime_type not in image_fields.IMAGE_MIME_TYPES:
+        return "Unsupported image type"
+    if head.get("ContentType") != mime_type:
+        return f"Uploaded object is not stored as {mime_type}"
+    try:
+        start = s3.get_object(
+            Bucket=item["s3Bucket"],
+            Key=item["s3Key"],
+            Range=f"bytes=0-{image_fields.SIGNATURE_BYTES - 1}",
+        )["Body"]
+        try:
+            head_bytes = start.read()
+        finally:
+            start.close()
+    except ClientError as e:
+        # As for HeadObject: the artifact stays pending, so the client can
+        # call complete again (or retry the upload).
+        code = e.response["Error"]["Code"]
+        if code in ("404", "NoSuchKey", "403"):
+            raise ItemError(409, "Uploaded object not found yet; retry once the upload has completed")
+        if code in TRANSIENT_S3_ERRORS:
+            raise ItemError(409, "Could not read the uploaded object; retry completing the upload")
+        raise
+    except BotoCoreError:
+        # Connection or streaming failure while reading the first bytes.
+        raise ItemError(409, "Could not read the uploaded object; retry completing the upload")
+    if not image_fields.matches_signature(mime_type, head_bytes):
+        return f"Uploaded file is not a valid {mime_type} image"
+    return None
 
 
 def _complete_multipart(table, key, item):

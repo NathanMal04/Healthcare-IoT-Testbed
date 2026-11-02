@@ -6,6 +6,7 @@ import secrets
 import time
 import uuid
 import boto3
+import image_fields
 import testbed_authz
 from datetime import datetime, timedelta, timezone
 from boto3.dynamodb.types import TypeSerializer
@@ -57,7 +58,7 @@ MAX_CLIENT_REF_LENGTH = 64
 MIN_PART_SIZE = 16 * 1024 ** 2
 MAX_PARTS = 1000
 
-ARTIFACT_TYPES = {"firmware", "pcap", "log", "binary", "kernel_module", "report", "other"}
+ARTIFACT_TYPES = {"firmware", "pcap", "log", "binary", "kernel_module", "report", "image", "other"}
 DEFAULT_RE_STATUS = "not_started"
 CONTENT_TYPE = "application/octet-stream"
 
@@ -193,6 +194,9 @@ def _create_artifact(user_id, batch_id, tags, devices, spec, workspace_id=None):
         # Reverse-engineering progress, separate from the upload "status";
         # changed with PATCH /artifacts/{artifactId} (artifacts-update).
         item["reverseEngineeringStatus"] = DEFAULT_RE_STATUS
+    if spec.get("image"):
+        # mimeType, title and, when given, description and capturedAt.
+        item.update(spec["image"])
     if tags:
         item["tags"] = set(tags)
     if devices:
@@ -455,20 +459,25 @@ def _upload_instructions(item):
         }
 
     # Same S3-enforced SHA-256 pairing as presign-firmware, plus an exact
-    # content-length-range and the pending tag.
+    # content-length-range and the pending tag. An image is stored with its
+    # declared image MIME type (pinned by the policy); everything else stays
+    # application/octet-stream.
     checksum_b64 = _sha256_hex_to_base64(item["sha256"])
     size = int(item["sizeBytes"])
+    content_type = CONTENT_TYPE
+    if item.get("type") == image_fields.IMAGE_TYPE:
+        content_type = image_fields.clean_mime_type(item.get("mimeType"))
     presigned = s3.generate_presigned_post(
         Bucket=item["s3Bucket"],
         Key=item["s3Key"],
         Fields={
-            "Content-Type": CONTENT_TYPE,
+            "Content-Type": content_type,
             "x-amz-checksum-algorithm": "SHA256",
             "x-amz-checksum-sha256": checksum_b64,
             "tagging": PENDING_TAGGING_XML,
         },
         Conditions=[
-            {"Content-Type": CONTENT_TYPE},
+            {"Content-Type": content_type},
             {"x-amz-checksum-algorithm": "SHA256"},
             {"x-amz-checksum-sha256": checksum_b64},
             {"tagging": PENDING_TAGGING_XML},
@@ -554,7 +563,7 @@ def _validate_file(raw):
     elif version is not None:
         raise RequestError(400, "version is only allowed for firmware")
 
-    return {
+    spec = {
         "originalFilename": original_filename,
         "name": name,
         "sizeBytes": size_bytes,
@@ -562,6 +571,41 @@ def _validate_file(raw):
         "type": artifact_type,
         "version": version,
     }
+    if artifact_type == image_fields.IMAGE_TYPE:
+        spec["image"] = _validate_image(raw, name, size_bytes)
+    else:
+        present = [f for f in image_fields.IMAGE_ONLY_FIELDS if raw.get(f) is not None]
+        if present:
+            raise RequestError(400, f"{', '.join(present)} only allowed for images")
+    return spec
+
+
+def _validate_image(raw, name, size_bytes):
+    """The image attributes to store: mimeType and title always, description
+    and capturedAt when given. The bytes are checked against mimeType when the
+    upload is completed (artifacts-complete)."""
+    # Images always use a single presigned POST, the only path where S3 pins
+    # the stored Content-Type and artifacts-complete checks the signature.
+    max_bytes = min(image_fields.MAX_IMAGE_SIZE_BYTES, SINGLE_UPLOAD_MAX_BYTES)
+    if size_bytes > max_bytes:
+        raise RequestError(400, f"Images can be at most {max_bytes} bytes")
+    try:
+        image = {
+            "mimeType": image_fields.clean_mime_type(raw.get("mimeType")),
+            # Defaults to the artifact name (up to 255 characters), cut to fit.
+            "title": image_fields.clean_title(
+                raw["title"] if raw.get("title") is not None else name[:image_fields.MAX_TITLE_LENGTH]
+            ),
+        }
+        description = image_fields.clean_description(raw.get("description"))
+        captured_at = image_fields.clean_captured_at(raw.get("capturedAt"))
+    except image_fields.FieldError as e:
+        raise RequestError(400, str(e))
+    if description is not None:
+        image["description"] = description
+    if captured_at is not None:
+        image["capturedAt"] = captured_at
+    return image
 
 
 def _validate_tags(raw):
