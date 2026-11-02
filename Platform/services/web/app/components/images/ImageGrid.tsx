@@ -96,11 +96,14 @@ export function ImageGrid({
   onOpen,
   renderActions,
   selection,
+  badge,
 }: {
   images: ImageArtifact[];
   urls: ImageUrls;
   onOpen?: (index: number) => void;
   renderActions?: (image: ImageArtifact, index: number) => React.ReactNode;
+  /** A label over the image's top-left corner (e.g. "Profile picture"), or nothing. */
+  badge?: (image: ImageArtifact) => React.ReactNode;
   selection?: { selectedIds: ReadonlySet<string>; onToggle: (image: ImageArtifact) => void };
 }) {
   return (
@@ -126,6 +129,11 @@ export function ImageGrid({
             >
               {/* Keyed by the file, so a replaced file never keeps showing the old one. */}
               <ImageView key={imageFileKey(image)} image={image} urls={urls} className="absolute inset-0 h-full w-full" />
+              {badge?.(image) && (
+                <span className="absolute top-2 left-2 max-w-[calc(100%-1rem)] truncate rounded-md bg-navy-950/80 px-2 py-0.5 text-[11px] font-medium text-white shadow">
+                  {badge(image)}
+                </span>
+              )}
               {selection && selected && (
                 <span className="absolute top-2 right-2 h-6 w-6 rounded-full bg-brand-600 text-white flex items-center justify-center shadow">
                   <Check className="h-4 w-4" aria-hidden="true" />

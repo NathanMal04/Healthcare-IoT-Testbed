@@ -15,11 +15,13 @@ import {
   Microchip,
   Pencil,
   ShieldAlert,
+  SquareUserRound,
   Unlink,
   Upload,
 } from "lucide-react";
 import {
   DEVICE_DETAIL_FIELDS,
+  canEditDevice,
   getDevice,
   getDevices,
   updateDeviceReverseEngineeringStatus,
@@ -56,6 +58,10 @@ import CveDetails from "@/app/components/CveDetails";
 import CveList from "@/app/components/CveList";
 import CveLinkExplorer from "@/app/components/CveLinkExplorer";
 import DeviceImageGallery from "@/app/components/images/DeviceImageGallery";
+import DeviceProfilePicture from "@/app/components/images/DeviceProfilePicture";
+import { useImageUrls } from "@/app/components/images/useImageData";
+import { useProfileImage } from "@/app/components/images/useProfileImage";
+import { imageTitle } from "@/lib/images";
 import {
   FirmwareRetryDialog,
   FirmwareTable,
@@ -145,6 +151,26 @@ function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: Ta
   const [firmwareError, setFirmwareError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>(initialTab);
   const [editing, setEditing] = useState(false);
+
+  // The profile picture: its view URL (refreshed when its file is replaced,
+  // then shown afresh through fileVersion), the change/remove actions, and a
+  // gallery key that reloads the Images tab after an upload from the header.
+  const profileImageId = device?.profileImageArtifactId;
+  const profileUrls = useImageUrls(profileImageId ? [profileImageId] : []);
+  const [profileFileVersion, setProfileFileVersion] = useState(0);
+  const [galleryVersion, setGalleryVersion] = useState(0);
+  const updateDevice = useCallback(
+    (update: (current: Device) => Device) => setDevice((current) => (current ? update(current) : current)),
+    []
+  );
+  const profile = useProfileImage(device?.deviceId, updateDevice);
+  const refreshProfileFile = useCallback(
+    (artifactId: string) => {
+      profileUrls.refresh(artifactId);
+      setProfileFileVersion((v) => v + 1);
+    },
+    [profileUrls]
+  );
 
   const isMountedRef = useRef(true);
   useEffect(() => {
@@ -269,12 +295,29 @@ function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: Ta
   }
   if (!device) return <LoadingState label="Loading device…" />;
 
+  const canEdit = canEditDevice(device);
+
   return (
     <div>
       <PageHeader
         title={device.name}
         back={back}
         scope={scope}
+        leading={
+          <DeviceProfilePicture
+            device={device}
+            canEdit={canEdit}
+            urls={profileUrls}
+            fileVersion={profileFileVersion}
+            profile={profile}
+            onFileReplaced={(image) => {
+              refreshProfileFile(image.artifactId);
+              // The Images tab shows the image too; reload it with the new file.
+              setGalleryVersion((v) => v + 1);
+            }}
+            onGalleryChanged={() => setGalleryVersion((v) => v + 1)}
+          />
+        }
         description={device.type ? `Device · ${device.type}` : "Device"}
         meta={<span className="text-xs text-slate-500 capitalize">Your access: {device.role}</span>}
         actions={
@@ -283,6 +326,17 @@ function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: Ta
           </Button>
         }
       />
+
+      {profile.notice && (
+        <Alert tone="success" className="mb-4" onDismiss={profile.dismiss}>
+          {profile.notice}
+        </Alert>
+      )}
+      {profile.error && (
+        <Alert tone="error" className="mb-4" onDismiss={profile.dismiss}>
+          {profile.error}
+        </Alert>
+      )}
 
       <Tabs
         ariaLabel="Device sections"
@@ -304,7 +358,7 @@ function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: Ta
             scope={scope}
             firmware={firmware}
             cveCount={cves ? deviceCves.length : null}
-            onDeviceChange={setDevice}
+            onDeviceChange={updateDevice}
             onOpenTab={selectTab}
           />
         )}
@@ -318,7 +372,29 @@ function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: Ta
           />
         )}
         {tab === "artifacts" && <ArtifactsTab device={device} />}
-        {tab === "images" && <DeviceImageGallery device={device} />}
+        {tab === "images" && (
+          <DeviceImageGallery
+            key={galleryVersion}
+            device={device}
+            badge={(image) => (image.artifactId === device.profileImageArtifactId ? "Profile picture" : null)}
+            extraActions={(image) => [
+              canEdit &&
+                image.status === "ready" &&
+                image.artifactId !== device.profileImageArtifactId && {
+                  label: "Set as profile picture",
+                  icon: SquareUserRound,
+                  disabled: profile.saving,
+                  onSelect: () =>
+                    void profile.setProfile(image.artifactId, `${imageTitle(image)} is now the profile picture.`),
+                },
+            ]}
+            onImageReplaced={(image) => {
+              // Same image, new file: the header shows the new file without
+              // the picture being chosen again.
+              if (image.artifactId === device.profileImageArtifactId) refreshProfileFile(image.artifactId);
+            }}
+          />
+        )}
         {tab === "cves" && openCveId && (
           <CveDetails
             key={openCveId}
@@ -372,7 +448,8 @@ function OverviewTab({
   scope: Scope;
   firmware: Artifact[] | null;
   cveCount: number | null;
-  onDeviceChange: (device: Device) => void;
+  /** Applies a change to the latest device state, not to this render's copy. */
+  onDeviceChange: (update: (current: Device) => Device) => void;
   onOpenTab: (tab: TabId) => void;
 }) {
   const [saving, setSaving] = useState(false);
@@ -399,7 +476,9 @@ function OverviewTab({
     setSaving(true);
     try {
       const updated = await updateDeviceReverseEngineeringStatus(device.deviceId, next);
-      onDeviceChange({ ...device, reverseEngineeringStatus: updated.reverseEngineeringStatus });
+      // Only the status is changed, on the latest device: anything saved while
+      // this request ran (e.g. the profile picture) is kept.
+      onDeviceChange((current) => ({ ...current, reverseEngineeringStatus: updated.reverseEngineeringStatus }));
     } catch (err) {
       setStatusError(`Couldn't update ${device.name}: ${err instanceof Error ? err.message : "Failed to update status"}`);
     } finally {

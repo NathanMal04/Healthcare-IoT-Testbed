@@ -12,6 +12,8 @@ import { isWorkspaceUnavailable, scopeKey, scopeWorkspaceId } from "@/lib/worksp
 import ReverseEngineeringStatusSelect from "@/app/components/ReverseEngineeringStatusSelect";
 import AddDeviceDialog from "@/app/components/AddDeviceDialog";
 import FirmwareUploadDialog from "@/app/components/firmware/FirmwareUploadDialog";
+import ProfileAvatar from "@/app/components/images/ProfileAvatar";
+import { useImageUrls } from "@/app/components/images/useImageData";
 import {
   Alert,
   Button,
@@ -55,6 +57,15 @@ function DevicesView() {
 
   const [savingStatusIds, setSavingStatusIds] = useState<Set<string>>(new Set());
   const [statusError, setStatusError] = useState<string | null>(null);
+
+  // Profile pictures: one view-URL request for the whole list (the endpoint
+  // checks each image's access on its own, and an unavailable one shows the
+  // default icon).
+  const profileImageIds = useMemo(
+    () => (devices ?? []).flatMap((device) => (device.profileImageArtifactId ? [device.profileImageArtifactId] : [])),
+    [devices]
+  );
+  const profileUrls = useImageUrls(profileImageIds);
 
   const isMountedRef = useRef(true);
   useEffect(() => {
@@ -133,9 +144,7 @@ function DevicesView() {
       header: "Device",
       cell: (device) => (
         <div className="flex items-center gap-3 min-w-0">
-          <span className="h-8 w-8 shrink-0 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center">
-            <Cpu className="h-4 w-4" aria-hidden="true" />
-          </span>
+          <ProfileAvatar artifactId={device.profileImageArtifactId} urls={profileUrls} alt={`Profile picture of ${device.name}`} />
           <span className="font-medium text-slate-900 break-words">{device.name}</span>
         </div>
       ),

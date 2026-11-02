@@ -95,6 +95,11 @@ export class UploadQueue {
     return this.uploadBatchId;
   }
 
+  /** The artifacts of the files that are ready (uploaded and verified), in queue order. */
+  get readyArtifactIds(): string[] {
+    return this.items.filter((item) => item.stage === "ready" && item.artifactId).map((item) => item.artifactId!);
+  }
+
   /** How many files the last run left failed (cancelled ones included). */
   get failedCount() {
     return this.items.filter((item) => item.stage === "failed").length;

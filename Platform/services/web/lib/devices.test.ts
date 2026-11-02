@@ -7,6 +7,7 @@ import { apiRequest } from "@/lib/api";
 import {
   DEVICE_DETAIL_FIELDS,
   applyDeviceUpdate,
+  canEditDevice,
   createDevice,
   deviceFormError,
   deviceToForm,
@@ -16,6 +17,7 @@ import {
   newDeviceBody,
   updateDevice,
   updateDeviceReverseEngineeringStatus,
+  setDeviceProfileImage,
   type Device,
 } from "@/lib/devices";
 
@@ -168,5 +170,39 @@ describe("reading a device", () => {
     expect(request).toHaveBeenCalledWith("GET", `/devices/${DEVICE_ID}`);
     expect(device.reverseEngineeringStatus).toBe("not_started");
     expect(device.manufacturer).toBeUndefined();
+  });
+});
+
+describe("device profile pictures", () => {
+  const IMAGE_ID = "0192a000-0000-7000-8000-000000000001";
+
+  beforeEach(() => request.mockReset());
+
+  it("sets and removes the picture with only the reference in the PATCH", async () => {
+    request.mockResolvedValue({});
+    await setDeviceProfileImage(DEVICE_ID, IMAGE_ID);
+    expect(request).toHaveBeenLastCalledWith("PATCH", `/devices/${DEVICE_ID}`, {
+      body: { profileImageArtifactId: IMAGE_ID },
+    });
+    await setDeviceProfileImage(DEVICE_ID, null);
+    expect(request).toHaveBeenLastCalledWith("PATCH", `/devices/${DEVICE_ID}`, { body: { profileImageArtifactId: null } });
+  });
+
+  it("takes the picture from every PATCH response, so other edits keep or clear it correctly", () => {
+    const base = { deviceId: DEVICE_ID, name: "Infusion pump", reverseEngineeringStatus: "in_progress" as const, updatedAt: "t" };
+    const withPicture = applyDeviceUpdate(DEVICE, { ...base, profileImageArtifactId: IMAGE_ID });
+    expect(withPicture.profileImageArtifactId).toBe(IMAGE_ID);
+    // An edit of other fields returns the picture it still has...
+    expect(applyDeviceUpdate(withPicture, { ...base, profileImageArtifactId: IMAGE_ID }).profileImageArtifactId).toBe(IMAGE_ID);
+    // ...and a device without one has no field.
+    expect(applyDeviceUpdate(withPicture, base)).not.toHaveProperty("profileImageArtifactId");
+  });
+
+  it("knows who may edit a device (the backend enforces the same rule)", () => {
+    expect(canEditDevice({ role: "owner" })).toBe(true);
+    expect(canEditDevice({ role: "viewer" })).toBe(false);
+    expect(canEditDevice({ role: "member", workspaceId: "ws" })).toBe(true);
+    expect(canEditDevice({ role: "owner", workspaceId: "ws" })).toBe(true);
+    expect(canEditDevice({ role: "viewer", workspaceId: "ws" })).toBe(false);
   });
 });

@@ -471,6 +471,18 @@ export function imageErrorMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
+/** What went wrong choosing or removing a device's profile picture (PATCH /devices/{id}). */
+export function profilePictureErrorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 400) {
+      return "That image can't be the profile picture: it must be a ready image of this device. Refresh the gallery and try again.";
+    }
+    if (err.status === 403) return "You don't have permission to change this device's profile picture.";
+    if (err.status === 404) return "This device no longer exists, or you no longer have access to it.";
+  }
+  return imageErrorMessage(err, "Couldn't update the profile picture");
+}
+
 // --- View URL cache -----------------------------------------------------------
 
 export type ImageUrlState =

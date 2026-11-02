@@ -41,6 +41,12 @@ export interface Device extends DeviceDetails {
   /** From GET /devices/{deviceId} only. */
   createdAt?: string;
   updatedAt?: string;
+  /**
+   * The device's profile picture: one of its own gallery images, by artifact
+   * id. Absent when none is chosen. Shown through POST /artifacts/view-urls,
+   * which reports an image that is no longer viewable as unavailable.
+   */
+  profileImageArtifactId?: string;
 }
 
 /** Personal devices, or the devices of a workspace when workspaceId is given. */
@@ -88,6 +94,8 @@ export type DeviceUpdate = {
   name?: string;
   type?: string;
   reverseEngineeringStatus?: ReverseEngineeringStatus;
+  /** A ready image of this device, or null to remove the profile picture. */
+  profileImageArtifactId?: string | null;
 } & Partial<Record<DeviceDetailKey, string | null>>;
 
 export interface UpdatedDevice extends DeviceDetails {
@@ -97,6 +105,8 @@ export interface UpdatedDevice extends DeviceDetails {
   reverseEngineeringStatus: ReverseEngineeringStatus;
   updatedAt: string | null;
   workspaceId?: string;
+  /** Present when the device has a profile picture. */
+  profileImageArtifactId?: string;
 }
 
 export async function updateDevice(deviceId: string, update: DeviceUpdate): Promise<UpdatedDevice> {
@@ -108,6 +118,24 @@ export async function updateDeviceReverseEngineeringStatus(
   reverseEngineeringStatus: ReverseEngineeringStatus
 ): Promise<UpdatedDevice> {
   return updateDevice(deviceId, { reverseEngineeringStatus });
+}
+
+/**
+ * Chooses one of the device's ready images as its profile picture, or removes
+ * the picture (null). Neither changes nor deletes any image. The backend
+ * refuses an image that isn't a ready image of this device in its scope.
+ */
+export async function setDeviceProfileImage(deviceId: string, artifactId: string | null): Promise<UpdatedDevice> {
+  return updateDevice(deviceId, { profileImageArtifactId: artifactId });
+}
+
+/**
+ * Whether the user may edit the device (PATCH /devices/{id}): the owner of a
+ * personal device, any member of a workspace device's workspace. Only hides
+ * actions; the backend enforces the same rule.
+ */
+export function canEditDevice(device: Pick<Device, "role" | "workspaceId">): boolean {
+  return device.workspaceId ? device.role === "owner" || device.role === "member" : device.role === "owner";
 }
 
 // --- The add/edit form ---------------------------------------------------------
@@ -182,5 +210,8 @@ export function applyDeviceUpdate(device: Device, updated: UpdatedDevice): Devic
   if (updated.type) next.type = updated.type;
   next.reverseEngineeringStatus = toReverseEngineeringStatus(updated.reverseEngineeringStatus);
   if (updated.updatedAt) next.updatedAt = updated.updatedAt;
+  // A PATCH response describes the whole device: no field, no picture.
+  if (updated.profileImageArtifactId) next.profileImageArtifactId = updated.profileImageArtifactId;
+  else delete next.profileImageArtifactId;
   return next;
 }

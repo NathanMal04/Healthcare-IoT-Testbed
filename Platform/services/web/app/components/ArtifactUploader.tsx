@@ -50,10 +50,15 @@ interface ArtifactUploaderProps {
    */
   fixedType?: StoredArtifactType;
   /**
-   * Called when a run of uploads ends, with the batch id if one was created
-   * and how many files ended failed.
+   * Images only: at most this many images can be staged (e.g. 1 for a
+   * device's new profile picture). Extra files are listed as skipped.
    */
-  onFinished: (uploadBatchId: string | undefined, failedCount: number) => void;
+  maxFiles?: number;
+  /**
+   * Called when a run of uploads ends, with the batch id if one was created,
+   * how many files ended failed, and the artifacts that are ready.
+   */
+  onFinished: (uploadBatchId: string | undefined, failedCount: number, readyArtifactIds: string[]) => void;
 }
 
 const STAGE_LABELS: Record<QueueStage, string> = {
@@ -135,6 +140,7 @@ export default function ArtifactUploader({
   requireDevice = false,
   fixedDevice,
   fixedType,
+  maxFiles,
   onFinished,
 }: ArtifactUploaderProps) {
   const [items, setItems] = useState<QueueItem[]>([]);
@@ -147,6 +153,8 @@ export default function ArtifactUploader({
   // Images: a capture date for every image that doesn't set its own.
   const [sharedCapturedAt, setSharedCapturedAt] = useState("");
   const imageMode = fixedType === IMAGE_TYPE;
+  // One image only (a new profile picture): no folders, one file at a time.
+  const single = imageMode && maxFiles === 1;
 
   const [queue, setQueue] = useState<UploadQueue | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -191,7 +199,9 @@ export default function ArtifactUploader({
     for (const { file, path } of files) {
       const identity = fileIdentity(file, path);
       if (identities.has(identity)) rejected.push(`${path} (already added)`);
-      else {
+      else if (maxFiles !== undefined && identities.size >= maxFiles) {
+        rejected.push(`${path} (only ${maxFiles === 1 ? "one image" : `${maxFiles} images`} can be uploaded here)`);
+      } else {
         identities.add(identity);
         candidates.push({ file, path, identity });
       }
@@ -309,7 +319,7 @@ export default function ArtifactUploader({
       await target.start();
     } finally {
       setRunning(false);
-      onFinished(target.batchId, target.failedCount);
+      onFinished(target.batchId, target.failedCount, target.readyArtifactIds);
     }
   }
 
@@ -398,22 +408,24 @@ export default function ArtifactUploader({
           <UploadCloud className={`mx-auto h-8 w-8 ${dragging ? "text-brand-600" : "text-slate-400"}`} aria-hidden="true" />
           <p className="text-sm text-slate-600 mt-2">
             <span className="font-medium text-slate-800">
-              {imageMode ? "Drop images or folders here" : "Drop files or folders here"}
+              {single ? "Drop an image here" : imageMode ? "Drop images or folders here" : "Drop files or folders here"}
             </span>
             , or choose them below
           </p>
           <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
             <button type="button" onClick={() => fileInputRef.current?.click()} className={secondaryButton}>
-              {imageMode ? "Choose images" : "Choose files"}
+              {single ? "Choose an image" : imageMode ? "Choose images" : "Choose files"}
             </button>
-            <button type="button" onClick={() => folderInputRef.current?.click()} className={secondaryButton}>
-              Choose folder
-            </button>
+            {!single && (
+              <button type="button" onClick={() => folderInputRef.current?.click()} className={secondaryButton}>
+                Choose folder
+              </button>
+            )}
           </div>
           <input
             ref={fileInputRef}
             type="file"
-            multiple
+            multiple={!single}
             accept={imageMode ? IMAGE_ACCEPT : undefined}
             className="hidden"
             onChange={(e) => {

@@ -153,7 +153,7 @@ describe("ArtifactUploader (images)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Upload 1 image" }));
     await act(async () => heldChecks.get("held-late.png")!({ ok: true, mimeType: "image/png" }));
-    await waitFor(() => expect(onFinished).toHaveBeenCalledWith("batch-1", 0));
+    await waitFor(() => expect(onFinished).toHaveBeenCalledWith("batch-1", 0, [expect.stringMatching(/^artifact-/)]));
 
     expect(staged()).toEqual(["ready.png"]);
     expect(presignedNames()).toEqual([["ready.png"]]);
@@ -182,7 +182,9 @@ describe("ArtifactUploader (images)", () => {
     fireEvent.change(screen.getByLabelText("Capture date for b.png"), { target: { value: "2024-02-03" } });
     fireEvent.change(screen.getByLabelText(/Captured on \(all images/), { target: { value: "2024-01-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Upload 2 images" }));
-    await waitFor(() => expect(onFinished).toHaveBeenCalledWith("batch-1", 0));
+    // The ready artifacts are reported, in order.
+    await waitFor(() => expect(onFinished).toHaveBeenCalledWith("batch-1", 0, expect.any(Array)));
+    expect(onFinished.mock.calls[0][2]).toHaveLength(2);
 
     const [presign] = request.mock.calls.filter(([, path]) => path === "/artifacts/presign");
     const body = presign[2]!.body as { deviceIds: string[]; files: Record<string, unknown>[] };

@@ -29,15 +29,21 @@ import { useDeviceImages, useImageUrls } from "./useImageData";
  * and to images, so uploads land in the device's scope), a paged grid, a
  * full-size viewer, metadata editing and replacing an image's file.
  *
- * `extraActions` adds per-image actions to the card menu; Phase 3's
- * "Set as profile image" goes there once the device API supports it.
+ * `extraActions` adds per-image actions to the card menu (the device page's
+ * "Set as profile picture"), and `badge` labels a card (its current one).
  */
 export default function DeviceImageGallery({
   device,
   extraActions,
+  badge,
+  onImageReplaced,
 }: {
   device: Device;
   extraActions?: (image: ImageArtifact) => (RowAction | false | null | undefined)[];
+  /** A label on an image's card, e.g. which image is the device's profile picture. */
+  badge?: (image: ImageArtifact) => React.ReactNode;
+  /** An image's file was replaced here (same artifact, new file). */
+  onImageReplaced?: (image: ImageArtifact) => void;
 }) {
   // The uploader locks the scope while it runs, so it can't be closed mid-upload.
   const { scopeLocked } = useWorkspace();
@@ -84,6 +90,7 @@ export default function DeviceImageGallery({
     replace(updated);
     urls.refresh(updated.artifactId);
     setReplacing(null);
+    onImageReplaced?.(updated);
     setNotice(
       `Replaced the file of ${imageTitle(updated)}. ` +
         (cleanupPending
@@ -198,6 +205,7 @@ export default function DeviceImageGallery({
               images={images}
               urls={urls}
               onOpen={setViewerIndex}
+              badge={badge}
               renderActions={(image, index) => (
                 <RowActionsMenu
                   label={`Actions for ${imageTitle(image)}`}

@@ -31,6 +31,7 @@ vi.mock("@/lib/artifacts", async (importOriginal) => ({
 import { ApiError, apiRequest } from "@/lib/api";
 import type { Device } from "@/lib/devices";
 import type { ImageArtifact, ViewUrlResult } from "@/lib/images";
+import { ImageIcon } from "lucide-react";
 import DeviceImageGallery from "./DeviceImageGallery";
 
 const request = vi.mocked(apiRequest);
@@ -229,7 +230,8 @@ describe("DeviceImageGallery", () => {
       }
       return routed(method, path, options);
     });
-    render(<DeviceImageGallery device={DEVICE} />);
+    const onImageReplaced = vi.fn();
+    render(<DeviceImageGallery device={DEVICE} onImageReplaced={onImageReplaced} />);
     await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(2));
     const oldSrc = screen.getByAltText("Photo 1").getAttribute("src");
 
@@ -247,6 +249,8 @@ describe("DeviceImageGallery", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Replace image" }));
 
     await waitFor(() => expect(screen.getByText(/Replaced the file of Photo 1\. The original file was permanently deleted/)).toBeTruthy());
+    // The page hears about it (e.g. to refresh the device's profile picture).
+    expect(onImageReplaced).toHaveBeenCalledWith(expect.objectContaining({ artifactId: "img-01", attemptId: "r-1" }));
     // A new URL was asked for this image alone, and both the grid and the
     // reopened viewer show it rather than the old file's.
     await waitFor(() => expect(viewUrlRequests().at(-1)).toEqual(["img-01"]));
@@ -259,6 +263,30 @@ describe("DeviceImageGallery", () => {
     expect(within(viewer).getByRole("heading", { name: "Photo 1" })).toBeTruthy();
     expect(within(viewer).getByText(/hires\.png · PNG/)).toBeTruthy();
     expect(screen.getAllByAltText("Photo 2")[0].getAttribute("src")).toBe("https://s3.example/img-02?call=1");
+  });
+
+  it("labels a card and adds the page's own actions (the device's profile picture)", async () => {
+    serve({ pages: { first: { artifacts: range(1, 2) } }, viewUrls: okUrls });
+    const onSet = vi.fn();
+    render(
+      <DeviceImageGallery
+        device={DEVICE}
+        badge={(img) => (img.artifactId === "img-01" ? "Profile picture" : null)}
+        extraActions={(img) => [
+          img.artifactId !== "img-01" && { label: "Set as profile picture", icon: ImageIcon, onSelect: () => onSet(img.artifactId) },
+        ]}
+      />
+    );
+    await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(2));
+    expect(screen.getAllByText("Profile picture")).toHaveLength(1);
+    expect(within(screen.getByRole("button", { name: "View Photo 1" })).getByText("Profile picture")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions for Photo 1" }));
+    expect(screen.queryByRole("menuitem", { name: "Set as profile picture" })).toBeNull();
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Actions for Photo 2" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Set as profile picture" }));
+    expect(onSet).toHaveBeenCalledWith("img-02");
   });
 
   it("shows empty and error states", async () => {
