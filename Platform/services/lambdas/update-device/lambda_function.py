@@ -4,6 +4,7 @@ import re
 import time
 import boto3
 import device_fields
+import image_fields
 import testbed_authz
 from datetime import datetime, timezone
 from boto3.dynamodb.conditions import Key
@@ -22,7 +23,11 @@ RE_STATUSES = ("not_started", "in_progress", "complete")
 # Devices created before reverseEngineeringStatus existed have no attribute.
 DEFAULT_RE_STATUS = "not_started"
 EDITABLE_FIELDS = {*device_fields.REQUIRED_FIELDS, *device_fields.OPTIONAL_FIELDS}
-UPDATABLE_FIELDS = EDITABLE_FIELDS | {"reverseEngineeringStatus"}
+# profileImageArtifactId: the device's profile picture, one of its own ready
+# images (an image artifact linked to it, in its scope); null removes it.
+# Only the reference is stored: the image stays an ordinary gallery artifact.
+PROFILE_IMAGE_FIELD = "profileImageArtifactId"
+UPDATABLE_FIELDS = EDITABLE_FIELDS | {"reverseEngineeringStatus", PROFILE_IMAGE_FIELD}
 # Set by the server only: keys, scope, provenance and bookkeeping. Named in
 # their own error so a client learns they can't be changed, not that they
 # don't exist.
@@ -57,7 +62,8 @@ class SyncSuperseded(Exception):
 
 def handler(event, context):
     """PATCH /devices/{deviceId} with any of: reverseEngineeringStatus, name,
-    type and the optional fields in device_fields.OPTIONAL_FIELDS.
+    type, profileImageArtifactId and the optional fields in
+    device_fields.OPTIONAL_FIELDS.
 
     Only the fields sent are changed. An optional field sent as null or an
     empty string is removed; name and type can be changed but not removed.
@@ -84,7 +90,7 @@ def handler(event, context):
     # be changed by any member of its workspace, and only by members: a
     # leftover USER#/DEVICE# owner row is never consulted for it.
     try:
-        testbed_authz.require_resource(table, user_id, "DEVICE", device_id, legacy_roles=("owner",))
+        device = testbed_authz.require_resource(table, user_id, "DEVICE", device_id, legacy_roles=("owner",))
     except testbed_authz.NotFound:
         return _resp(404, {"error": "Device not found"})
     except testbed_authz.Forbidden:
@@ -120,6 +126,18 @@ def handler(event, context):
     except device_fields.FieldError as e:
         return _resp(400, {"error": str(e)})
 
+    profile_image_id = None
+    if PROFILE_IMAGE_FIELD in body:
+        raw = body[PROFILE_IMAGE_FIELD]
+        if raw is None or raw == "":
+            removes.append(PROFILE_IMAGE_FIELD)
+        else:
+            error = _profile_image_error(table, user_id, device_id, device, raw)
+            if error:
+                return _resp(400, {"error": error})
+            profile_image_id = raw
+            sets[PROFILE_IMAGE_FIELD] = raw
+
     now = datetime.now(timezone.utc).isoformat()
     sets["updatedAt"] = now
     if "name" in sets:
@@ -141,20 +159,27 @@ def handler(event, context):
 
     # Only the canonical DEVICE#/METADATA record holds these fields; the link
     # rows carry only the name, updated below. The condition stops an update
-    # from creating a bare item if the metadata record is missing.
-    try:
-        updated = table.update_item(
-            Key={"pk": f"DEVICE#{device_id}", "sk": "METADATA"},
-            UpdateExpression=expression,
-            ConditionExpression="attribute_exists(pk)",
-            ExpressionAttributeNames=names,
-            ExpressionAttributeValues=values,
-            ReturnValues="ALL_NEW",
-        )["Attributes"]
-    except ClientError as e:
-        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-            return _resp(404, {"error": "Device not found"})
-        raise
+    # from creating a bare item if the metadata record is missing. Only the
+    # attributes named in the request are written, so concurrent updates of
+    # other fields (or of the profile picture) never overwrite each other.
+    if profile_image_id is not None:
+        updated, error = _update_with_profile_image(table, device_id, profile_image_id, expression, names, values)
+        if error:
+            return error
+    else:
+        try:
+            updated = table.update_item(
+                Key={"pk": f"DEVICE#{device_id}", "sk": "METADATA"},
+                UpdateExpression=expression,
+                ConditionExpression="attribute_exists(pk)",
+                ExpressionAttributeNames=names,
+                ExpressionAttributeValues=values,
+                ReturnValues="ALL_NEW",
+            )["Attributes"]
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                return _resp(404, {"error": "Device not found"})
+            raise
 
     if "pendingNameSync" in updated:
         try:
@@ -174,6 +199,90 @@ def handler(event, context):
             })
 
     return _resp(200, _public_device(device_id, updated))
+
+
+# One answer for every unusable profile image, so the endpoint can't be used
+# to learn whether an artifact id exists or what it is.
+PROFILE_IMAGE_ERROR = f"{PROFILE_IMAGE_FIELD} must be a ready image of this device"
+
+
+def _profile_image_error(table, user_id, device_id, device, artifact_id):
+    """Why `artifact_id` can't be the device's profile picture, or None.
+
+    It must be an image artifact that the caller may read (the read rule of
+    GET /artifacts/{id}), in the device's scope (both personal, or both in
+    the same workspace), linked to this device, and ready with a supported
+    format. Anything else, including an id that doesn't exist, gets the same
+    error.
+    """
+    if not isinstance(artifact_id, str) or not DEVICE_ID_PATTERN.match(artifact_id):
+        return f"{PROFILE_IMAGE_FIELD} must be an artifact id or null"
+    try:
+        image = testbed_authz.require_resource(table, user_id, "ARTIFACT", artifact_id,
+                                               legacy_roles=testbed_authz.ANY_ROLE)
+    except testbed_authz.AuthorizationError:
+        return PROFILE_IMAGE_ERROR
+    usable = (
+        image.get("type") == image_fields.IMAGE_TYPE
+        and image.get("status") == "ready"
+        and image.get("mimeType") in image_fields.IMAGE_MIME_TYPES
+        and image.get("workspaceId") == device.get("workspaceId")
+        and device_id in (image.get("deviceIds") or ())
+        and table.get_item(Key=_profile_link_key(device_id, artifact_id)).get("Item") is not None
+    )
+    return None if usable else PROFILE_IMAGE_ERROR
+
+
+def _profile_link_key(device_id, artifact_id):
+    # The device's gallery row for the image (artifacts-presign writes it).
+    return {"pk": f"DEVICE#{device_id}", "sk": f"ARTIFACT#{image_fields.IMAGE_TYPE}#{artifact_id}"}
+
+
+def _update_with_profile_image(table, device_id, artifact_id, expression, names, values):
+    """Applies the update together with checks that the image is still linked
+    to the device and still a ready image, so a reference to an image that
+    changed after it was validated is never written. Returns (updated
+    METADATA, None) or (None, error response)."""
+    link = _profile_link_key(device_id, artifact_id)
+    items = [
+        {"Update": {
+            "TableName": TABLE,
+            "Key": _key(f"DEVICE#{device_id}", "METADATA"),
+            "UpdateExpression": expression,
+            "ConditionExpression": "attribute_exists(pk)",
+            "ExpressionAttributeNames": names,
+            "ExpressionAttributeValues": {k: serializer.serialize(v) for k, v in values.items()},
+        }},
+        {"ConditionCheck": {
+            "TableName": TABLE,
+            "Key": _key(link["pk"], link["sk"]),
+            "ConditionExpression": "attribute_exists(pk)",
+        }},
+        {"ConditionCheck": {
+            "TableName": TABLE,
+            "Key": _key(f"ARTIFACT#{artifact_id}", "METADATA"),
+            "ConditionExpression": "#type = :image AND #st = :ready",
+            "ExpressionAttributeNames": {"#type": "type", "#st": "status"},
+            "ExpressionAttributeValues": {":image": serializer.serialize(image_fields.IMAGE_TYPE),
+                                          ":ready": serializer.serialize("ready")},
+        }},
+    ]
+    try:
+        client.transact_write_items(TransactItems=items)
+    except ClientError as e:
+        if e.response["Error"]["Code"] != "TransactionCanceledException":
+            raise
+        reasons = e.response.get("CancellationReasons", [])
+        if reasons and reasons[0].get("Code") == "ConditionalCheckFailed":
+            return None, _resp(404, {"error": "Device not found"})
+        if any(r.get("Code") == "ConditionalCheckFailed" for r in reasons[1:]):
+            return None, _resp(400, {"error": PROFILE_IMAGE_ERROR})
+        # A conflicting concurrent write: nothing was changed.
+        return None, _resp(409, {"error": "The device was being changed at the same time; try again"})
+    item = table.get_item(Key={"pk": f"DEVICE#{device_id}", "sk": "METADATA"}, ConsistentRead=True).get("Item")
+    if item is None:
+        return None, _resp(404, {"error": "Device not found"})
+    return item, None
 
 
 def _sync_name(table, device_id, name):
@@ -274,6 +383,8 @@ def _public_device(device_id, item):
         "updatedAt": item.get("updatedAt"),
         **device_fields.optional_values(item),
     }
+    if isinstance(item.get(PROFILE_IMAGE_FIELD), str):
+        device[PROFILE_IMAGE_FIELD] = item[PROFILE_IMAGE_FIELD]
     if "workspaceId" in item:
         device["workspaceId"] = item["workspaceId"]
     return device

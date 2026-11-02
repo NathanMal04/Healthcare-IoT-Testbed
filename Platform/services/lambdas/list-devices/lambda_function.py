@@ -21,10 +21,17 @@ BATCH_GET_MAX_KEYS = 100
 
 UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
+# The device's profile picture: an image artifact id (update-device checks it
+# when it is set). Only the reference is returned; clients ask
+# POST /artifacts/view-urls for a URL, which answers 404 for an image that is
+# no longer viewable, so a stale reference just shows no picture.
+PROFILE_IMAGE_FIELD = "profileImageArtifactId"
+
 # What the lists read from each DEVICE#/METADATA. "name" and "type" are
 # DynamoDB reserved words.
 LIST_PROJECTION = ", ".join(
-    ["pk", "#name", "#type", "reverseEngineeringStatus", "workspaceId", *device_fields.OPTIONAL_FIELDS]
+    ["pk", "#name", "#type", "reverseEngineeringStatus", "workspaceId", PROFILE_IMAGE_FIELD,
+     *device_fields.OPTIONAL_FIELDS]
 )
 
 
@@ -154,6 +161,8 @@ def _list_fields(device_id, item, fallback_name=None):
         "reverseEngineeringStatus": _re_status(item),
     }
     fields.update(device_fields.optional_values(item))
+    if isinstance(item.get(PROFILE_IMAGE_FIELD), str) and UUID_PATTERN.match(item[PROFILE_IMAGE_FIELD]):
+        fields[PROFILE_IMAGE_FIELD] = item[PROFILE_IMAGE_FIELD]
     return fields
 
 

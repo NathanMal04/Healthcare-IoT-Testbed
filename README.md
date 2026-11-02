@@ -199,6 +199,11 @@ its file signature is checked on completion and it is displayed through `/artifa
 Images are uploaded and browsed from a device's **Images** tab. The gallery shows the original files (there are
 no thumbnails yet), so each card downloads and decodes a full photograph; pages hold 12 images and load lazily,
 but large photos still cost bandwidth and browser memory, especially on phones.
+A device can have a **profile picture**: one of its gallery images, shown on the devices list and the device's page.
+It is chosen from the gallery ("Set as profile picture") or by uploading a new picture (which joins the gallery),
+from the picture's menu on the device page, where its file can also be replaced or the picture removed. Changing or
+removing the picture never deletes an image. See
+[Device profile pictures](Platform/infra/DATABASE.md#device-profile-pictures).
 An image's file can be **replaced** (from its card menu or the viewer) while the image keeps its id, details,
 tags and device links. The new file is verified before it goes live, and the old file is then **permanently
 deleted** (the bucket is unversioned and there is no version history). A job that was already given a URL for the

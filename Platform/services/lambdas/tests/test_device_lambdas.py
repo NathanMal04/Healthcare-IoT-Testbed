@@ -81,7 +81,7 @@ class FakeTable:
         self.update_calls = []
         self.queries = []
 
-    def get_item(self, Key):
+    def get_item(self, Key, ConsistentRead=False):
         item = self.items.get((Key["pk"], Key["sk"]))
         return {"Item": dict(item)} if item else {}
 
