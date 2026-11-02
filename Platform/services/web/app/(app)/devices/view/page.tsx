@@ -55,6 +55,7 @@ import ArtifactTypeChips from "@/app/components/ArtifactTypeChips";
 import CveDetails from "@/app/components/CveDetails";
 import CveList from "@/app/components/CveList";
 import CveLinkExplorer from "@/app/components/CveLinkExplorer";
+import DeviceImageGallery from "@/app/components/images/DeviceImageGallery";
 import {
   FirmwareRetryDialog,
   FirmwareTable,
@@ -82,7 +83,7 @@ import {
   type Column,
 } from "@/app/components/ui";
 
-const TABS = ["overview", "firmware", "artifacts", "cves"] as const;
+const TABS = ["overview", "firmware", "artifacts", "images", "cves"] as const;
 type TabId = (typeof TABS)[number];
 
 export default function DeviceViewPage() {
@@ -291,6 +292,7 @@ function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: Ta
           { id: "overview", label: "Overview" },
           { id: "firmware", label: "Firmware", count: firmware ? firmware.length : undefined },
           { id: "artifacts", label: "Artifacts" },
+          { id: "images", label: "Images" },
           { id: "cves", label: "CVEs", count: cves ? deviceCves.length : undefined },
         ]}
       />
@@ -316,6 +318,7 @@ function DeviceView({ deviceId, initialTab }: { deviceId: string; initialTab: Ta
           />
         )}
         {tab === "artifacts" && <ArtifactsTab device={device} />}
+        {tab === "images" && <DeviceImageGallery device={device} />}
         {tab === "cves" && openCveId && (
           <CveDetails
             key={openCveId}

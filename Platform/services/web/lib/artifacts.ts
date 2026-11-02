@@ -5,10 +5,16 @@ import { toReverseEngineeringStatus, type ReverseEngineeringStatus } from "@/lib
 // --- Types -------------------------------------------------------------------
 
 export const ARTIFACT_TYPES = ["firmware", "binary", "pcap", "log", "kernel_module", "report", "other"] as const;
+/** The types offered by the category tabs, the generic uploader and run filters. */
 export type ArtifactType = (typeof ARTIFACT_TYPES)[number];
+/**
+ * Every type an artifact can have. Images (lib/images.ts) are uploaded and
+ * shown from a device's Images tab only, so they aren't in ARTIFACT_TYPES.
+ */
+export type StoredArtifactType = ArtifactType | "image";
 
 /** Display names: the category tabs, and an upload button's "Upload …". */
-export const ARTIFACT_TYPE_LABELS: Record<ArtifactType, { category: string; single: string }> = {
+export const ARTIFACT_TYPE_LABELS: Record<StoredArtifactType, { category: string; single: string }> = {
   firmware: { category: "Firmware", single: "Firmware" },
   binary: { category: "Binary", single: "Binary" },
   pcap: { category: "PCAP", single: "PCAP" },
@@ -16,6 +22,7 @@ export const ARTIFACT_TYPE_LABELS: Record<ArtifactType, { category: string; sing
   kernel_module: { category: "Kernel Modules", single: "Kernel Module" },
   report: { category: "PDF Reports", single: "PDF Report" },
   other: { category: "Other", single: "Other" },
+  image: { category: "Images", single: "Image" },
 };
 export type ArtifactStatus = "pending" | "verifying" | "ready" | "failed";
 
@@ -25,7 +32,7 @@ export const MAX_FILES_PER_PRESIGN = 100;
 export interface Artifact {
   artifactId: string;
   name: string;
-  type: ArtifactType;
+  type: StoredArtifactType;
   origin: string | null;
   version: string | null;
   status: ArtifactStatus;
@@ -48,6 +55,12 @@ export interface Artifact {
    * Separate from `status`, which is the upload lifecycle.
    */
   reverseEngineeringStatus?: ReverseEngineeringStatus;
+  /** Images only (lib/images.ts): always present on images, absent otherwise. */
+  title?: string;
+  description?: string | null;
+  mimeType?: string;
+  capturedAt?: string | null;
+  updatedAt?: string | null;
 }
 
 export interface ArtifactDetail extends Artifact {
@@ -59,9 +72,14 @@ export interface PresignFile {
   originalFilename: string;
   sizeBytes: number;
   sha256: string;
-  type: ArtifactType;
+  type: StoredArtifactType;
   version?: string;
   name?: string;
+  /** Images only: the format (required), and optional title, description and capturedAt. */
+  mimeType?: string;
+  title?: string;
+  description?: string;
+  capturedAt?: string;
 }
 
 export type UploadInstructions =
@@ -102,7 +120,7 @@ export interface ArtifactPage {
 }
 
 export interface ListParams {
-  type?: ArtifactType;
+  type?: StoredArtifactType;
   tag?: string;
   batchId?: string;
   runId?: string;
@@ -242,7 +260,7 @@ export function guessArtifactType(filename: string): ArtifactType {
 }
 
 /** A staged file's type: the upload's fixed type if it has one, else the guess. */
-export function stagedArtifactType(filename: string, fixedType?: ArtifactType): ArtifactType {
+export function stagedArtifactType(filename: string, fixedType?: StoredArtifactType): StoredArtifactType {
   return fixedType ?? guessArtifactType(filename);
 }
 

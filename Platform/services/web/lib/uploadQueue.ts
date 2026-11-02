@@ -6,9 +6,10 @@ import {
   retryArtifact,
   sha256File,
   transferArtifact,
-  type ArtifactType,
   type PresignedUpload,
+  type StoredArtifactType,
 } from "@/lib/artifacts";
+import type { ImageUploadFields } from "@/lib/images";
 
 export type QueueStage =
   | "queued"
@@ -24,8 +25,10 @@ export interface QueueItem {
   file: File;
   /** Path relative to the chosen folder, or the file name. */
   path: string;
-  type: ArtifactType;
+  type: StoredArtifactType;
   version: string;
+  /** Images only: the detected format and the optional title, description and capture date. */
+  image?: ImageUploadFields;
   stage: QueueStage;
   /** Progress of the current stage, 0..1. */
   progress: number;
@@ -208,6 +211,7 @@ export class UploadQueue {
           sha256: item.sha256!,
           type: item.type,
           version: item.type === "firmware" ? item.version.trim() : undefined,
+          ...(item.type === "image" && item.image ? imagePresignFields(item.image) : {}),
         })),
       });
       this.uploadBatchId = response.uploadBatchId;
@@ -282,4 +286,16 @@ export class UploadQueue {
     const snapshot = this.items.map((item) => ({ ...item }));
     this.listeners.forEach((listener) => listener(snapshot));
   }
+}
+
+/** The image fields of a presign file; blank optional fields are left out. */
+export function imagePresignFields(image: ImageUploadFields) {
+  const title = image.title?.trim();
+  const description = image.description?.trim();
+  return {
+    mimeType: image.mimeType,
+    ...(title ? { title } : {}),
+    ...(description ? { description } : {}),
+    ...(image.capturedAt ? { capturedAt: image.capturedAt } : {}),
+  };
 }

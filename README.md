@@ -194,6 +194,9 @@ which is unique per device. An **image** (JPEG, PNG or WebP, at most 25 MiB) als
 an optional `description` and an optional `capturedAt` (when the photo was taken, not when it was uploaded);
 its file signature is checked on completion and it is displayed through `/artifacts/view-urls`. See
 [Image artifacts](Platform/infra/DATABASE.md#image-artifacts).
+Images are uploaded and browsed from a device's **Images** tab. The gallery shows the original files (there are
+no thumbnails yet), so each card downloads and decodes a full photograph; pages hold 12 images and load lazily,
+but large photos still cost bandwidth and browser memory, especially on phones.
 Files sent together form an **upload batch**, which can be listed on its own. Records and keys are described
 in [`Platform/infra/DATABASE.md`](Platform/infra/DATABASE.md).
 
