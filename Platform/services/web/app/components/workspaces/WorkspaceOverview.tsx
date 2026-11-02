@@ -39,6 +39,7 @@ import {
 } from "@/app/components/ui";
 import { CountRow, KIND_STYLES, KindTile, SelectedPill, scopeCounts } from "./parts";
 import { firmwareCount, type ScopeResources } from "./useWorkspaceResources";
+import { usePageCrumbs } from "@/app/components/shell/ShellContext";
 
 type TabId = "members" | "invitations" | "devices" | "firmware" | "cves";
 
@@ -63,6 +64,8 @@ export function WorkspaceOverview({
   const { user } = useAuth();
   const { scope, selectWorkspace, scopeLocked } = useWorkspace();
   const { detail, error, invite } = useWorkspaceDetail(workspace.workspaceId);
+  // The top bar's breadcrumb names the workspace.
+  usePageCrumbs([{ label: "Workspaces", href: "/workspaces" }, { label: workspace.name }]);
   const [tab, setTab] = useState<TabId>("members");
   const [inviting, setInviting] = useState(false);
 
@@ -108,13 +111,14 @@ export function WorkspaceOverview({
 
   return (
     <div className="space-y-5">
-      <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-xs font-medium text-slate-500">
+      {/* The top bar's breadcrumb is the page's navigation landmark; this trail is a visual aid. */}
+      <div className="flex items-center gap-1 text-xs font-medium text-slate-500">
         <button type="button" onClick={onBack} className="hover:text-brand-700">
           Workspaces
         </button>
         <ChevronRight className="h-3.5 w-3.5 text-slate-300" aria-hidden="true" />
         <span className="text-slate-800 truncate">{workspace.name}</span>
-      </nav>
+      </div>
 
       <Card className="overflow-hidden">
         <div className={`h-16 border-b ${KIND_STYLES[workspace.role].band}`} aria-hidden="true" />

@@ -61,6 +61,7 @@ import DeviceImageGallery from "@/app/components/images/DeviceImageGallery";
 import DeviceProfilePicture from "@/app/components/images/DeviceProfilePicture";
 import { useImageUrls } from "@/app/components/images/useImageData";
 import { useProfileImage } from "@/app/components/images/useProfileImage";
+import { usePageCrumbs } from "@/app/components/shell/ShellContext";
 import { imageTitle } from "@/lib/images";
 import {
   FirmwareRetryDialog,
@@ -287,6 +288,8 @@ function DeviceView({
 
   const scopeName = scope.kind === "workspace" ? scope.name : "Personal";
   const back = { href: "/devices", label: "Devices" };
+  // The top bar's breadcrumb names the device once it's loaded.
+  usePageCrumbs(device ? [{ label: "Devices", href: "/devices" }, { label: device.name }] : null);
 
   if (loadError) {
     return (
@@ -997,19 +1000,18 @@ function DeviceCveFrame({ cveId, children }: { cveId?: string; children: React.R
   const listHref = deviceHref(deviceId, "cves");
   return (
     <div>
-      <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1 text-xs text-slate-400">
+      {/* The top bar's breadcrumb is the page's navigation landmark; this trail is a visual aid. */}
+      <div className="flex flex-wrap items-center gap-1 text-xs text-slate-400">
         <Link href={listHref} className="hover:text-brand-700">
           CVEs
         </Link>
         {cveId && (
           <>
             <ChevronRight className="h-3.5 w-3.5 text-slate-300" aria-hidden="true" />
-            <span className="font-mono text-slate-600" aria-current="page">
-              {cveId}
-            </span>
+            <span className="font-mono text-slate-600">{cveId}</span>
           </>
         )}
-      </nav>
+      </div>
       <div className="flex flex-wrap items-center justify-between gap-2 mt-3 mb-4">
         <Link
           href={listHref}

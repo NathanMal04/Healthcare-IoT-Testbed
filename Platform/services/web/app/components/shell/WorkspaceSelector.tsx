@@ -9,11 +9,22 @@ const SELECT_CLASS =
   "appearance-none h-9 w-full pl-8 pr-8 rounded-lg border border-line bg-white text-sm font-medium text-slate-800 shadow-sm truncate focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 disabled:opacity-60 disabled:cursor-not-allowed";
 
 /**
- * The scope selector in the top bar: Personal, the user's workspaces, and
- * "Create workspace". Selecting is done through WorkspaceContext, which
- * restores the saved workspace and refuses changes while a write is running.
+ * The scope selector at the top of the navigation: Personal, the user's
+ * workspaces, and "Create workspace". Selecting is done through
+ * WorkspaceContext, which restores the saved workspace and refuses changes
+ * while a write is running (the selector is disabled and says why).
+ *
+ * In the collapsed navigation ("rail") it is a single button showing the
+ * current scope; it expands the navigation to switch.
  */
-export default function WorkspaceSelector() {
+export default function WorkspaceSelector({
+  variant = "sidebar",
+  onExpand,
+}: {
+  variant?: "sidebar" | "rail";
+  /** Rail only: expands the navigation (where the selector is). */
+  onExpand?: () => void;
+}) {
   const {
     scope,
     scopeReady,
@@ -41,10 +52,25 @@ export default function WorkspaceSelector() {
   }
 
   const ScopeIcon = scopeReady && scope.kind === "workspace" ? Building2 : UserRound;
+  const scopeName = !scopeReady ? "Loading" : scope.kind === "workspace" ? scope.name : "Personal";
+
+  if (variant === "rail") {
+    return (
+      <button
+        type="button"
+        onClick={onExpand}
+        aria-label={`Scope: ${scopeName}. Expand the navigation to switch`}
+        title={`Scope: ${scopeName}`}
+        className="group relative h-10 w-10 inline-flex items-center justify-center rounded-lg border border-line bg-white text-slate-600 shadow-sm hover:text-slate-900 hover:border-line-strong outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+      >
+        <ScopeIcon className="h-[18px] w-[18px]" aria-hidden="true" />
+      </button>
+    );
+  }
 
   return (
-    <div className="flex items-center gap-2 min-w-0">
-      <div className="relative w-40 sm:w-52 min-w-0">
+    <div className="space-y-1.5 min-w-0">
+      <div className="relative w-full min-w-0">
         <ScopeIcon className="h-4 w-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" aria-hidden="true" />
         {/* Until the saved workspace is restored, the scope is a placeholder
             Personal; show neither it nor any choice. */}
@@ -59,6 +85,7 @@ export default function WorkspaceSelector() {
             onChange={(e) => handleChange(e.target.value)}
             disabled={scopeLocked}
             title={scopeLocked ? "Finish the upload or change in progress before switching" : undefined}
+            aria-describedby={scopeLocked ? "scope-locked-reason" : undefined}
             className={SELECT_CLASS}
           >
             <option value="personal">Personal</option>
@@ -83,14 +110,19 @@ export default function WorkspaceSelector() {
         <ChevronDown className="h-4 w-4 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" aria-hidden="true" />
       </div>
 
+      {scopeLocked && (
+        <p id="scope-locked-reason" className="px-1 text-2xs text-slate-500">
+          Finish the upload or change in progress before switching.
+        </p>
+      )}
       {scopeReady && scope.kind === "workspace" && (
         <button
           type="button"
           onClick={() => openPanel("members")}
-          className="hidden md:inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg text-sm text-slate-600 hover:text-slate-900 hover:bg-surface-sunken"
+          className="w-full inline-flex items-center gap-2 h-8 px-2.5 rounded-lg text-sm text-slate-600 hover:text-slate-900 hover:bg-surface-sunken outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
           title={`Members of ${scope.name}`}
         >
-          <Users className="h-4 w-4" aria-hidden="true" />
+          <Users className="h-4 w-4 text-slate-400" aria-hidden="true" />
           Members
         </button>
       )}

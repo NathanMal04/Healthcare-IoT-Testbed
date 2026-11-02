@@ -1,14 +1,24 @@
-/** The Vzoniq mark: a shield with a signal trace, drawn inline so no asset is needed. */
+"use client";
+
+import { useId } from "react";
+
+/**
+ * The Vzoniq mark: a shield with a signal trace, drawn inline so no asset is
+ * needed. Each instance has its own gradient id: with a shared id, a logo
+ * would paint with the gradient of another one, and draw nothing when that
+ * one is hidden (the desktop sidebar's, below large screens).
+ */
 export function BrandLogo({ className = "h-8 w-8" }: { className?: string }) {
+  const gradientId = `vzoniq-mark-${useId().replace(/:/g, "")}`;
   return (
     <svg viewBox="0 0 32 32" className={className} aria-hidden="true">
       <defs>
-        <linearGradient id="vzoniq-mark" x1="0" y1="0" x2="1" y2="1">
+        <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#3a74ec" />
           <stop offset="1" stopColor="#1a4db3" />
         </linearGradient>
       </defs>
-      <path d="M16 2.5 27 6.6v8.2c0 7.1-4.6 12.3-11 14.7C9.6 27.1 5 21.9 5 14.8V6.6L16 2.5Z" fill="url(#vzoniq-mark)" />
+      <path d="M16 2.5 27 6.6v8.2c0 7.1-4.6 12.3-11 14.7C9.6 27.1 5 21.9 5 14.8V6.6L16 2.5Z" fill={`url(#${gradientId})`} />
       <path
         d="M9.5 16.2h3.4l1.9-4.4 2.8 8.6 2.1-4.2h2.8"
         fill="none"

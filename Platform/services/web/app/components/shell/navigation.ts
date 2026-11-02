@@ -12,6 +12,7 @@ import {
   Workflow,
   type LucideIcon,
 } from "lucide-react";
+import type { ContentWidth } from "@/app/components/ui/Layout";
 
 export interface NavItem {
   href: string;
@@ -41,7 +42,8 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/scripts", label: "Scripts", icon: FileCode },
       { href: "/environments", label: "Environments", icon: Boxes },
       { href: "/runs", label: "Runs", icon: Workflow },
-      { href: "/notebooks", label: "Notebooks", icon: NotebookPen },
+      // Jupyter analysis sessions (not a device's RE Notebook); the URL stays /notebooks.
+      { href: "/notebooks", label: "Analysis Notebooks", icon: NotebookPen },
     ],
   },
 ];
@@ -80,4 +82,49 @@ export function currentPage(pathname: string | null): { section: string; title: 
   }
   const system = SYSTEM_ITEMS.find((item) => isActive(path, item.href));
   return system ? { section: "System", title: system.label } : null;
+}
+
+/** One step of the breadcrumb trail; the last one is the current page (no link). */
+export interface Crumb {
+  label: string;
+  href?: string;
+}
+
+/** Detail pages under a list page, with the label shown until the page names its record. */
+const DETAIL_PAGES: Record<string, { parent: string; label: string }> = {
+  "/devices/view": { parent: "/devices", label: "Device" },
+  "/vulnerabilities/view": { parent: "/vulnerabilities", label: "Vulnerability" },
+};
+
+function navItem(href: string): NavItem | undefined {
+  return [...NAV_SECTIONS.flatMap((s) => s.items), ...SYSTEM_ITEMS].find((item) => item.href === href);
+}
+
+/**
+ * The breadcrumb trail for a route: the page, or its list page then the
+ * detail. Pages that know their record's name replace the last step (see
+ * usePageCrumbs).
+ */
+export function routeCrumbs(pathname: string | null): Crumb[] {
+  const path = normalizePath(pathname);
+  const detail = DETAIL_PAGES[path];
+  if (detail) {
+    const parent = navItem(detail.parent);
+    return [{ label: parent?.label ?? detail.parent, href: detail.parent }, { label: detail.label }];
+  }
+  for (const item of [...NAV_SECTIONS.flatMap((s) => s.items), ...SYSTEM_ITEMS]) {
+    if (isActive(path, item.href)) return [{ label: item.label, href: item.href }];
+  }
+  return [];
+}
+
+/**
+ * How wide a page's content may grow. Tables and research workspaces use
+ * the screen (fluid, up to about 1600px); detail pages with long text and
+ * settings-style pages keep the default width.
+ */
+export function contentWidth(pathname: string | null): ContentWidth {
+  const path = normalizePath(pathname);
+  if (path === "/vulnerabilities/view" || isActive(path, "/workspaces") || isActive(path, "/usage")) return "default";
+  return "fluid";
 }
