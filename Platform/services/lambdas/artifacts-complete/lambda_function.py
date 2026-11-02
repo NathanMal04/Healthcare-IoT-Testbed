@@ -20,6 +20,7 @@ VERIFY_STALE_SEC = int(os.environ.get("VERIFY_STALE_SEC", "1200"))
 
 MAX_ITEMS_PER_REQUEST = 100
 COMMITTED_TAGSET = [{"Key": "upload-state", "Value": "committed"}]
+PENDING_TAGSET = [{"Key": "upload-state", "Value": "pending"}]
 # S3 errors worth retrying (throttling, server-side failures) when reading an
 # image's first bytes; the image stays pending and complete can be called again.
 TRANSIENT_S3_ERRORS = {"SlowDown", "ServiceUnavailable", "InternalError", "RequestTimeout", "500", "503"}
@@ -44,6 +45,9 @@ def handler(event, context):
 
     if not isinstance(body, dict):
         return _resp(400, {"error": "Invalid JSON in request body"})
+
+    if event.get("resource") == "/artifacts/{artifactId}/replacement/complete":
+        return _handle_replacement_complete(user_id, event, body)
 
     items = body.get("items")
     if not isinstance(items, list) or not items:
@@ -173,6 +177,270 @@ def _image_problem(item, head):
     if not image_fields.matches_signature(mime_type, head_bytes):
         return f"Uploaded file is not a valid {mime_type} image"
     return None
+
+
+# --- POST /artifacts/{artifactId}/replacement/complete -------------------------
+
+def _handle_replacement_complete(user_id, event, body):
+    """Verifies a replacement image (artifacts-presign started it) and swaps
+    it in, keeping the artifact, then permanently deletes the old object.
+
+    Order, so the artifact never points at a missing or unverified file:
+    1. verify the new object exactly like a first image upload (size and
+       SHA-256 from S3's checksum, stored Content-Type, file signature);
+    2. tag it committed, so the lifecycle rule never expires it;
+    3. swap the record to it in one conditional write, which also moves the
+       old key to `orphanS3Keys`;
+    4. delete every orphaned key that isn't live or in flight.
+    If verification fails, the old file stays live and untouched. A repeated
+    call for a replacement that is already live only retries the cleanup.
+    """
+    artifact_id = (event.get("pathParameters") or {}).get("artifactId")
+    if not isinstance(artifact_id, str) or not UUID_PATTERN.match(artifact_id):
+        return _resp(400, {"error": "artifactId is invalid or missing"})
+    replacement_id = body.get("replacementId")
+    if not isinstance(replacement_id, str) or not UUID_PATTERN.match(replacement_id):
+        return _resp(400, {"error": "replacementId is invalid or missing"})
+
+    table = dynamodb.Table(TABLE)
+    # Same rule as starting it (and as PATCH): owner of a personal image, any
+    # member of a workspace image's workspace; 404 otherwise.
+    try:
+        item = testbed_authz.require_resource(table, user_id, "ARTIFACT", artifact_id, legacy_roles=("owner",))
+    except testbed_authz.AuthorizationError:
+        return _resp(404, {"error": "Artifact not found"})
+    if item.get("type") != image_fields.IMAGE_TYPE:
+        return _resp(400, {"error": "Only image artifacts can be replaced"})
+
+    key = {"pk": f"ARTIFACT#{artifact_id}", "sk": "METADATA"}
+    # The authorization read is eventually consistent; decide on a strongly
+    # consistent one, so a just-started replacement is never missed.
+    item = _read(table, key) or item
+    try:
+        swapped = _replace(table, key, item, replacement_id)
+    except ItemError as e:
+        # A rejected or superseded upload may just have been recorded as
+        # orphaned: remove it now rather than at the next replacement.
+        # Cleanup only ever touches keys that can't go live, so it is safe
+        # on every path, and best-effort, so it never hides this answer.
+        _cleanup_best_effort(table, key, artifact_id)
+        return _resp(e.status, {"error": e.message})
+
+    # The replacement is live from here on: nothing below may turn that into
+    # an error, or the client would believe the old file was kept.
+    pending = _cleanup_best_effort(table, key, artifact_id)
+    try:
+        current = _read(table, key) or swapped
+    except (ClientError, BotoCoreError):
+        current = swapped
+    return _resp(200, {
+        "artifactId": artifact_id,
+        "replacementId": replacement_id,
+        "image": _replaced_image(current),
+        # The old file couldn't be deleted yet: it stays tracked in
+        # orphanS3Keys (retried by later calls) and is tagged for expiry.
+        "cleanupPending": pending,
+    })
+
+
+def _replace(table, key, item, replacement_id):
+    """Swaps the replacement in and returns the record, or raises ItemError."""
+    if item["attemptId"] == replacement_id:
+        # Already live: a repeated call, or a concurrent one got here first.
+        return item
+
+    replacement = item.get("replacement")
+    if not replacement or replacement.get("replacementId") != replacement_id:
+        # Superseded by a newer replacement, or failed verification earlier.
+        # Its object (if the upload landed after all) is never live: track it.
+        _add_orphan(table, key, _replacement_key(item, replacement_id), replacement_id)
+        raise ItemError(409, "This replacement is no longer current (another replacement was started, or it "
+                             "failed); start again")
+    if item.get("status") != "ready":
+        raise ItemError(409, f"Artifact is {item.get('status')}, not ready")
+
+    candidate = {**item, "s3Key": replacement["s3Key"], "mimeType": replacement["mimeType"]}
+    try:
+        head = s3.head_object(Bucket=item["s3Bucket"], Key=replacement["s3Key"], ChecksumMode="ENABLED")
+    except ClientError as e:
+        code = e.response["Error"]["Code"]
+        if code in ("404", "NoSuchKey", "403"):
+            raise ItemError(409, "Uploaded file not found yet; retry once the upload has completed")
+        if code in TRANSIENT_S3_ERRORS:
+            raise ItemError(409, "Could not read the uploaded file; try again")
+        raise
+    except BotoCoreError:
+        raise ItemError(409, "Could not read the uploaded file; try again")
+
+    expected_checksum = _sha256_hex_to_base64(replacement["sha256"])
+    if head["ContentLength"] != int(replacement["sizeBytes"]) or head.get("ChecksumSHA256") != expected_checksum:
+        problem = "Uploaded file does not match the declared size and SHA-256"
+    else:
+        # Raises ItemError(409) for a missing object or a transient read error.
+        problem = _image_problem(candidate, head)
+    if problem:
+        _abandon_replacement(table, key, item, replacement)
+        raise ItemError(422, f"{problem}; the current image was kept")
+
+    _commit_object(candidate)
+    now = _now()
+    try:
+        return table.update_item(
+            Key=key,
+            UpdateExpression=(
+                "SET s3Key = :key, attemptId = :rid, sha256 = :sha, sizeBytes = :size, mimeType = :mime, "
+                "originalFilename = :filename, uploadedAt = :now, updatedAt = :now "
+                "REMOVE #rep ADD orphanS3Keys :old"
+            ),
+            ConditionExpression="attemptId = :expected AND #st = :ready AND #rep.#rid = :rid",
+            ExpressionAttributeNames={"#st": "status", "#rep": "replacement", "#rid": "replacementId"},
+            ExpressionAttributeValues={
+                ":key": replacement["s3Key"],
+                ":rid": replacement_id,
+                ":sha": replacement["sha256"],
+                ":size": replacement["sizeBytes"],
+                ":mime": replacement["mimeType"],
+                ":filename": replacement["originalFilename"],
+                ":now": now,
+                ":old": {item["s3Key"]},
+                ":expected": item["attemptId"],
+                ":ready": "ready",
+            },
+            ReturnValues="ALL_NEW",
+        )["Attributes"]
+    except ClientError as e:
+        if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+            raise
+    refreshed = _read(table, key)
+    if refreshed and refreshed["attemptId"] == replacement_id:
+        return refreshed  # a concurrent call swapped it in
+    # Superseded while it was being verified: the new object never went live.
+    _add_orphan(table, key, replacement["s3Key"], replacement_id)
+    raise ItemError(409, "Another replacement was started at the same time; start again")
+
+
+def _abandon_replacement(table, key, item, replacement):
+    """Clears a replacement that failed verification; its object is orphaned."""
+    try:
+        table.update_item(
+            Key=key,
+            UpdateExpression="REMOVE #rep ADD orphanS3Keys :orphan",
+            ConditionExpression="#rep.#rid = :rid",
+            ExpressionAttributeNames={"#rep": "replacement", "#rid": "replacementId"},
+            ExpressionAttributeValues={":rid": replacement["replacementId"], ":orphan": {replacement["s3Key"]}},
+        )
+    except ClientError as e:
+        if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+            raise
+        # Already superseded, and the newer request recorded this key.
+
+
+def _replacement_key(item, replacement_id):
+    # Same layout as artifacts-presign; replacement_id is a validated UUID.
+    return f"artifacts/{item['artifactId']}/{replacement_id}"
+
+
+def _add_orphan(table, key, s3_key, replacement_id):
+    """Records the object of a replacement that can no longer go live.
+
+    Every write that adds to orphanS3Keys is conditional on the key being
+    unable to become live: here, the replacement is neither live nor the
+    pending one (only the pending one can be swapped in), checked on the
+    write itself, so a stale read can never get a live key deleted.
+    """
+    try:
+        table.update_item(
+            Key=key,
+            UpdateExpression="ADD orphanS3Keys :orphan",
+            ConditionExpression=(
+                "attribute_exists(pk) AND attemptId <> :rid "
+                "AND (attribute_not_exists(#rep) OR #rep.#rid <> :rid)"
+            ),
+            ExpressionAttributeNames={"#rep": "replacement", "#rid": "replacementId"},
+            ExpressionAttributeValues={":orphan": {s3_key}, ":rid": replacement_id},
+        )
+    except ClientError as e:
+        if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+            raise
+        # It became live or pending after all: not an orphan.
+
+
+def _read(table, key):
+    return table.get_item(Key=key, ConsistentRead=True).get("Item")
+
+
+def _cleanup_orphans(table, key, artifact_id):
+    """Permanently deletes the artifact's orphaned objects; returns the keys
+    that couldn't be deleted (they stay in orphanS3Keys for a later call).
+
+    The bucket is unversioned, so DeleteObject removes the bytes for good. A
+    key is never deleted while it is the live s3Key or the pending
+    replacement's key, and only keys under this artifact's own prefix are
+    touched. Keys are unique per upload attempt and never reused, so an
+    orphaned key can't become live again.
+    """
+    item = _read(table, key)
+    if not item:
+        return []
+    protected = {item.get("s3Key"), (item.get("replacement") or {}).get("s3Key")}
+    prefix = f"artifacts/{artifact_id}/"
+    pending = []
+    for orphan in sorted(item.get("orphanS3Keys") or ()):
+        if orphan in protected or not orphan.startswith(prefix):
+            print(json.dumps({"event": "orphan_cleanup_skipped", "artifactId": artifact_id, "s3Key": orphan}))
+            continue
+        try:
+            s3.delete_object(Bucket=item["s3Bucket"], Key=orphan)
+        except (ClientError, BotoCoreError) as e:
+            code = e.response["Error"]["Code"] if isinstance(e, ClientError) else type(e).__name__
+            print(json.dumps({"event": "orphan_delete_failed", "artifactId": artifact_id, "s3Key": orphan,
+                              "code": code}))
+            _tag_for_expiry(item["s3Bucket"], orphan)
+            pending.append(orphan)
+            continue
+        table.update_item(
+            Key=key,
+            UpdateExpression="DELETE orphanS3Keys :orphan",
+            ConditionExpression="attribute_exists(pk)",
+            ExpressionAttributeValues={":orphan": {orphan}},
+        )
+    return pending
+
+
+def _cleanup_best_effort(table, key, artifact_id):
+    """_cleanup_orphans, never raising. Returns whether cleanup is still
+    pending: keys that couldn't be deleted, or a cleanup that failed itself
+    (e.g. DynamoDB throttling). Either way the keys stay in orphanS3Keys, so
+    a later call retries them."""
+    try:
+        return bool(_cleanup_orphans(table, key, artifact_id))
+    except (ClientError, BotoCoreError) as e:
+        code = e.response["Error"]["Code"] if isinstance(e, ClientError) else type(e).__name__
+        print(json.dumps({"event": "orphan_cleanup_failed", "artifactId": artifact_id, "code": code}))
+        return True
+
+
+def _tag_for_expiry(bucket, s3_key):
+    # Fallback for a failed delete: the lifecycle rule expires pending-tagged
+    # objects 7 days after they were created, so an old file goes within a
+    # day of this even if no later call retries the delete.
+    try:
+        s3.put_object_tagging(Bucket=bucket, Key=s3_key, Tagging={"TagSet": PENDING_TAGSET})
+    except (ClientError, BotoCoreError):
+        pass
+
+
+def _replaced_image(item):
+    return {
+        "artifactId": item["artifactId"],
+        "attemptId": item["attemptId"],
+        "status": item.get("status"),
+        "sha256": item.get("sha256"),
+        "sizeBytes": int(item["sizeBytes"]) if item.get("sizeBytes") is not None else None,
+        "originalFilename": item.get("originalFilename"),
+        "uploadedAt": item.get("uploadedAt"),
+        **image_fields.public_fields(item),
+    }
 
 
 def _complete_multipart(table, key, item):

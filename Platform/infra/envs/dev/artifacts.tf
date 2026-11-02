@@ -14,6 +14,9 @@
 #   POST /artifacts/view-urls                -> artifacts-get      (inline URLs for up to 100 ready images)
 #   PATCH /artifacts/{artifactId}            -> artifacts-update   (firmware reverseEngineeringStatus,
 #                                                                   image title/description/capturedAt)
+#   POST /artifacts/{artifactId}/replacement -> artifacts-presign  (start replacing an image's file)
+#   POST /artifacts/{artifactId}/replacement/complete
+#                                            -> artifacts-complete (verify, swap in, delete the old file)
 #
 # Images are ordinary artifacts with type = image (JPEG, PNG or WebP, at most
 # 25 MiB, single upload only); see _shared/python/image_fields.py.
@@ -185,12 +188,17 @@ resource "aws_iam_policy" "artifacts_complete" {
         # GetObject covers HeadObject and the ranged read of an image's
         # first bytes (file signature check); PutObject covers
         # CompleteMultipartUpload. s3:ListBucket is deliberately not granted
-        # (see complete-firmware).
+        # (see complete-firmware). DeleteObject removes an image's old file
+        # once a replacement is live (and replacement uploads that never
+        # went live); the code only deletes keys recorded in the artifact's
+        # orphanS3Keys. The bucket is unversioned, so this is permanent; with
+        # versioning enabled it would only add a delete marker.
         Effect = "Allow"
         Action = [
           "s3:GetObject",
           "s3:PutObject",
           "s3:PutObjectTagging",
+          "s3:DeleteObject",
           "s3:ListMultipartUploadParts",
         ]
         Resource = local.artifact_objects_arn
@@ -363,6 +371,18 @@ resource "aws_api_gateway_resource" "artifacts_artifact_id_retry" {
   path_part   = "retry"
 }
 
+resource "aws_api_gateway_resource" "artifacts_artifact_id_replacement" {
+  rest_api_id = module.api.rest_api_id
+  parent_id   = aws_api_gateway_resource.artifacts_artifact_id.id
+  path_part   = "replacement"
+}
+
+resource "aws_api_gateway_resource" "artifacts_artifact_id_replacement_complete" {
+  rest_api_id = module.api.rest_api_id
+  parent_id   = aws_api_gateway_resource.artifacts_artifact_id_replacement.id
+  path_part   = "complete"
+}
+
 resource "aws_api_gateway_resource" "artifacts_artifact_id_download" {
   rest_api_id = module.api.rest_api_id
   parent_id   = aws_api_gateway_resource.artifacts_artifact_id.id
@@ -426,6 +446,18 @@ locals {
       method      = "POST"
       path        = "artifacts/*/retry"
       fn          = module.artifacts_presign_fn
+    }
+    "artifacts-id-replacement-POST" = {
+      resource_id = aws_api_gateway_resource.artifacts_artifact_id_replacement.id
+      method      = "POST"
+      path        = "artifacts/*/replacement"
+      fn          = module.artifacts_presign_fn
+    }
+    "artifacts-id-replacement-complete-POST" = {
+      resource_id = aws_api_gateway_resource.artifacts_artifact_id_replacement_complete.id
+      method      = "POST"
+      path        = "artifacts/*/replacement/complete"
+      fn          = module.artifacts_complete_fn
     }
     "artifacts-id-PATCH" = {
       resource_id = aws_api_gateway_resource.artifacts_artifact_id.id

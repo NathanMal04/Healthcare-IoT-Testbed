@@ -179,6 +179,8 @@ checks that the caller owns the device or artifact before acting on it.
 | `GET` | `/artifacts/{artifactId}/download` | `artifacts-get` | Short-lived presigned download URL |
 | `PATCH` | `/artifacts/{artifactId}` | `artifacts-update` | Firmware `reverseEngineeringStatus`; image `title`, `description`, `capturedAt` |
 | `POST` | `/artifacts/view-urls` | `artifacts-get` | Short-lived inline URLs for up to 100 ready images |
+| `POST` | `/artifacts/{artifactId}/replacement` | `artifacts-presign` | Start replacing a ready image's file (presigned POST) |
+| `POST` | `/artifacts/{artifactId}/replacement/complete` | `artifacts-complete` | Verify the new file, swap it in, permanently delete the old one |
 
 `artifacts-verify` has no route: `artifacts-complete` invokes it asynchronously to check multipart uploads.
 
@@ -197,6 +199,11 @@ its file signature is checked on completion and it is displayed through `/artifa
 Images are uploaded and browsed from a device's **Images** tab. The gallery shows the original files (there are
 no thumbnails yet), so each card downloads and decodes a full photograph; pages hold 12 images and load lazily,
 but large photos still cost bandwidth and browser memory, especially on phones.
+An image's file can be **replaced** (from its card menu or the viewer) while the image keeps its id, details,
+tags and device links. The new file is verified before it goes live, and the old file is then **permanently
+deleted** (the bucket is unversioned and there is no version history). A job that was already given a URL for the
+old file may fail to download it after a replacement; new jobs use the new file. See
+[Replacing an image's file](Platform/infra/DATABASE.md#replacing-an-images-file).
 Files sent together form an **upload batch**, which can be listed on its own. Records and keys are described
 in [`Platform/infra/DATABASE.md`](Platform/infra/DATABASE.md).
 

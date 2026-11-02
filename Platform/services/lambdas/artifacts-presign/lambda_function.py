@@ -109,6 +109,8 @@ def handler(event, context):
             return _handle_parts(table, user_id, artifact_id, body)
         if resource == "/artifacts/{artifactId}/retry":
             return _handle_retry(table, user_id, artifact_id, body)
+        if resource == "/artifacts/{artifactId}/replacement":
+            return _handle_replacement(table, user_id, artifact_id, body)
     except RequestError as e:
         return _resp(e.status, {"error": e.message})
 
@@ -443,6 +445,113 @@ def _handle_retry(table, user_id, artifact_id, body):
     return _resp(200, {"artifactId": artifact_id, **_upload_instructions(updated)})
 
 
+# --- POST /artifacts/{artifactId}/replacement --------------------------------
+
+# Fields a replacement request may carry. Everything else about the image
+# (title, description, capturedAt, tags, devices, scope, artifact id) is kept
+# as it is, so other fields are refused rather than silently ignored.
+REPLACEMENT_FIELDS = {"originalFilename", "sizeBytes", "sha256", "mimeType", "expectedAttemptId"}
+
+
+def _handle_replacement(table, user_id, artifact_id, body):
+    """Starts replacing a ready image's file, keeping the artifact.
+
+    The new file is uploaded to its own key (artifacts/{id}/{replacementId})
+    and recorded as the artifact's pending `replacement`. The artifact keeps
+    pointing at its current, verified file until artifacts-complete has
+    verified the new one and swapped them; only then is the old object
+    deleted. A new request supersedes an unfinished one: the superseded
+    upload's key goes to `orphanS3Keys` for cleanup and its completion fails.
+    """
+    # Same rule as PATCH /artifacts/{id} and retry: the owner of a personal
+    # image, any member of a workspace image's workspace; 404 otherwise.
+    item = _get_owned_artifact(table, user_id, artifact_id)
+
+    unsupported = sorted(set(body) - REPLACEMENT_FIELDS)
+    if unsupported:
+        return _resp(400, {"error": f"Unsupported field(s): {', '.join(unsupported)}"})
+    if item.get("type") != image_fields.IMAGE_TYPE:
+        return _resp(400, {"error": "Only image artifacts can be replaced"})
+
+    expected = body.get("expectedAttemptId")
+    if not isinstance(expected, str) or not expected:
+        return _resp(400, {"error": "expectedAttemptId is required"})
+    if item.get("status") != "ready":
+        return _resp(409, {"error": "Only an image that has finished uploading can be replaced"})
+    if item.get("attemptId") != expected:
+        return _resp(409, {"error": "This image has changed since it was loaded (it may have been replaced); "
+                                    "reload it and try again"})
+
+    original_filename = _clean_original_filename(body.get("originalFilename"))
+    size_bytes = body.get("sizeBytes")
+    max_bytes = min(image_fields.MAX_IMAGE_SIZE_BYTES, SINGLE_UPLOAD_MAX_BYTES)
+    if not _is_int(size_bytes) or size_bytes <= 0:
+        return _resp(400, {"error": "sizeBytes must be a positive integer"})
+    if size_bytes > max_bytes:
+        return _resp(400, {"error": f"Images can be at most {max_bytes} bytes"})
+    sha256 = body.get("sha256")
+    if not isinstance(sha256, str) or not SHA256_PATTERN.match(sha256):
+        return _resp(400, {"error": "sha256 must be a 64-character lowercase hex string"})
+    try:
+        mime_type = image_fields.clean_mime_type(body.get("mimeType"))
+    except image_fields.FieldError as e:
+        return _resp(400, {"error": str(e)})
+
+    replacement_id = str(uuid.uuid4())
+    replacement = {
+        "replacementId": replacement_id,
+        "s3Key": _build_s3_key(artifact_id, replacement_id),
+        "sha256": sha256,
+        "sizeBytes": size_bytes,
+        "mimeType": mime_type,
+        "originalFilename": original_filename,
+        "requestedBy": user_id,
+        "requestedAt": _now(),
+    }
+
+    names = {"#st": "status", "#type": "type", "#rep": "replacement"}
+    values = {":rep": replacement, ":expected": expected, ":ready": "ready", ":image": image_fields.IMAGE_TYPE}
+    expression = "SET #rep = :rep"
+    condition = "attemptId = :expected AND #st = :ready AND #type = :image"
+    previous = item.get("replacement")
+    if previous:
+        # Supersedes the unfinished replacement this request saw (and only
+        # that one), keeping track of its object so it's cleaned up.
+        names["#rid"] = "replacementId"
+        values[":previous"] = previous.get("replacementId")
+        values[":orphans"] = {previous["s3Key"]}
+        expression += " ADD orphanS3Keys :orphans"
+        condition += " AND #rep.#rid = :previous"
+    else:
+        condition += " AND attribute_not_exists(#rep)"
+
+    try:
+        table.update_item(
+            Key={"pk": f"ARTIFACT#{artifact_id}", "sk": "METADATA"},
+            UpdateExpression=expression,
+            ConditionExpression=condition,
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+        )
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            return _resp(409, {"error": "This image was changed or another replacement started at the same "
+                                        "time; reload it and try again"})
+        raise
+
+    upload = _upload_instructions({
+        "type": image_fields.IMAGE_TYPE,
+        "uploadMode": "single",
+        "attemptId": replacement_id,
+        "s3Bucket": item["s3Bucket"],
+        "s3Key": replacement["s3Key"],
+        "sha256": sha256,
+        "sizeBytes": size_bytes,
+        "mimeType": mime_type,
+    })["upload"]
+    return _resp(200, {"artifactId": artifact_id, "replacementId": replacement_id, "upload": upload})
+
+
 # --- Upload instructions -----------------------------------------------------
 
 def _upload_instructions(item):
@@ -525,12 +634,7 @@ def _validate_file(raw):
     if not isinstance(raw, dict):
         raise RequestError(400, "Each file must be an object")
 
-    original_filename = raw.get("originalFilename")
-    if not isinstance(original_filename, str) or not original_filename.strip():
-        raise RequestError(400, "originalFilename is required")
-    original_filename = original_filename.strip()
-    if len(original_filename) > MAX_FILENAME_LENGTH or _has_control_chars(original_filename):
-        raise RequestError(400, "originalFilename is invalid")
+    original_filename = _clean_original_filename(raw.get("originalFilename"))
 
     name = raw.get("name")
     if name is None:
@@ -578,6 +682,15 @@ def _validate_file(raw):
         if present:
             raise RequestError(400, f"{', '.join(present)} only allowed for images")
     return spec
+
+
+def _clean_original_filename(raw):
+    if not isinstance(raw, str) or not raw.strip():
+        raise RequestError(400, "originalFilename is required")
+    value = raw.strip()
+    if len(value) > MAX_FILENAME_LENGTH or _has_control_chars(value):
+        raise RequestError(400, "originalFilename is invalid")
+    return value
 
 
 def _validate_image(raw, name, size_bytes):
