@@ -59,46 +59,63 @@ export default function EditorToolbar({ editor, disabled }: { editor: Editor; di
   const chain = () => editor.chain().focus();
 
   return (
-    <div
-      role="toolbar"
-      aria-label="Formatting"
-      className="flex flex-wrap items-center gap-1 border-b border-line px-2 py-1.5 bg-surface-muted/60 sticky top-0 z-10"
-    >
-      <label className="sr-only" htmlFor="re-notebook-style">
-        Text style
-      </label>
-      <select
-        id="re-notebook-style"
-        value={state.style}
-        disabled={off || state.codeBlock}
-        onChange={(e) => {
-          const value = e.target.value;
-          if (value === "paragraph") chain().setParagraph().run();
-          else chain().setHeading({ level: Number(value) as 1 | 2 | 3 }).run();
-        }}
-        className="h-8 rounded-md border border-line bg-white px-2 text-xs text-slate-700 disabled:opacity-50"
+    <div className="sticky top-0 z-10 border-y border-line bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/85">
+      <div
+        role="toolbar"
+        aria-label="Formatting"
+        className="mx-auto flex max-w-3xl flex-wrap items-center gap-x-1 gap-y-1 px-3 sm:px-8 py-1.5"
       >
-        {STYLES.map((s) => (
-          <option key={s.value} value={s.value}>
-            {s.label}
-          </option>
-        ))}
-      </select>
-      <Divider />
-      <Tool label="Bold" icon={Bold} active={state.bold} disabled={off} onClick={() => chain().toggleBold().run()} />
-      <Tool label="Italic" icon={Italic} active={state.italic} disabled={off} onClick={() => chain().toggleItalic().run()} />
-      <Tool label="Inline code" icon={Code} active={state.code} disabled={off} onClick={() => chain().toggleCode().run()} />
-      <Tool label={state.link ? "Edit link" : "Add link"} icon={Link2} active={state.link} disabled={off} onClick={() => setLinkOpen(true)} />
-      <Divider />
-      <Tool label="Bulleted list" icon={List} active={state.bulletList} disabled={off} onClick={() => chain().toggleBulletList().run()} />
-      <Tool label="Numbered list" icon={ListOrdered} active={state.orderedList} disabled={off} onClick={() => chain().toggleOrderedList().run()} />
-      <Tool label="Quote" icon={Quote} active={state.blockquote} disabled={off} onClick={() => chain().toggleBlockquote().run()} />
-      <Tool label="Code block" icon={SquareCode} active={state.codeBlock} disabled={off} onClick={() => chain().toggleCodeBlock().run()} />
-      <Divider />
-      <Tool label="Undo" icon={Undo2} disabled={off || !state.canUndo} onClick={() => chain().undo().run()} />
-      <Tool label="Redo" icon={Redo2} disabled={off || !state.canRedo} onClick={() => chain().redo().run()} />
+        <label className="sr-only" htmlFor="re-notebook-style">
+          Text style
+        </label>
+        <select
+          id="re-notebook-style"
+          value={state.style}
+          disabled={off || state.codeBlock}
+          onChange={(e) => {
+            const value = e.target.value;
+            if (value === "paragraph") chain().setParagraph().run();
+            else chain().setHeading({ level: Number(value) as 1 | 2 | 3 }).run();
+          }}
+          className="h-8 rounded-md border border-line bg-white px-2 text-xs font-medium text-slate-700 disabled:opacity-50"
+        >
+          {STYLES.map((s) => (
+            <option key={s.value} value={s.value}>
+              {s.label}
+            </option>
+          ))}
+        </select>
+        <Divider />
+        <Group label="Text">
+          <Tool label="Bold" icon={Bold} active={state.bold} disabled={off} onClick={() => chain().toggleBold().run()} />
+          <Tool label="Italic" icon={Italic} active={state.italic} disabled={off} onClick={() => chain().toggleItalic().run()} />
+          <Tool label="Inline code" icon={Code} active={state.code} disabled={off} onClick={() => chain().toggleCode().run()} />
+          <Tool label={state.link ? "Edit link" : "Add link"} icon={Link2} active={state.link} disabled={off} onClick={() => setLinkOpen(true)} />
+        </Group>
+        <Divider />
+        <Group label="Blocks">
+          <Tool label="Bulleted list" icon={List} active={state.bulletList} disabled={off} onClick={() => chain().toggleBulletList().run()} />
+          <Tool label="Numbered list" icon={ListOrdered} active={state.orderedList} disabled={off} onClick={() => chain().toggleOrderedList().run()} />
+          <Tool label="Quote" icon={Quote} active={state.blockquote} disabled={off} onClick={() => chain().toggleBlockquote().run()} />
+          <Tool label="Code block" icon={SquareCode} active={state.codeBlock} disabled={off} onClick={() => chain().toggleCodeBlock().run()} />
+        </Group>
+        <span className="ml-auto" aria-hidden="true" />
+        <Group label="History">
+          <Tool label="Undo" icon={Undo2} disabled={off || !state.canUndo} onClick={() => chain().undo().run()} />
+          <Tool label="Redo" icon={Redo2} disabled={off || !state.canRedo} onClick={() => chain().redo().run()} />
+        </Group>
 
-      {linkOpen && <LinkDialog editor={editor} onClose={() => setLinkOpen(false)} />}
+        {linkOpen && <LinkDialog editor={editor} onClose={() => setLinkOpen(false)} />}
+      </div>
+    </div>
+  );
+}
+
+/** Related tools, kept together when the toolbar wraps. */
+function Group({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div role="group" aria-label={label} className="flex items-center gap-0.5">
+      {children}
     </div>
   );
 }

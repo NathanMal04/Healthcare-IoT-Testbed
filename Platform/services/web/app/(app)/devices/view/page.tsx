@@ -2,7 +2,6 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
@@ -47,7 +46,7 @@ import {
   type CveSummary,
 } from "@/lib/cves";
 import { countLabel, cvesForDevice } from "@/lib/dashboard";
-import { cveHref, deviceHref } from "@/lib/routes";
+import { cveHref, deviceHref, legacyNotebookHref, notebookHref } from "@/lib/routes";
 import { useScopeLock, useWorkspace } from "@/context/WorkspaceContext";
 import { isWorkspaceUnavailable, scopeKey, scopeWorkspaceId, type Scope } from "@/lib/workspaces";
 import ReverseEngineeringStatusSelect from "@/app/components/ReverseEngineeringStatusSelect";
@@ -63,12 +62,6 @@ import DeviceProfilePicture from "@/app/components/images/DeviceProfilePicture";
 import { useImageUrls } from "@/app/components/images/useImageData";
 import { useProfileImage } from "@/app/components/images/useProfileImage";
 import { imageTitle } from "@/lib/images";
-
-// The RE Notebook loads its editor (Tiptap) only when its tab is opened.
-const DeviceNotebook = dynamic(() => import("@/app/components/renotebook/DeviceNotebook"), {
-  ssr: false,
-  loading: () => <LoadingState label="Loading the RE Notebook…" />,
-});
 import {
   FirmwareRetryDialog,
   FirmwareTable,
@@ -110,8 +103,14 @@ export default function DeviceViewPage() {
 
 function DeviceViewRoute() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { scope, scopeReady } = useWorkspace();
   const deviceId = searchParams.get("id") ?? "";
+  // The RE Notebook has its own page now; older links to its tab go there.
+  const notebookRedirect = legacyNotebookHref(searchParams);
+  useEffect(() => {
+    if (notebookRedirect) router.replace(notebookRedirect);
+  }, [notebookRedirect, router]);
   const tabParam = searchParams.get("tab");
   const initialTab: TabId = searchParams.get("cve")
     ? "cves"
@@ -119,6 +118,7 @@ function DeviceViewRoute() {
       ? (tabParam as TabId)
       : "overview";
 
+  if (notebookRedirect) return <LoadingState label="Opening the RE Notebook…" />;
   if (!scopeReady) return <LoadingState label="Loading workspace…" />;
   if (!deviceId) {
     return (
@@ -140,7 +140,6 @@ function DeviceViewRoute() {
       key={`${scopeKey(scope)}:${deviceId}`}
       deviceId={deviceId}
       initialTab={initialTab}
-      initialEntryId={searchParams.get("entry")}
     />
   );
 }
@@ -148,11 +147,9 @@ function DeviceViewRoute() {
 function DeviceView({
   deviceId,
   initialTab,
-  initialEntryId,
 }: {
   deviceId: string;
   initialTab: TabId;
-  initialEntryId: string | null;
 }) {
   const router = useRouter();
   // A linked CVE opened from the CVEs tab; in the URL so Back returns to the list.
@@ -270,6 +267,11 @@ function DeviceView({
   }, [device, reloadFirmware]);
 
   function selectTab(next: TabId) {
+    // The RE Notebook is a full-screen workspace of its own.
+    if (next === "notebook") {
+      router.push(notebookHref(deviceId));
+      return;
+    }
     setTab(next);
     router.replace(deviceHref(deviceId, next === "overview" ? undefined : next), { scroll: false });
   }
@@ -416,15 +418,6 @@ function DeviceView({
               // the picture being chosen again.
               if (image.artifactId === device.profileImageArtifactId) refreshProfileFile(image.artifactId);
             }}
-          />
-        )}
-        {tab === "notebook" && (
-          <DeviceNotebook
-            device={device}
-            initialEntryId={initialEntryId}
-            onEntryChange={(entryId) =>
-              router.replace(deviceHref(deviceId, "notebook", { entry: entryId ?? undefined }), { scroll: false })
-            }
           />
         )}
         {tab === "cves" && openCveId && (

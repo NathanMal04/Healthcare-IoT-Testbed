@@ -46,6 +46,18 @@ interface EditorProps {
   onStructureChanged: () => void;
   /** Open another entry (e.g. the copy of a recovered version). */
   onOpenEntry: (entryId: string | null) => void;
+  /** Actions shown in the entry's header (e.g. its menu). */
+  headerActions?: React.ReactNode;
+  /**
+   * The save state, for a page that shows it elsewhere (its top bar); null
+   * once the editor closes. Without it, the header shows the state.
+   */
+  onSaveState?: (save: SaveStateReport | null) => void;
+}
+
+export interface SaveStateReport {
+  state: AutosaveState;
+  retry: () => void;
 }
 
 type Loaded = { kind: "loaded"; entry: NotebookEntry; doc: NotebookDoc; draft: EntryDraft | null };
@@ -119,6 +131,8 @@ function LoadedEditor({
   onSaved,
   onStructureChanged,
   onOpenEntry,
+  headerActions,
+  onSaveState,
 }: EditorProps & { scope: DraftScope; loaded: Loaded }) {
   const title = listed.title;
   const [state, setState] = useState<AutosaveState>({
@@ -133,8 +147,14 @@ function LoadedEditor({
   const [recovery, setRecovery] = useState<EntryDraft | null>(loaded.draft);
   const autosaveRef = useRef<EntryAutosave | null>(null);
   const copyIdRef = useRef<string | null>(null);
-  const callbacks = useRef({ onSaved, onHandle });
-  callbacks.current = { onSaved, onHandle };
+  const callbacks = useRef({ onSaved, onHandle, onSaveState });
+  callbacks.current = { onSaved, onHandle, onSaveState };
+
+  // Reported to the page (its top bar shows it), and cleared on close.
+  useEffect(() => {
+    callbacks.current.onSaveState?.({ state, retry: () => autosaveRef.current?.retry() });
+  }, [state]);
+  useEffect(() => () => callbacks.current.onSaveState?.(null), []);
 
   const extensions = useMemo(() => notebookExtensions(), []);
   const editor = useEditor({
@@ -145,7 +165,7 @@ function LoadedEditor({
     editable: !loaded.draft,
     editorProps: {
       attributes: {
-        class: "re-notebook-doc min-h-[18rem] px-4 sm:px-6 py-4 focus:outline-none",
+        class: "re-notebook-doc min-h-[24rem] mx-auto max-w-3xl px-5 sm:px-10 pt-5 pb-16 focus:outline-none",
         "aria-label": `Content of ${title}`,
         "aria-multiline": "true",
         role: "textbox",
@@ -254,17 +274,38 @@ function LoadedEditor({
   }
 
   const meta = loaded.entry;
+  // The listed entry is kept current by the page (saves, renames); the loaded one is as opened.
+  const changedAt = listed.contentUpdatedAt ?? listed.updatedAt ?? meta.contentUpdatedAt ?? meta.updatedAt;
+  const changedBy = listed.contentUpdatedByName ?? listed.updatedByName ?? meta.contentUpdatedByName;
+  const sectionTitle = sections.find((s) => s.sectionId === listed.sectionId)?.title;
   return (
     <div className="flex flex-col min-w-0">
-      <div className="px-4 sm:px-6 pt-4 pb-3 border-b border-line flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="text-lg font-semibold text-slate-900 break-words">{title}</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Created by {meta.createdByName ?? "unknown"} · {formatDate(meta.createdAt)}
+      <header className="mx-auto w-full max-w-3xl px-5 sm:px-10 pt-6 sm:pt-8 pb-4">
+        <div className="flex items-center gap-3">
+          <p className="min-w-0 flex-1 truncate text-sm text-slate-500">
+            {sectionTitle && (
+              <>
+                <span className="font-medium text-slate-600">{sectionTitle}</span>
+                <span aria-hidden="true"> · </span>
+              </>
+            )}
+            <span title={formatDate(changedAt)}>Updated {formatDate(changedAt)}</span>
+            {changedBy && <span> by {changedBy}</span>}
           </p>
+          {headerActions}
         </div>
-        <SaveStatus state={state} onRetry={() => autosaveRef.current?.retry()} />
-      </div>
+        <h2 className="mt-2 text-2xl sm:text-[1.75rem] sm:leading-tight font-semibold tracking-tight text-slate-900 break-words">
+          {title}
+        </h2>
+        <p className="mt-1.5 text-xs text-slate-500">
+          Created by {meta.createdByName ?? "unknown"} · {formatDate(meta.createdAt)}
+        </p>
+        {!onSaveState && (
+          <div className="mt-3">
+            <SaveStatus state={state} onRetry={() => autosaveRef.current?.retry()} />
+          </div>
+        )}
+      </header>
 
       {recovery && (
         <Alert
