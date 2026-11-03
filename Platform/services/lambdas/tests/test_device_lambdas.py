@@ -1014,6 +1014,14 @@ class GetDeviceTests(unittest.TestCase):
         self.assertEqual({k: device[k] for k in DETAILS}, DETAILS)
         self.assertFalse(set(device) & INTERNAL_FIELDS)
 
+    def test_list_returns_updated_at_only_when_the_device_has_one(self):
+        metadata_of(self.table, DEVICE_A)["updatedAt"] = "2026-10-05T12:00:00Z"
+        [device] = response_body(self.module.handler(event(), None))["devices"]
+        self.assertEqual(device["updatedAt"], "2026-10-05T12:00:00Z")
+        del metadata_of(self.table, DEVICE_A)["updatedAt"]
+        [device] = response_body(self.module.handler(event(), None))["devices"]
+        self.assertNotIn("updatedAt", device)
+
     def test_list_falls_back_to_the_link_name_without_metadata(self):
         del self.table.items[(f"DEVICE#{DEVICE_A}", "METADATA")]
         [device] = response_body(self.module.handler(event(), None))["devices"]

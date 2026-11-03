@@ -28,9 +28,10 @@ UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
 PROFILE_IMAGE_FIELD = "profileImageArtifactId"
 
 # What the lists read from each DEVICE#/METADATA. "name" and "type" are
-# DynamoDB reserved words.
+# DynamoDB reserved words. updatedAt is set by create-device and every
+# update-device write; devices without one simply list without it.
 LIST_PROJECTION = ", ".join(
-    ["pk", "#name", "#type", "reverseEngineeringStatus", "workspaceId", PROFILE_IMAGE_FIELD,
+    ["pk", "#name", "#type", "reverseEngineeringStatus", "workspaceId", PROFILE_IMAGE_FIELD, "updatedAt",
      *device_fields.OPTIONAL_FIELDS]
 )
 
@@ -163,6 +164,8 @@ def _list_fields(device_id, item, fallback_name=None):
     fields.update(device_fields.optional_values(item))
     if isinstance(item.get(PROFILE_IMAGE_FIELD), str) and UUID_PATTERN.match(item[PROFILE_IMAGE_FIELD]):
         fields[PROFILE_IMAGE_FIELD] = item[PROFILE_IMAGE_FIELD]
+    if isinstance(item.get("updatedAt"), str):
+        fields["updatedAt"] = item["updatedAt"]
     return fields
 
 

@@ -4,9 +4,14 @@ import { useEffect, useState } from "react";
 import { Cpu } from "lucide-react";
 import type { ImageUrls } from "./useImageData";
 
+const ICON_FALLBACK = "bg-brand-50 text-brand-600";
+
 const SIZES = {
-  sm: { box: "h-8 w-8 rounded-lg", icon: "h-4 w-4" },
-  lg: { box: "h-16 w-16 sm:h-20 sm:w-20 rounded-xl", icon: "h-7 w-7 sm:h-8 sm:w-8" },
+  sm: { box: "h-8 w-8 rounded-lg", icon: "h-4 w-4", fallback: ICON_FALLBACK },
+  md: { box: "h-10 w-10 rounded-lg", icon: "h-5 w-5", fallback: ICON_FALLBACK },
+  lg: { box: "h-16 w-16 sm:h-20 sm:w-20 rounded-xl", icon: "h-7 w-7 sm:h-8 sm:w-8", fallback: ICON_FALLBACK },
+  /** Fills its container (e.g. a device card's image area), cropped to cover it. */
+  fill: { box: "h-full w-full", icon: "h-10 w-10", fallback: "bg-gradient-to-br from-surface-muted to-brand-50 text-brand-500/60" },
 } as const;
 
 /**
@@ -47,7 +52,7 @@ export default function ProfileAvatar({
   if (!src) {
     return (
       <span
-        className={`${sizing.box} shrink-0 bg-brand-50 text-brand-600 flex items-center justify-center ${className}`}
+        className={`${sizing.box} shrink-0 ${sizing.fallback} flex items-center justify-center ${className}`}
         role="img"
         aria-label={artifactId && !unavailable ? `Loading ${alt}` : `${alt} (no picture)`}
       >

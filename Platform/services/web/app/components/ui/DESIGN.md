@@ -61,6 +61,7 @@ Text is `slate-900` (headings), `slate-800` (body emphasis), `slate-700`
 | Pattern | Parts | Example |
 | --- | --- | --- |
 | List | `PageHeader`, `Toolbar` / filters, `DataTable` | Devices |
+| Card grid | The same toolbar and data as a list, with a list/grid toggle remembered per user; cards open their record through a stretched title link, with the ⋮ menu layered above it | Devices (`app/components/devices`) |
 | Master-detail | `SplitView` (detail beside the list on large screens, a `Sheet` below them) | Vulnerabilities, Runs |
 | Record | `PageHeader`, vertical `Tabs`, `DescriptionList`, `PageSection` | Device workspace |
 | Full-screen workspace | Own top bar, resizable panels, Focus Mode | RE Notebook |
