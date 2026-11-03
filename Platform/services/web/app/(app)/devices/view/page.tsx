@@ -2,7 +2,6 @@
 
 import { Suspense, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { initialDeviceSection } from "@/lib/deviceView";
 import { legacyNotebookHref } from "@/lib/routes";
 import { scopeKey } from "@/lib/workspaces";
 import { useWorkspace } from "@/context/WorkspaceContext";
@@ -35,11 +34,5 @@ function DeviceViewRoute() {
   if (!deviceId) return <NoDeviceSelected />;
   // Keyed on the scope and device: switching workspace remounts the view, so
   // nothing from the previous scope carries over.
-  return (
-    <DeviceView
-      key={`${scopeKey(scope)}:${deviceId}`}
-      deviceId={deviceId}
-      initialSection={initialDeviceSection(searchParams)}
-    />
-  );
+  return <DeviceView key={`${scopeKey(scope)}:${deviceId}`} deviceId={deviceId} />;
 }

@@ -1,75 +1,78 @@
 "use client";
 
+import { createContext, useCallback, useContext, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, ChevronRight, ExternalLink } from "lucide-react";
+import { ArrowLeft, ExternalLink } from "lucide-react";
 import type { Cve } from "@/lib/cves";
 import { cveHref, deviceHref } from "@/lib/routes";
 import CveDetails from "@/app/components/CveDetails";
 import { ButtonLink } from "@/app/components/ui";
 
+/** Tells the page the open CVE's ID once it has loaded (for the top bar's breadcrumb). */
+const CveLabelContext = createContext<(label: string | undefined) => void>(() => undefined);
+
 /**
- * A linked CVE's details, opened from the device's CVEs section (`cve=` in
- * the URL, so Back returns to the list). Deleting it returns to the list.
+ * A linked CVE's details, opened from the device's Vulnerabilities section
+ * (`cve=` in the URL, so Back returns to the list). Deleting it returns to
+ * the list. Its place in the device is shown by the top bar's breadcrumb.
  */
 export default function DeviceCveDetail({
   deviceId,
   cveRecordId,
   onChanged,
   onDeleted,
+  onLabel,
 }: {
   deviceId: string;
   cveRecordId: string;
   onChanged: (cve: Cve) => void;
   onDeleted: (cveRecordId: string) => void;
+  /** The CVE ID of `cveRecordId`, once known. */
+  onLabel: (cveRecordId: string, label: string | undefined) => void;
 }) {
   const router = useRouter();
+  const reportLabel = useCallback((label: string | undefined) => onLabel(cveRecordId, label), [onLabel, cveRecordId]);
   return (
-    <CveDetails
-      key={cveRecordId}
-      cveRecordId={cveRecordId}
-      Frame={DeviceCveFrame}
-      backAction={
-        <ButtonLink href={deviceHref(deviceId, "cves")} variant="secondary" size="sm">
-          Back to CVEs
-        </ButtonLink>
-      }
-      onChanged={onChanged}
-      onDeleted={(deleted) => {
-        onDeleted(deleted);
-        router.push(deviceHref(deviceId, "cves"));
-      }}
-    />
+    <CveLabelContext.Provider value={reportLabel}>
+      <CveDetails
+        key={cveRecordId}
+        cveRecordId={cveRecordId}
+        Frame={DeviceCveFrame}
+        backAction={
+          <ButtonLink href={deviceHref(deviceId, "cves")} variant="secondary" size="sm">
+            Back to linked vulnerabilities
+          </ButtonLink>
+        }
+        onChanged={onChanged}
+        onDeleted={(deleted) => {
+          onDeleted(deleted);
+          router.push(deviceHref(deviceId, "cves"));
+        }}
+      />
+    </CveLabelContext.Provider>
   );
 }
 
-/** Keeps a linked CVE's details inside the device: the way back is its CVE list. */
+/** Keeps a linked CVE's details inside the device: the way back is its Vulnerabilities list. */
 function DeviceCveFrame({ cveId, children }: { cveId?: string; children: React.ReactNode }) {
   const searchParams = useSearchParams();
   const deviceId = searchParams.get("id") ?? "";
   const cveRecordId = searchParams.get("cve") ?? "";
   const listHref = deviceHref(deviceId, "cves");
+  const reportLabel = useContext(CveLabelContext);
+  useEffect(() => {
+    reportLabel(cveId);
+  }, [cveId, reportLabel]);
   return (
     <div>
-      {/* The top bar's breadcrumb is the page's navigation landmark; this trail is a visual aid. */}
-      <div className="flex flex-wrap items-center gap-1 text-xs text-slate-400">
-        <Link href={listHref} className="hover:text-brand-700">
-          CVEs
-        </Link>
-        {cveId && (
-          <>
-            <ChevronRight className="h-3.5 w-3.5 text-slate-300" aria-hidden="true" />
-            <span className="font-mono text-slate-600">{cveId}</span>
-          </>
-        )}
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-2 mt-3 mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <Link
           href={listHref}
           className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-brand-700"
         >
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-          Back to CVEs
+          Back to linked vulnerabilities
         </Link>
         {cveRecordId && (
           <Link

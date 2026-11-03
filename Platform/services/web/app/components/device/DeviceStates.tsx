@@ -2,7 +2,8 @@
 
 import { Cpu } from "lucide-react";
 import { ButtonLink, Card, EmptyState, ErrorState, PageHeader } from "@/app/components/ui";
-import { DEVICES_BACK } from "./DeviceHeader";
+
+const DEVICES_BACK = { href: "/devices", label: "Devices" };
 
 function BackToDevices() {
   return (

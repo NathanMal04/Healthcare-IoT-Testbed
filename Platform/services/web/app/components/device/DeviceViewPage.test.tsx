@@ -10,11 +10,41 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 
 // --- Navigation ------------------------------------------------------------------
 
-const nav = vi.hoisted(() => ({ search: "", push: vi.fn(), replace: vi.fn() }));
-vi.mock("next/navigation", () => ({
-  usePathname: () => "/devices/view",
-  useRouter: () => ({ push: nav.push, replace: nav.replace }),
-  useSearchParams: () => new URLSearchParams(nav.search),
+// A small stand-in for the app router: the current query string, which
+// push/replace (and the tests' own "browser" steps) change and the page
+// re-renders from, as it does with the real useSearchParams.
+const nav = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
+  const state = {
+    search: "",
+    push: vi.fn(),
+    replace: vi.fn(),
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    /** Moves to another device page URL, as a link, Back or Forward would. */
+    go(search: string) {
+      state.search = search;
+      listeners.forEach((l) => l());
+    },
+  };
+  return state;
+});
+vi.mock("next/navigation", async () => {
+  const { useMemo, useSyncExternalStore } = await import("react");
+  return {
+    usePathname: () => "/devices/view",
+    useRouter: () => ({ push: nav.push, replace: nav.replace }),
+    useSearchParams: () => {
+      const search = useSyncExternalStore(nav.subscribe, () => nav.search);
+      return useMemo(() => new URLSearchParams(search), [search]);
+    },
+  };
+});
+const auth = vi.hoisted(() => ({ userId: "user-1" }));
+vi.mock("@/context/AuthContext", () => ({
+  useAuth: () => ({ user: { userId: auth.userId }, loading: false }),
 }));
 
 // --- Workspace ---------------------------------------------------------------------
@@ -22,13 +52,41 @@ vi.mock("next/navigation", () => ({
 const workspace = vi.hoisted(() => ({
   state: {} as Record<string, unknown>,
   locks: [] as boolean[],
+  /** Locks currently held, and how many have been released. */
+  held: 0,
+  released: 0,
 }));
-vi.mock("@/context/WorkspaceContext", () => ({
-  useWorkspace: () => workspace.state,
-  useScopeLock: (active: boolean) => {
-    workspace.locks.push(active);
-  },
-}));
+// useScopeLock records each value it's given, and reports a held lock to the
+// nearest ScopeLockReporter, as the real context does.
+vi.mock("@/context/WorkspaceContext", async () => {
+  const React = await import("react");
+  const Reporter = React.createContext<((delta: number) => void) | null>(null);
+  return {
+    useWorkspace: () => workspace.state,
+    useScopeLock: (active: boolean) => {
+      workspace.locks.push(active);
+      const report = React.useContext(Reporter);
+      React.useEffect(() => {
+        if (!active) return;
+        workspace.held++;
+        report?.(1);
+        return () => {
+          workspace.held--;
+          workspace.released++;
+          report?.(-1);
+        };
+      }, [active, report]);
+    },
+    ScopeLockReporter: ({ onChange, children }: { onChange: (locked: boolean) => void; children: React.ReactNode }) => {
+      const [held, setHeld] = React.useState(0);
+      const report = React.useCallback((delta: number) => setHeld((n) => n + delta), []);
+      React.useEffect(() => {
+        onChange(held > 0);
+      }, [held, onChange]);
+      return React.createElement(Reporter.Provider, { value: report }, children);
+    },
+  };
+});
 
 const crumbs = vi.hoisted(() => ({ calls: [] as unknown[] }));
 vi.mock("@/app/components/shell/ShellContext", () => ({
@@ -119,9 +177,23 @@ function recordingStub(name: string, render: (props: Record<string, unknown>) =>
   };
 }
 
+/** A stand-in upload that holds the workspace while "running", like the real uploaders. */
+function TestUpload({ name }: { name: string }) {
+  const [running, setRunning] = useStateForStubs(false);
+  useScopeLockForStubs(running);
+  return (
+    <button type="button" onClick={() => setRunning(!running)}>
+      {running ? `Finish ${name}` : `Start ${name}`}
+    </button>
+  );
+}
 vi.mock(
   "@/app/components/firmware/FirmwareUploadDialog",
-  recordingStub("FirmwareUploadDialog", () => <div role="dialog" aria-label="Upload firmware dialog" />)
+  recordingStub("FirmwareUploadDialog", () => (
+    <div role="dialog" aria-label="Upload firmware dialog">
+      <TestUpload name="firmware upload" />
+    </div>
+  ))
 );
 vi.mock(
   "@/app/components/EditDeviceDialog",
@@ -129,7 +201,12 @@ vi.mock(
 );
 vi.mock(
   "@/app/components/ArtifactUploader",
-  recordingStub("ArtifactUploader", (p) => <div data-testid="artifact-uploader">{String(p.fixedType ?? "all")}</div>)
+  recordingStub("ArtifactUploader", (p) => (
+    <div data-testid="artifact-uploader">
+      {String(p.fixedType ?? "all")}
+      <TestUpload name="artifact upload" />
+    </div>
+  ))
 );
 vi.mock(
   "@/app/components/CveDetails",
@@ -181,11 +258,14 @@ vi.mock("@/app/components/images/useImageData", async (importOriginal) => ({
   useImageUrls: () => stubs.imageUrls,
 }));
 
+import { useState as useStateForStubs } from "react";
+import { useScopeLock as useScopeLockForStubs } from "@/context/WorkspaceContext";
 import DeviceViewPage from "@/app/(app)/devices/view/page";
 import { ApiError } from "@/lib/api";
 import type { Device } from "@/lib/devices";
 import type { Artifact } from "@/lib/artifacts";
 import type { Cve, CveSummary } from "@/lib/cves";
+import { axeViolations } from "@/app/components/ui/testing/axe";
 
 // --- Fixtures ----------------------------------------------------------------------
 
@@ -261,10 +341,21 @@ function setScope(scope: Record<string, unknown> = { kind: "personal" }, patch: 
 }
 
 beforeEach(() => {
+  localStorage.clear();
+  auth.userId = "user-1";
+  setViewport(null);
   nav.search = `id=${DEVICE_ID}`;
   nav.push.mockReset();
   nav.replace.mockReset();
+  // Links within the device page change its URL, like the app router.
+  const follow = (href: string) => {
+    if (href.startsWith("/devices/view?")) nav.go(href.slice("/devices/view?".length));
+  };
+  nav.push.mockImplementation(follow);
+  nav.replace.mockImplementation(follow);
   workspace.locks = [];
+  workspace.held = 0;
+  workspace.released = 0;
   crumbs.calls = [];
   stubs.props = {};
   stubs.mounts = {};
@@ -279,6 +370,31 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+// --- Viewport ----------------------------------------------------------------------
+
+const viewport = vi.hoisted(() => ({ wide: true, listeners: new Set<() => void>() }));
+/** `wide`: 1280px and wider; null: no media queries at all (the default in jsdom). */
+function setViewport(wide: boolean | null) {
+  viewport.listeners.clear();
+  if (wide === null) {
+    delete (window as { matchMedia?: unknown }).matchMedia;
+    return;
+  }
+  viewport.wide = wide;
+  window.matchMedia = ((query: string) => ({
+    get matches() {
+      return query === "(min-width: 1280px)" ? viewport.wide : true;
+    },
+    media: query,
+    addEventListener: (_: string, l: () => void) => viewport.listeners.add(l),
+    removeEventListener: (_: string, l: () => void) => viewport.listeners.delete(l),
+  })) as unknown as typeof window.matchMedia;
+}
+function resize(wide: boolean) {
+  viewport.wide = wide;
+  act(() => viewport.listeners.forEach((l) => l()));
+}
+
 async function renderPage(search = `id=${DEVICE_ID}`) {
   nav.search = search;
   const view = render(<DeviceViewPage />);
@@ -286,7 +402,10 @@ async function renderPage(search = `id=${DEVICE_ID}`) {
   return view;
 }
 
-const tab = (name: RegExp | string) => screen.getByRole("tab", { name });
+const sectionNav = () => screen.getByRole("navigation", { name: "Device sections" });
+const sectionLink = (label: string) => within(sectionNav()).getByRole("link", { name: new RegExp(`^${label}`) });
+const currentSection = () => within(sectionNav()).getByRole("link", { current: "page" });
+const href = (search = "") => `/devices/view?id=${DEVICE_ID}${search}`;
 
 // --- Routing and deep links -------------------------------------------------------
 
@@ -320,29 +439,61 @@ describe("Device page routing", () => {
     ["&tab=firmware", "Firmware"],
     ["&tab=artifacts", "Artifacts"],
     ["&tab=images", "Images"],
-    ["&tab=cves", "CVEs"],
+    ["&tab=cves", "Vulnerabilities"],
     ["&tab=unknown", "Overview"],
-    ["&cve=rec-0001", "CVEs"],
-    ["&tab=firmware&cve=rec-0001", "CVEs"],
+    ["&cve=rec-0001", "Vulnerabilities"],
+    ["&tab=firmware&cve=rec-0001", "Vulnerabilities"],
   ])("opens the section a link names (%s → %s)", async (extra, section) => {
     await renderPage(`id=${DEVICE_ID}${extra}`);
-    expect(screen.getByRole("tab", { selected: true }).textContent).toMatch(new RegExp(`^${section}`));
+    expect(currentSection().textContent).toMatch(new RegExp(`^${section}`));
   });
 
-  it("switches sections in place, replacing the URL without scrolling; the notebook opens its own page", async () => {
+  it("links every section, Vulnerabilities as tab=cves and the RE Notebook to its own page", async () => {
     await renderPage();
-    fireEvent.click(tab(/^Firmware/));
-    expect(nav.replace).toHaveBeenLastCalledWith(`/devices/view?id=${DEVICE_ID}&tab=firmware`, { scroll: false });
-    expect(screen.getByRole("tab", { selected: true }).textContent).toMatch(/^Firmware/);
-    fireEvent.click(tab(/^CVEs/));
-    expect(nav.replace).toHaveBeenLastCalledWith(`/devices/view?id=${DEVICE_ID}&tab=cves`, { scroll: false });
-    fireEvent.click(tab("Overview"));
-    expect(nav.replace).toHaveBeenLastCalledWith(`/devices/view?id=${DEVICE_ID}`, { scroll: false });
+    await waitFor(() => expect(sectionLink("Firmware").textContent).toBe("Firmware (2)"));
+    const links = within(sectionNav()).getAllByRole("link");
+    expect(links.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+      ["Overview", href()],
+      ["Firmware (2)", href("&tab=firmware")],
+      ["Artifacts", href("&tab=artifacts")],
+      ["Images", href("&tab=images")],
+      ["Vulnerabilities (2)", href("&tab=cves")],
+      ["RE Notebook, opens full screen", `/devices/notebook?id=${DEVICE_ID}`],
+    ]);
+    expect(currentSection().textContent).toBe("Overview");
     expect(nav.push).not.toHaveBeenCalled();
+    expect(nav.replace).not.toHaveBeenCalled();
+  });
 
-    fireEvent.click(tab("RE Notebook"));
-    expect(nav.push).toHaveBeenCalledWith(`/devices/notebook?id=${DEVICE_ID}`);
-    expect(screen.getByRole("tab", { selected: true }).textContent).toBe("Overview");
+  it("shows whichever section the URL names, so Back and Forward move between sections", async () => {
+    await renderPage();
+    expect(screen.getByText("Device information")).toBeTruthy();
+    act(() => nav.go(`id=${DEVICE_ID}&tab=firmware`));
+    expect(currentSection().textContent).toMatch(/^Firmware/);
+    expect(await screen.findByText("pump-2.4.bin")).toBeTruthy();
+    act(() => nav.go(`id=${DEVICE_ID}&tab=cves`));
+    expect(currentSection().textContent).toMatch(/^Vulnerabilities/);
+    expect(screen.getByText("Linked vulnerabilities")).toBeTruthy();
+    // Back, twice.
+    act(() => nav.go(`id=${DEVICE_ID}&tab=firmware`));
+    expect(screen.getByText("pump-2.4.bin")).toBeTruthy();
+    act(() => nav.go(`id=${DEVICE_ID}`));
+    expect(screen.getByText("Device information")).toBeTruthy();
+    // The device itself isn't requested again.
+    expect(api.getDevice).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the open section in the top bar's breadcrumb", async () => {
+    await renderPage(`id=${DEVICE_ID}&tab=images`);
+    const device = [
+      { label: "Devices", href: "/devices" },
+      { label: "Infusion Pump X", href: href() },
+    ];
+    expect(crumbs.calls.at(-1)).toEqual([...device, { label: "Images" }]);
+    act(() => nav.go(`id=${DEVICE_ID}&tab=cves`));
+    expect(crumbs.calls.at(-1)).toEqual([...device, { label: "Vulnerabilities" }]);
+    act(() => nav.go(`id=${DEVICE_ID}`));
+    expect(crumbs.calls.at(-1)).toEqual([...device, { label: "Overview" }]);
   });
 });
 
@@ -368,14 +519,23 @@ describe("Device page loading", () => {
 
   it("shows the device's header, access, counts, and names it in the breadcrumb", async () => {
     await renderPage();
-    expect(screen.getByText("Device · Infusion pump")).toBeTruthy();
-    expect(screen.getByText("Your access: owner")).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Devices/ }).getAttribute("href")).toBe("/devices");
+    expect(screen.getByText("Philips · MX800 · Infusion pump")).toBeTruthy();
+    const header = document.querySelector("header")!;
+    expect(header.textContent).toContain("Your access: owner");
+    expect(within(header).getByText("In-Progress")).toBeTruthy();
+    expect(within(header).getByText("Personal")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open RE Notebook" }).getAttribute("href")).toBe(
+      `/devices/notebook?id=${DEVICE_ID}`
+    );
     expect(screen.getByTestId("profile-picture")).toBeTruthy();
     expect(stubs.props.DeviceProfilePicture.canEdit).toBe(true);
-    await waitFor(() => expect(tab(/^Firmware/).textContent).toBe("Firmware2"));
-    expect(tab(/^CVEs/).textContent).toBe("CVEs2");
-    expect(crumbs.calls.at(-1)).toEqual([{ label: "Devices", href: "/devices" }, { label: "Infusion Pump X" }]);
+    await waitFor(() => expect(sectionLink("Firmware").textContent).toBe("Firmware (2)"));
+    expect(sectionLink("Vulnerabilities").textContent).toBe("Vulnerabilities (2)");
+    expect(crumbs.calls.at(-1)).toEqual([
+      { label: "Devices", href: "/devices" },
+      { label: "Infusion Pump X", href: href() },
+      { label: "Overview" },
+    ]);
   });
 
   it("treats a device of another scope as not found, and loads no firmware for it", async () => {
@@ -422,9 +582,9 @@ describe("Device page loading", () => {
     await waitFor(() => expect(stubs.props.CveList).toBeTruthy());
     api.listCves.mockResolvedValueOnce([cve("0001", [DEVICE_ID])]);
     await act(async () => (stubs.props.CveList.onRefresh as () => void)());
-    expect(tab(/^CVEs/).textContent).toBe("CVEs1");
+    expect(sectionLink("Vulnerabilities").textContent).toBe("Vulnerabilities (1)");
     await act(async () => finishFirst(CVES));
-    expect(tab(/^CVEs/).textContent).toBe("CVEs1");
+    expect(sectionLink("Vulnerabilities").textContent).toBe("Vulnerabilities (1)");
   });
 
   it("reloads the firmware whenever the device record changes", async () => {
@@ -505,8 +665,10 @@ describe("Device overview", () => {
     await waitFor(() => expect(tile("Artifacts").textContent).toContain("1+"));
     expect(tile("Linked CVEs").textContent).toContain("2");
     fireEvent.click(tile("Artifacts"));
-    expect(nav.replace).toHaveBeenLastCalledWith(`/devices/view?id=${DEVICE_ID}&tab=artifacts`, { scroll: false });
-    expect(screen.getByRole("tab", { selected: true }).textContent).toBe("Artifacts");
+    // A history entry, like the navigation's links.
+    expect(nav.push).toHaveBeenLastCalledWith(href("&tab=artifacts"), { scroll: false });
+    expect(nav.replace).not.toHaveBeenCalled();
+    expect(currentSection().textContent).toBe("Artifacts");
   });
 
   it("saves a new research status, keeping the saved one shown on failure", async () => {
@@ -627,7 +789,7 @@ describe("Device firmware", () => {
     api.loadDeviceFirmware.mockResolvedValue([...FIRMWARE, artifact("fw-3", { type: "firmware", name: "pump-2.6.bin" })]);
     await act(async () => (stubs.props.FirmwareUploadDialog.onUploaded as () => void)());
     expect(await screen.findByText("pump-2.6.bin")).toBeTruthy();
-    expect(tab(/^Firmware/).textContent).toBe("Firmware3");
+    expect(sectionLink("Firmware").textContent).toBe("Firmware (3)");
     act(() => (stubs.props.FirmwareUploadDialog.onClose as () => void)());
     expect(screen.queryByRole("dialog", { name: "Upload firmware dialog" })).toBeNull();
 
@@ -677,7 +839,7 @@ describe("Device artifacts", () => {
     await renderPage(`id=${DEVICE_ID}&tab=artifacts`);
     await screen.findByText("a-1.bin");
     fireEvent.click(screen.getByRole("button", { name: "Upload new artifact" }));
-    expect(screen.getByTestId("artifact-uploader").textContent).toBe("all");
+    expect(screen.getByTestId("artifact-uploader").textContent).toMatch(/^all/);
     expect(stubs.props.ArtifactUploader.fixedDevice).toMatchObject({ deviceId: DEVICE_ID });
     const calls = api.listDeviceArtifacts.mock.calls.length;
     await act(async () => (stubs.props.ArtifactUploader.onFinished as (b: string, f: number) => void)("batch-1", 1));
@@ -688,7 +850,7 @@ describe("Device artifacts", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Logs" }));
     fireEvent.click(await screen.findByRole("button", { name: "Upload Log" }));
-    expect(screen.getByTestId("artifact-uploader").textContent).toBe("log");
+    expect(screen.getByTestId("artifact-uploader").textContent).toMatch(/^log/);
     fireEvent.click(screen.getByRole("button", { name: "Close uploader" }));
     expect(screen.queryByTestId("artifact-uploader")).toBeNull();
   });
@@ -748,7 +910,7 @@ describe("Device CVEs", () => {
     await act(async () => (stubs.props.CveList.onRefresh as () => void)());
     expect(api.listCves).toHaveBeenCalledTimes(2);
     expect(api.getDevices).toHaveBeenCalledTimes(2);
-    expect(tab(/^CVEs/).textContent).toBe("CVEs1");
+    expect(sectionLink("Vulnerabilities").textContent).toBe("Vulnerabilities (1)");
   });
 
   it("unlinks a CVE, holding the scope while it runs", async () => {
@@ -766,7 +928,7 @@ describe("Device CVEs", () => {
     expect(workspace.locks.at(-1)).toBe(false);
     const list = screen.getByRole("list", { name: "Linked CVE list" });
     expect(within(list).getAllByRole("link").map((a) => a.textContent)).toEqual(["CVE-2024-0002"]);
-    expect(tab(/^CVEs/).textContent).toBe("CVEs1");
+    expect(sectionLink("Vulnerabilities").textContent).toBe("Vulnerabilities (1)");
   });
 
   it("drops a CVE that has gone when unlinking it, and reports other failures", async () => {
@@ -793,7 +955,7 @@ describe("Device CVEs", () => {
     act(() =>
       (stubs.props.CveLinkExplorer.onLinked as (c: Cve[]) => void)([{ ...CVES[2], deviceIds: ["other", DEVICE_ID], references: [] }])
     );
-    expect(tab(/^CVEs/).textContent).toBe("CVEs3");
+    expect(sectionLink("Vulnerabilities").textContent).toBe("Vulnerabilities (3)");
     act(() => (stubs.props.CveLinkExplorer.onDone as (n: number) => void)(1));
     expect(screen.queryByRole("dialog", { name: "Link CVEs dialog" })).toBeNull();
     expect(screen.getByText("Linked 1 CVE to Infusion Pump X.")).toBeTruthy();
@@ -815,8 +977,19 @@ describe("Device CVEs", () => {
     expect(screen.getByTestId("cve-details").textContent).toBe("rec-0001");
     expect(screen.queryByRole("list", { name: "Linked CVE list" })).toBeNull();
     const listHref = `/devices/view?id=${DEVICE_ID}&tab=cves`;
-    expect(screen.getByRole("link", { name: "CVEs" }).getAttribute("href")).toBe(listHref);
-    expect(screen.getAllByRole("link", { name: /Back to CVEs/ }).map((a) => a.getAttribute("href"))).toEqual([listHref, listHref]);
+    // The top bar's breadcrumb places it; the page has no trail of its own.
+    expect(crumbs.calls.at(-1)).toEqual([
+      { label: "Devices", href: "/devices" },
+      { label: "Infusion Pump X", href: href() },
+      { label: "Vulnerabilities", href: listHref },
+      { label: "CVE-2024-0001" },
+    ]);
+    expect(screen.queryByRole("link", { name: "CVEs" })).toBeNull();
+    expect(screen.queryByText("CVEs")).toBeNull();
+    expect(screen.getAllByRole("link", { name: /Back to linked vulnerabilities/ }).map((a) => a.getAttribute("href"))).toEqual([
+      listHref,
+      listHref,
+    ]);
     expect(screen.getByRole("link", { name: /Open in Vulnerabilities/ }).getAttribute("href")).toBe(
       "/vulnerabilities/view?id=rec-0001"
     );
@@ -825,9 +998,265 @@ describe("Device CVEs", () => {
     act(() =>
       (stubs.props.CveDetails.onChanged as (c: Cve) => void)({ ...CVES[0], deviceIds: [], references: [] })
     );
-    expect(tab(/^CVEs/).textContent).toBe("CVEs1");
+    expect(sectionLink("Vulnerabilities").textContent).toBe("Vulnerabilities (1)");
     act(() => (stubs.props.CveDetails.onDeleted as (id: string) => void)("rec-0002"));
     expect(nav.push).toHaveBeenCalledWith(listHref);
-    expect(tab(/^CVEs/).textContent).toBe("CVEs0");
+    expect(sectionLink("Vulnerabilities").textContent).toBe("Vulnerabilities (0)");
+  });
+});
+
+// --- Workspace layout ---------------------------------------------------------------
+
+describe("Device workspace layout", () => {
+  it("puts the sections beside the content from 1280px, collapsible to an icon rail", async () => {
+    setViewport(true);
+    await renderPage(`id=${DEVICE_ID}&tab=firmware`);
+    expect(sectionNav().dataset.variant).toBe("panel");
+    const collapse = screen.getByRole("button", { name: "Collapse device navigation" });
+    expect(collapse.getAttribute("aria-expanded")).toBe("true");
+    expect(collapse.getAttribute("aria-controls")).toBe("device-section-links");
+    await waitFor(() => expect(sectionLink("Firmware").textContent).toBe("Firmware (2)"));
+
+    fireEvent.click(collapse);
+    expect(sectionNav().hasAttribute("data-collapsed")).toBe(true);
+    const expand = screen.getByRole("button", { name: "Expand device navigation" });
+    expect(expand.getAttribute("aria-expanded")).toBe("false");
+    // The rail keeps every link named, with the open one marked, and shows
+    // the name beside an icon on hover or focus.
+    expect(within(sectionNav()).getAllByRole("link").map((a) => a.querySelector(".sr-only")?.textContent)).toEqual([
+      "Overview",
+      "Firmware (2)",
+      "Artifacts",
+      "Images",
+      "Vulnerabilities (2)",
+      "RE Notebook, opens full screen",
+    ]);
+    expect(within(sectionNav()).getByRole("link", { name: "Firmware (2)" }).getAttribute("aria-current")).toBe("page");
+    expect(within(sectionNav()).getByRole("link", { name: "RE Notebook, opens full screen" })).toBeTruthy();
+    const tips = Array.from(sectionNav().querySelectorAll("[data-rail-tooltip]")).map((t) => t.textContent);
+    expect(tips).toEqual(["Overview", "Firmware", "Artifacts", "Images", "Vulnerabilities", "RE Notebook"]);
+    expect(sectionNav().querySelectorAll("[data-rail-tooltip]:not([aria-hidden='true'])")).toHaveLength(0);
+
+    fireEvent.click(expand);
+    expect(sectionNav().hasAttribute("data-collapsed")).toBe(false);
+  });
+
+  it("remembers the collapsed rail per user", async () => {
+    setViewport(true);
+    const view = await renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse device navigation" }));
+    expect(JSON.parse(localStorage.getItem("vzoniq.layout.v1.user-1.device.nav")!)).toMatchObject({ collapsed: true });
+    view.unmount();
+
+    await renderPage();
+    expect(sectionNav().hasAttribute("data-collapsed")).toBe(true);
+    cleanup();
+
+    auth.userId = "user-2";
+    await renderPage();
+    expect(sectionNav().hasAttribute("data-collapsed")).toBe(false);
+  });
+
+  it("uses a scrolling strip of section links below 1280px, switching as the window crosses it", async () => {
+    setViewport(false);
+    await renderPage(`id=${DEVICE_ID}&tab=images`);
+    expect(sectionNav().dataset.variant).toBe("strip");
+    expect(screen.queryByRole("button", { name: /device navigation/ })).toBeNull();
+    await waitFor(() => expect(sectionLink("Firmware").textContent).toBe("Firmware (2)"));
+    expect(within(sectionNav()).getAllByRole("link").map((a) => a.getAttribute("href"))).toEqual([
+      href(),
+      href("&tab=firmware"),
+      href("&tab=artifacts"),
+      href("&tab=images"),
+      href("&tab=cves"),
+      `/devices/notebook?id=${DEVICE_ID}`,
+    ]);
+    expect(currentSection().textContent).toBe("Images");
+
+    resize(true);
+    expect(sectionNav().dataset.variant).toBe("panel");
+    expect(currentSection().textContent).toBe("Images");
+    resize(false);
+    expect(sectionNav().dataset.variant).toBe("strip");
+    // One navigation at a time.
+    expect(screen.getAllByRole("navigation", { name: "Device sections" })).toHaveLength(1);
+  });
+
+  it.each([
+    ["panel", true],
+    ["strip", false],
+  ])("has no automated accessibility violations (%s)", async (_name, wide) => {
+    setViewport(wide);
+    const { container } = await renderPage(`id=${DEVICE_ID}&tab=firmware`);
+    await screen.findByText("pump-2.4.bin");
+    expect(await axeViolations(container)).toEqual([]);
+  });
+
+  it("names the device by whichever of manufacturer, model and type it has", async () => {
+    api.getDevice.mockResolvedValue(device({ manufacturer: undefined, modelNumber: "MX800" }));
+    await renderPage();
+    expect(screen.getByText("MX800 · Infusion pump")).toBeTruthy();
+    cleanup();
+    api.getDevice.mockResolvedValue(device({ manufacturer: undefined, modelNumber: undefined, type: undefined }));
+    await renderPage();
+    expect(within(document.querySelector("header")!).getByText("Device")).toBeTruthy();
+  });
+
+  it("shows the workspace and the saved research status in the header", async () => {
+    setScope(WS);
+    api.getDevice.mockResolvedValue(device({ workspaceId: "ws-1", role: "member", reverseEngineeringStatus: "complete" }));
+    await renderPage();
+    const header = document.querySelector("header")!;
+    expect(header.textContent).toContain("Workspace · Cardiac Lab");
+    expect(within(header).getByText("Complete")).toBeTruthy();
+    expect(header.textContent).toContain("Your access: member");
+  });
+});
+
+// --- Upload protection ----------------------------------------------------------------
+
+describe("Device upload protection", () => {
+  const LEAVE_TITLE = "Leave while work is in progress?";
+  const go = (extra = "") => act(() => nav.go(`id=${DEVICE_ID}${extra}`));
+  const uploader = () => screen.getByTestId("artifact-uploader");
+  const sectionOf = (el: Element) => el.closest("[data-device-section]") as HTMLElement;
+
+  async function startArtifactUpload() {
+    await renderPage(`id=${DEVICE_ID}&tab=artifacts`);
+    await screen.findByText("a-1.bin");
+    fireEvent.click(screen.getByRole("button", { name: "Upload new artifact" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start artifact upload" }));
+    expect(workspace.locks.at(-1)).toBe(true);
+  }
+
+  it("keeps a running upload mounted through repeated section changes, Back and Forward", async () => {
+    await startArtifactUpload();
+    const original = uploader();
+    expect(stubs.mounts.ArtifactUploader).toBe(1);
+
+    // A section link, then Back, Forward, Back… (each is a URL change).
+    for (const step of ["&tab=firmware", "", "&tab=images", "&tab=cves", "&tab=firmware", ""]) {
+      go(step);
+      expect(uploader()).toBe(original);
+      const slot = sectionOf(original);
+      expect(slot.hidden).toBe(true);
+      expect(slot.hasAttribute("inert")).toBe(true);
+      expect(screen.getByRole("status").textContent).toContain("An upload or change in Artifacts is still running.");
+    }
+    expect(stubs.mounts.ArtifactUploader).toBe(1);
+    // The scope stays locked the whole time (never released and retaken).
+    expect(workspace.held).toBe(1);
+    expect(workspace.released).toBe(0);
+    expect(screen.queryByRole("dialog", { name: LEAVE_TITLE })).toBeNull();
+
+    // Back to it: shown again, the same uploader, still running.
+    go("&tab=artifacts");
+    expect(uploader()).toBe(original);
+    expect(sectionOf(original).hidden).toBe(false);
+    expect(sectionOf(original).hasAttribute("inert")).toBe(false);
+    expect(screen.getByRole("button", { name: "Finish artifact upload" })).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("links to the busy section from its notice, and keeps a finished one until it is seen", async () => {
+    await startArtifactUpload();
+    go("&tab=firmware");
+    const notice = screen.getByRole("status");
+    expect(within(notice).getByRole("link", { name: "Go to Artifacts" }).getAttribute("href")).toBe(href("&tab=artifacts"));
+    expect(within(notice).queryByRole("button", { name: "Dismiss" })).toBeNull();
+
+    // It finishes while out of view.
+    act(() => {
+      (sectionOf(uploader()).querySelector("button") as HTMLButtonElement).click();
+    });
+    expect(screen.getByRole("status").textContent).toContain("The upload or change in Artifacts has finished.");
+    expect(uploader()).toBeTruthy();
+
+    // Opened: the outcome is there; leaving again lets it go.
+    go("&tab=artifacts");
+    expect(sectionOf(uploader()).hidden).toBe(false);
+    go("&tab=images");
+    expect(screen.queryByTestId("artifact-uploader")).toBeNull();
+  });
+
+  it("lets a finished section's notice be dismissed", async () => {
+    await startArtifactUpload();
+    go("&tab=overview");
+    act(() => {
+      (sectionOf(uploader()).querySelector("button") as HTMLButtonElement).click();
+    });
+    fireEvent.click(within(screen.getByRole("status")).getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByTestId("artifact-uploader")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("keeps a firmware upload dialog (and its upload) through Back to another section", async () => {
+    await renderPage(`id=${DEVICE_ID}&tab=firmware`);
+    fireEvent.click(screen.getByRole("button", { name: "Upload firmware" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start firmware upload" }));
+    go();
+    const dialog = document.querySelector('[aria-label="Upload firmware dialog"]')!;
+    expect(dialog).toBeTruthy();
+    expect(sectionOf(dialog).hidden).toBe(true);
+    expect(stubs.mounts.FirmwareUploadDialog).toBe(1);
+    go("&tab=firmware");
+    expect(screen.getByRole("dialog", { name: "Upload firmware dialog" })).toBeTruthy();
+    expect(stubs.mounts.FirmwareUploadDialog).toBe(1);
+  });
+
+  it("mounts only the open section when nothing is running", async () => {
+    await renderPage(`id=${DEVICE_ID}&tab=artifacts`);
+    await screen.findByText("a-1.bin");
+    fireEvent.click(screen.getByRole("button", { name: "Upload new artifact" }));
+    go("&tab=firmware");
+    // A staged but unstarted uploader goes, as before.
+    expect(screen.queryByTestId("artifact-uploader")).toBeNull();
+    expect(document.querySelectorAll("[data-device-section]")).toHaveLength(1);
+  });
+
+  it("asks before a link leaves the device page while work is in progress", async () => {
+    setScope({ kind: "personal" }, { scopeLocked: true });
+    await renderPage(`id=${DEVICE_ID}&tab=cves`);
+    await screen.findByRole("list", { name: "Linked CVE list" });
+
+    // Another section of this device stays on the page: no question.
+    expect(fireEvent.click(sectionLink("Firmware"))).toBe(true);
+    expect(screen.queryByRole("dialog", { name: LEAVE_TITLE })).toBeNull();
+
+    for (const name of ["All vulnerabilities", "Open RE Notebook"]) {
+      expect(fireEvent.click(screen.getByRole("link", { name }))).toBe(false);
+      expect(screen.getByRole("dialog", { name: LEAVE_TITLE })).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("dialog", { name: LEAVE_TITLE })).toBeNull();
+    }
+    expect(nav.push).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("link", { name: "Open RE Notebook" }));
+    fireEvent.click(screen.getByRole("button", { name: "Leave anyway" }));
+    expect(nav.push).toHaveBeenCalledWith(`/devices/notebook?id=${DEVICE_ID}`);
+  });
+
+  it("asks the browser to confirm reloading or closing while work is in progress", async () => {
+    setScope({ kind: "personal" }, { scopeLocked: true });
+    await renderPage();
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("changes nothing about navigation when nothing is in progress", async () => {
+    const pushState = vi.spyOn(window.history, "pushState");
+    await renderPage(`id=${DEVICE_ID}&tab=artifacts`);
+    await screen.findByText("a-1.bin");
+    fireEvent.click(screen.getByRole("link", { name: "Open RE Notebook" }));
+    expect(screen.queryByRole("dialog", { name: LEAVE_TITLE })).toBeNull();
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(pushState).not.toHaveBeenCalled();
+    pushState.mockRestore();
   });
 });

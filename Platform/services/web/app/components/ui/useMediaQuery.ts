@@ -26,3 +26,6 @@ export function useMediaQuery(query: string, fallback = true): boolean {
 
 /** The app's large breakpoint (Tailwind lg): side-by-side layouts start here. */
 export const LARGE_SCREEN = "(min-width: 1024px)";
+
+/** The app's wide breakpoint (Tailwind xl): a page's own side navigation starts here. */
+export const WIDE_SCREEN = "(min-width: 1280px)";

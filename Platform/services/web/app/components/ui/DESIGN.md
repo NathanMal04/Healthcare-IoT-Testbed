@@ -81,10 +81,32 @@ Text is `slate-900` (headings), `slate-800` (body emphasis), `slate-700`
 - `Dialog`: named by its title, traps focus, restores it on close.
 - `Sheet`: the same for side panels.
 - `PageContainer`, `PageSection`, `DescriptionList`, `SplitView`, `ResizeHandle`.
+- `NavigationGuard`: while work is in progress (an upload, a save), in-app
+  links that leave the page ask first, and reload, tab close and typed
+  addresses get the browser's "Leave site?" prompt. It uses only standard
+  browser behaviour and never touches browser history.
 - Hooks:
   - `useFocusTrap`;
-  - `useMediaQuery` (`LARGE_SCREEN`);
+  - `useMediaQuery` (`LARGE_SCREEN`, `WIDE_SCREEN`);
   - `useLatestRequest`, which replaces hand-written load-id counters.
+
+### Known limitation: uploads and browser Back/Forward
+
+Neither the browser nor the Next.js app router offers a supported way to
+cancel Back or Forward, and rewriting history to fake one discards or
+duplicates entries. `NavigationGuard` therefore doesn't intercept them.
+
+- Within the device workspace this is safe: a section with an upload or save
+  running (one holding the workspace lock, reported by `ScopeLockReporter`)
+  stays mounted while other sections are open, and its notice links back to
+  it.
+- Browser Back/Forward can leave the device page during an upload without
+  prompting. The upload keeps sending in the background, except image
+  replacement, which is cancelled. Its progress and retry controls go, and
+  so does the workspace lock.
+- The fix is a future app-level upload manager mounted in the app shell. It
+  would own running uploads, hold the workspace lock and show their
+  progress, so that no in-app navigation can interrupt them.
 
 ## Accessibility checklist
 

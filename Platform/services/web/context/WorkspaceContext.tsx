@@ -266,3 +266,41 @@ export function useScopeLock(active: boolean) {
   const { lockScope } = useWorkspace();
   useEffect(() => (active ? lockScope() : undefined), [active, lockScope]);
 }
+
+/**
+ * Reports whether anything inside holds the scope lock (an upload, a save),
+ * e.g. so a page can keep that part mounted while the user looks elsewhere.
+ * The scope itself is locked exactly as before: every lock taken inside is
+ * passed on to the provider above.
+ */
+export function ScopeLockReporter({
+  onChange,
+  children,
+}: {
+  onChange: (locked: boolean) => void;
+  children: React.ReactNode;
+}) {
+  const parent = useWorkspace();
+  const parentLock = parent.lockScope;
+  const [held, setHeld] = useState(0);
+
+  const lockScope = useCallback(() => {
+    const release = parentLock();
+    setHeld((n) => n + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      release();
+      setHeld((n) => n - 1);
+    };
+  }, [parentLock]);
+
+  const locked = held > 0;
+  useEffect(() => {
+    onChange(locked);
+  }, [locked, onChange]);
+
+  const value = useMemo(() => ({ ...parent, lockScope }), [parent, lockScope]);
+  return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
+}
