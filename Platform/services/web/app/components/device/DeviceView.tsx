@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { canEditDevice } from "@/lib/devices";
 import {
   DEVICE_PAGE_SECTIONS,
@@ -14,7 +14,6 @@ import {
   mountedSections,
   sectionActivity,
   type DevicePageSection,
-  type DeviceSection,
 } from "@/lib/deviceView";
 import { scopeWorkspaceId } from "@/lib/workspaces";
 import { ScopeLockReporter, useWorkspace } from "@/context/WorkspaceContext";
@@ -28,6 +27,7 @@ import { useDevice } from "./useDevice";
 import { useDeviceCves } from "./useDeviceCves";
 import { useDeviceFirmware } from "./useDeviceFirmware";
 import { useDeviceProfilePicture } from "./useDeviceProfilePicture";
+import { useOverviewData } from "./useOverviewData";
 import ArtifactsSection from "./sections/ArtifactsSection";
 import CvesSection from "./sections/CvesSection";
 import DeviceCveDetail from "./sections/DeviceCveDetail";
@@ -49,7 +49,6 @@ import OverviewSection from "./sections/OverviewSection";
  * the browser's prompt.
  */
 export default function DeviceView({ deviceId }: { deviceId: string }) {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const section = deviceSectionFromParams(searchParams);
   // A linked CVE opened from Vulnerabilities; in the URL so Back returns to the list.
@@ -61,6 +60,8 @@ export default function DeviceView({ deviceId }: { deviceId: string }) {
   const cves = useDeviceCves(deviceId, workspaceId, reportWorkspaceUnavailable);
   const firmware = useDeviceFirmware(deviceId, device);
   const picture = useDeviceProfilePicture(device, updateDevice);
+  // The Overview's own data loads only while it's open (and once the device is known).
+  const overview = useOverviewData(deviceId, section === "overview" && device !== null);
   const [editing, setEditing] = useState(false);
   // The open linked CVE's ID, for the breadcrumb, once its details have loaded.
   const [cveLabel, setCveLabel] = useState<{ cveRecordId: string; label?: string } | null>(null);
@@ -90,12 +91,6 @@ export default function DeviceView({ deviceId }: { deviceId: string }) {
     return cancel;
   }, [loadDevice, loadCves]);
 
-  // Overview's count tiles open their sections like the navigation does.
-  const openSection = useCallback(
-    (next: DeviceSection) => router.push(deviceSectionHref(deviceId, next), { scroll: next === "notebook" }),
-    [router, deviceId]
-  );
-
   const scopeName = scope.kind === "workspace" ? scope.name : "Personal";
   usePageCrumbs(
     device
@@ -121,11 +116,14 @@ export default function DeviceView({ deviceId }: { deviceId: string }) {
         return (
           <OverviewSection
             device={loaded}
-            scope={scope}
+            canEdit={canEdit}
             firmware={firmware.firmware}
-            cveCount={cveCount}
+            firmwareError={firmware.error}
+            reloadFirmware={() => void firmware.reload()}
+            cves={cves}
+            overview={overview}
             onDeviceChange={updateDevice}
-            onOpenSection={openSection}
+            onEdit={() => setEditing(true)}
           />
         );
       case "firmware":

@@ -107,6 +107,8 @@ const api = vi.hoisted(() => ({
   listCves: vi.fn(),
   unlinkCveDevice: vi.fn(),
   loadDeviceFirmware: vi.fn(),
+  listDeviceImages: vi.fn(),
+  getNotebook: vi.fn(),
 }));
 vi.mock("@/lib/devices", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/devices")>()),
@@ -120,6 +122,14 @@ vi.mock("@/lib/artifacts", async (importOriginal) => ({
   listDeviceArtifacts: api.listDeviceArtifacts,
   getArtifactDownloadUrl: api.getArtifactDownloadUrl,
 }));
+vi.mock("@/lib/images", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/images")>()),
+  listDeviceImages: api.listDeviceImages,
+}));
+vi.mock("@/lib/reNotebook", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/reNotebook")>()),
+  getNotebook: api.getNotebook,
+}));
 vi.mock("@/lib/cves", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/cves")>()),
   listCves: api.listCves,
@@ -131,8 +141,21 @@ vi.mock("@/lib/cves", async (importOriginal) => ({
 const stubs = vi.hoisted(() => ({
   props: {} as Record<string, Record<string, unknown>>,
   mounts: {} as Record<string, number>,
-  imageUrls: { refresh: vi.fn() },
+  imageUrls: imageUrlsStub(),
 }));
+/** The view-URL hook's interface, with nothing loaded. */
+function imageUrlsStub() {
+  return {
+    refresh: vi.fn(),
+    get: () => undefined,
+    ensure: () => undefined,
+    reportError: () => undefined,
+    isBroken: () => false,
+    problemCount: 0,
+    error: null,
+    retry: () => undefined,
+  };
+}
 
 vi.mock("@/app/components/firmware/FirmwareList", async (importOriginal) => {
   const { useEffect } = await import("react");
@@ -359,7 +382,7 @@ beforeEach(() => {
   crumbs.calls = [];
   stubs.props = {};
   stubs.mounts = {};
-  stubs.imageUrls = { refresh: vi.fn() };
+  stubs.imageUrls = imageUrlsStub();
   setScope();
   for (const fn of Object.values(api)) fn.mockReset();
   api.getDevice.mockResolvedValue(device());
@@ -367,6 +390,8 @@ beforeEach(() => {
   api.listCves.mockResolvedValue(CVES);
   api.loadDeviceFirmware.mockResolvedValue(FIRMWARE);
   api.listDeviceArtifacts.mockResolvedValue({ artifacts: [artifact("a-1"), artifact("a-2")] });
+  api.listDeviceImages.mockResolvedValue({ images: [] });
+  api.getNotebook.mockResolvedValue({ deviceId: DEVICE_ID, orderVersion: 0, sections: [], limits: {} });
 });
 afterEach(cleanup);
 
@@ -467,7 +492,7 @@ describe("Device page routing", () => {
 
   it("shows whichever section the URL names, so Back and Forward move between sections", async () => {
     await renderPage();
-    expect(screen.getByText("Device information")).toBeTruthy();
+    expect(screen.getByText("Specifications")).toBeTruthy();
     act(() => nav.go(`id=${DEVICE_ID}&tab=firmware`));
     expect(currentSection().textContent).toMatch(/^Firmware/);
     expect(await screen.findByText("pump-2.4.bin")).toBeTruthy();
@@ -478,7 +503,7 @@ describe("Device page routing", () => {
     act(() => nav.go(`id=${DEVICE_ID}&tab=firmware`));
     expect(screen.getByText("pump-2.4.bin")).toBeTruthy();
     act(() => nav.go(`id=${DEVICE_ID}`));
-    expect(screen.getByText("Device information")).toBeTruthy();
+    expect(screen.getByText("Specifications")).toBeTruthy();
     // The device itself isn't requested again.
     expect(api.getDevice).toHaveBeenCalledTimes(1);
   });
@@ -500,7 +525,7 @@ describe("Device page routing", () => {
 // --- Loading and scope ------------------------------------------------------------
 
 describe("Device page loading", () => {
-  it("loads the device, the scope's CVEs and devices, firmware and the overview's artifact page, once each", async () => {
+  it("loads the device, the scope's CVEs and devices, firmware and the overview's own data, once each", async () => {
     setScope(WS);
     api.getDevice.mockResolvedValue(device({ workspaceId: "ws-1", role: "member" }));
     await renderPage();
@@ -514,6 +539,10 @@ describe("Device page loading", () => {
     expect(api.loadDeviceFirmware).toHaveBeenCalledWith(DEVICE_ID);
     expect(api.listDeviceArtifacts).toHaveBeenCalledTimes(1);
     expect(api.listDeviceArtifacts).toHaveBeenCalledWith(DEVICE_ID, { limit: 100 });
+    expect(api.listDeviceImages).toHaveBeenCalledTimes(1);
+    expect(api.listDeviceImages).toHaveBeenCalledWith(DEVICE_ID, { limit: 100 });
+    expect(api.getNotebook).toHaveBeenCalledTimes(1);
+    expect(api.getNotebook).toHaveBeenCalledWith(DEVICE_ID);
     expect(api.setDeviceProfileImage).not.toHaveBeenCalled();
   });
 
@@ -612,21 +641,24 @@ describe("Device page loading", () => {
 // --- Overview ---------------------------------------------------------------------
 
 describe("Device overview", () => {
-  it("lists the device's details, scope and access", async () => {
+  it("lists every specification, saying which aren't recorded", async () => {
     await renderPage();
-    expect(screen.getByText("Device information")).toBeTruthy();
+    expect(screen.getByText("Specifications")).toBeTruthy();
     expect(document.querySelectorAll("dl")).toHaveLength(1);
     const rows = Array.from(document.querySelectorAll("dl dt")).map(
       (dt) => `${dt.textContent}: ${dt.nextElementSibling?.textContent}`
     );
     expect(rows).toEqual([
-      "Name: Infusion Pump X",
-      "Type: Infusion pump",
       "Manufacturer: Philips",
-      "Model number: MX800",
-      "Scope: Personal",
-      "Your access: owner",
+      "Model: MX800",
+      "Device type: Infusion pump",
+      "Chipset: Not recorded",
+      "Serial number: Not recorded",
+      "Hardware revision: Not recorded",
+      "Reported firmware version: Not recorded",
+      "Description: Not recorded",
     ]);
+    expect(screen.getByText("5 of 8 details not recorded")).toBeTruthy();
   });
 
   it("changes only the status, keeping a profile picture chosen while it saved", async () => {
@@ -657,18 +689,23 @@ describe("Device overview", () => {
     expect(screen.getByRole("heading", { name: "Infusion Pump X" })).toBeTruthy();
   });
 
-  it("shows the counts and opens their sections", async () => {
-    api.listDeviceArtifacts.mockResolvedValue({ artifacts: [artifact("a-1")], nextToken: "more" });
+  it("shows the counts as links to their sections, marking partial ones", async () => {
+    api.listDeviceArtifacts.mockResolvedValue({
+      artifacts: [artifact("a-1"), artifact("fw-x", { type: "firmware" }), artifact("img-x", { type: "image" })],
+      nextToken: "more",
+    });
     await renderPage();
-    const tile = (label: string) => screen.getByRole("button", { name: new RegExp(`^${label}`) });
-    await waitFor(() => expect(tile("Firmware versions").textContent).toContain("2"));
-    await waitFor(() => expect(tile("Artifacts").textContent).toContain("1+"));
-    expect(tile("Linked CVEs").textContent).toContain("2");
-    fireEvent.click(tile("Artifacts"));
-    // A history entry, like the navigation's links.
-    expect(nav.push).toHaveBeenLastCalledWith(href("&tab=artifacts"), { scroll: false });
-    expect(nav.replace).not.toHaveBeenCalled();
-    expect(currentSection().textContent).toBe("Artifacts");
+    const glance = within(screen.getByRole("region", { name: "At a glance" }));
+    await waitFor(() => expect(glance.getByRole("link", { name: /Other files: at least 1/ })).toBeTruthy());
+    const tiles = glance.getAllByRole("link").map((a) => [a.querySelector(".sr-only")?.textContent, a.getAttribute("href")]);
+    expect(tiles).toEqual([
+      ["Firmware versions: 2", href("&tab=firmware")],
+      ["Linked vulnerabilities: 2", href("&tab=cves")],
+      ["Images: 0", href("&tab=images")],
+      ["Other files: at least 1", href("&tab=artifacts")],
+    ]);
+    expect(glance.getByText("1+")).toBeTruthy();
+    expect(glance.getByText("Excluding firmware and images")).toBeTruthy();
   });
 
   it("saves a new research status, keeping the saved one shown on failure", async () => {
@@ -1258,5 +1295,71 @@ describe("Device upload protection", () => {
     });
     expect(pushState).not.toHaveBeenCalled();
     pushState.mockRestore();
+  });
+});
+
+// --- Overview data loading -------------------------------------------------------------
+
+describe("Device overview data", () => {
+  const overviewCalls = () => [
+    api.listDeviceArtifacts.mock.calls.length,
+    api.listDeviceImages.mock.calls.length,
+    api.getNotebook.mock.calls.length,
+  ];
+
+  it("requests the Overview's data only while the Overview is open", async () => {
+    await renderPage(`id=${DEVICE_ID}&tab=firmware`);
+    await screen.findByText("pump-2.4.bin");
+    act(() => nav.go(`id=${DEVICE_ID}&tab=images`));
+    act(() => nav.go(`id=${DEVICE_ID}&tab=cves`));
+    expect(overviewCalls()).toEqual([0, 0, 0]);
+
+    act(() => nav.go(`id=${DEVICE_ID}`));
+    await waitFor(() => expect(overviewCalls()).toEqual([1, 1, 1]));
+    // Firmware and CVEs come from what the page already loaded.
+    expect(api.loadDeviceFirmware).toHaveBeenCalledTimes(1);
+    expect(api.listCves).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the last figures at once on returning, refreshing them once", async () => {
+    api.getNotebook.mockResolvedValue({
+      deviceId: DEVICE_ID,
+      orderVersion: 1,
+      limits: {},
+      sections: [{ sectionId: "s", title: "Hardware", entries: [{ entryId: "e", sectionId: "s", title: "UART" }] }],
+    });
+    await renderPage();
+    await screen.findByText("1 section · 1 entry");
+    expect(overviewCalls()).toEqual([1, 1, 1]);
+
+    let finish!: (value: unknown) => void;
+    api.getNotebook.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+    act(() => nav.go(`id=${DEVICE_ID}&tab=firmware`));
+    act(() => nav.go(`id=${DEVICE_ID}`));
+    // The refresh is running; the last figures are already there.
+    expect(screen.getByText("1 section · 1 entry")).toBeTruthy();
+    await waitFor(() => expect(overviewCalls()).toEqual([2, 2, 2]));
+    await act(async () =>
+      finish({ deviceId: DEVICE_ID, orderVersion: 1, limits: {}, sections: [] })
+    );
+    expect(screen.getByText("0 sections · 0 entries")).toBeTruthy();
+    expect(overviewCalls()).toEqual([2, 2, 2]);
+  });
+
+  it("requests nothing for a device that isn't in the current scope", async () => {
+    api.getDevice.mockResolvedValue(device({ workspaceId: "ws-other" }));
+    render(<DeviceViewPage />);
+    await screen.findByRole("heading", { name: "Device not found" });
+    expect(overviewCalls()).toEqual([0, 0, 0]);
+  });
+
+  it("keeps the other cards when one request fails", async () => {
+    api.getNotebook.mockRejectedValue(new ApiError("Notebook down", 500));
+    api.listDeviceImages.mockRejectedValue(new ApiError("forbidden", 403));
+    await renderPage();
+    expect(await screen.findByText("Notebook down")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Specifications" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Linked vulnerabilities" })).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole("link", { name: /Other files: 2/ })).toBeTruthy());
   });
 });
