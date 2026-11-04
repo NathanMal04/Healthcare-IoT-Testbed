@@ -12,7 +12,8 @@ export const ENTRIES_PANEL_ID = "re-notebook-entries";
  * The notebook's sections as a row of tabs (scrolls sideways when they don't
  * fit). Arrow keys, Home and End move between tabs; the selected section's
  * actions (rename, move left/right, delete when empty) are in the menu
- * after the tabs, and new sections and entries are added from here.
+ * after the tabs, and new sections and entries are added from here. With
+ * readOnly (a workspace viewer) only the tabs are shown.
  */
 export default function SectionTabs({
   notebook,
@@ -22,6 +23,7 @@ export default function SectionTabs({
   onAction,
   onMoveSection,
   onNewSection,
+  readOnly = false,
 }: {
   notebook: Notebook;
   activeSectionId: string | null;
@@ -30,6 +32,7 @@ export default function SectionTabs({
   onAction: (action: NavAction) => void;
   onMoveSection: (index: number, delta: -1 | 1) => void;
   onNewSection: () => void;
+  readOnly?: boolean;
 }) {
   const sections = notebook.sections;
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -92,55 +95,57 @@ export default function SectionTabs({
           })}
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-1 py-1.5">
-        {active && (
-          <RowActionsMenu
-            label={`Actions for section ${active.title}`}
-            disabled={busy}
-            actions={[
-              { label: "Rename section", icon: Pencil, onSelect: () => onAction({ kind: "renameSection", section: active }) },
-              activeIndex > 0 && {
-                label: "Move section left",
-                icon: ArrowLeft,
-                onSelect: () => onMoveSection(activeIndex, -1),
-              },
-              activeIndex < sections.length - 1 && {
-                label: "Move section right",
-                icon: ArrowRight,
-                onSelect: () => onMoveSection(activeIndex, 1),
-              },
-              {
-                label: active.entries.length ? "Delete section (empty it first)" : "Delete section",
-                icon: Trash2,
-                danger: true,
-                disabled: active.entries.length > 0,
-                onSelect: () => onAction({ kind: "deleteSection", section: active }),
-              },
-            ]}
-          />
-        )}
-        <Button
-          size="sm"
-          variant="ghost"
-          icon={Plus}
-          disabled={!canAddSection || busy}
-          title={canAddSection ? undefined : `At most ${notebook.limits.sections} sections`}
-          onClick={onNewSection}
-        >
-          <span className="sr-only sm:not-sr-only">Add section</span>
-        </Button>
-        {active && (
+      {!readOnly && (
+        <div className="flex shrink-0 items-center gap-1 py-1.5">
+          {active && (
+            <RowActionsMenu
+              label={`Actions for section ${active.title}`}
+              disabled={busy}
+              actions={[
+                { label: "Rename section", icon: Pencil, onSelect: () => onAction({ kind: "renameSection", section: active }) },
+                activeIndex > 0 && {
+                  label: "Move section left",
+                  icon: ArrowLeft,
+                  onSelect: () => onMoveSection(activeIndex, -1),
+                },
+                activeIndex < sections.length - 1 && {
+                  label: "Move section right",
+                  icon: ArrowRight,
+                  onSelect: () => onMoveSection(activeIndex, 1),
+                },
+                {
+                  label: active.entries.length ? "Delete section (empty it first)" : "Delete section",
+                  icon: Trash2,
+                  danger: true,
+                  disabled: active.entries.length > 0,
+                  onSelect: () => onAction({ kind: "deleteSection", section: active }),
+                },
+              ]}
+            />
+          )}
           <Button
             size="sm"
-            icon={FilePlus2}
-            disabled={full || busy}
-            title={full ? `At most ${notebook.limits.entriesPerSection} entries per section` : undefined}
-            onClick={() => onAction({ kind: "newEntry", section: active })}
+            variant="ghost"
+            icon={Plus}
+            disabled={!canAddSection || busy}
+            title={canAddSection ? undefined : `At most ${notebook.limits.sections} sections`}
+            onClick={onNewSection}
           >
-            <span className="sr-only sm:not-sr-only">New entry</span>
+            <span className="sr-only sm:not-sr-only">Add section</span>
           </Button>
-        )}
-      </div>
+          {active && (
+            <Button
+              size="sm"
+              icon={FilePlus2}
+              disabled={full || busy}
+              title={full ? `At most ${notebook.limits.entriesPerSection} entries per section` : undefined}
+              onClick={() => onAction({ kind: "newEntry", section: active })}
+            >
+              <span className="sr-only sm:not-sr-only">New entry</span>
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

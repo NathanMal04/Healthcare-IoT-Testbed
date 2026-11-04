@@ -1,14 +1,15 @@
-import { Building2, Check, Cpu, Lock, Microchip, ShieldAlert, Users, type LucideIcon } from "lucide-react";
+import { Building2, Check, Cpu, Eye, Lock, Microchip, ShieldAlert, Users, type LucideIcon } from "lucide-react";
 import type { WorkspaceMember } from "@/lib/workspaces";
 import { Avatar } from "@/app/components/WorkspaceDialogs";
 import { firmwareCount, type ScopeResources } from "./useWorkspaceResources";
 
 /** How a card or header is tinted: by the user's role, or Personal. */
-export type WorkspaceKind = "owner" | "member" | "personal";
+export type WorkspaceKind = "owner" | "member" | "viewer" | "personal";
 
 export const KIND_STYLES: Record<WorkspaceKind, { band: string; tile: string; icon: LucideIcon }> = {
   owner: { band: "bg-brand-50 border-brand-100", tile: "text-brand-600", icon: Building2 },
   member: { band: "bg-sky-50 border-sky-100", tile: "text-sky-600", icon: Building2 },
+  viewer: { band: "bg-surface-sunken border-line", tile: "text-slate-600", icon: Eye },
   personal: { band: "bg-surface-sunken border-line", tile: "text-slate-500", icon: Lock },
 };
 

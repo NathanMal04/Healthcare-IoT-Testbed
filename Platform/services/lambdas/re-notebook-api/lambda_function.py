@@ -123,20 +123,24 @@ def handler(event, context):
             return _resp(404, {"error": "Unknown route"})
         device_id = _uuid(path.get("deviceId"), "deviceId")
         ids = {name: _uuid(path.get(name), name) for name in ("sectionId", "entryId") if f"{{{name}}}" in resource}
-        ctx = _authorize(table, user_id, _display_name(claims), device_id)
+        ctx = _authorize(table, user_id, _display_name(claims), device_id, read_only=method == "GET")
         body = _json_body(event) if method in ("POST", "PUT", "PATCH") else None
         return ROUTES[route](ctx, ids, body, query)
     except RequestError as e:
         return _resp(e.status, {"error": e.message, **e.extra})
 
 
-def _authorize(table, user_id, name, device_id):
-    # The device-edit rule: the owner of a personal device, or any member of
-    # a workspace device's workspace (a leftover USER#/DEVICE# row on a
-    # workspace device grants nothing). The same 404 whether the device is
+def _authorize(table, user_id, name, device_id, read_only=False):
+    # The device-edit rule: the owner of a personal device, or any
+    # contributor of a workspace device's workspace (a leftover USER#/DEVICE#
+    # row on a workspace device grants nothing). Reads (GET) also accept the
+    # workspace's viewers; every write keeps the contributor rule, here and
+    # in its transaction (_guards). The same 404 whether the device is
     # missing or not the caller's, so ids aren't revealed.
+    roles = testbed_authz.MEMBERSHIP_ROLES if read_only else testbed_authz.CONTRIBUTOR_ROLES
     try:
-        device = testbed_authz.require_resource(table, user_id, "DEVICE", device_id, legacy_roles=("owner",))
+        device = testbed_authz.require_resource(table, user_id, "DEVICE", device_id, legacy_roles=("owner",),
+                                                workspace_roles=roles)
     except testbed_authz.AuthorizationError:
         raise RequestError(404, "Device not found")
     return Context(table, user_id, name, device_id, device.get("workspaceId"))

@@ -24,6 +24,17 @@ describe("filterAndSortWorkspaces", () => {
     expect(filterAndSortWorkspaces(list, "", "role").map((w) => w.name)).toEqual(["Alpha", "gamma", "beta"]);
   });
 
+  it("sorts read-only workspaces after owned and shared ones, consistently", () => {
+    const withViewer = [workspace("delta", "viewer", "2026-01-04"), ...list, workspace("Aleph", "viewer", "2026-01-05")];
+    expect(filterAndSortWorkspaces(withViewer, "", "role").map((w) => w.name)).toEqual([
+      "Alpha", "gamma", "beta", "Aleph", "delta",
+    ]);
+    // The same order whatever the input order.
+    expect(filterAndSortWorkspaces([...withViewer].reverse(), "", "role").map((w) => w.name)).toEqual([
+      "Alpha", "gamma", "beta", "Aleph", "delta",
+    ]);
+  });
+
   it("filters by name, ignoring case, without changing the input", () => {
     expect(filterAndSortWorkspaces(list, " AL ", "name").map((w) => w.name)).toEqual(["Alpha"]);
     expect(list.map((w) => w.name)).toEqual(["beta", "Alpha", "gamma"]);

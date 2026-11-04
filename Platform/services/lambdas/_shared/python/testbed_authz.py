@@ -14,9 +14,19 @@ A resource is authorized one of two ways, chosen by its METADATA record:
 The helpers raise instead of returning HTTP responses, because endpoints map
 the same outcome to different status codes (the device endpoints answer 403,
 the artifact endpoints 404).
+
+Workspace roles fail closed: by default only contributors (owner, member)
+are accepted, so every write path refuses a viewer without naming it. Read
+and download endpoints opt in to viewers by passing MEMBERSHIP_ROLES.
 """
 
-WORKSPACE_ROLES = ("owner", "member")
+# May change a workspace's resources.
+CONTRIBUTOR_ROLES = ("owner", "member")
+# Every membership role: contributors plus read-only viewers.
+MEMBERSHIP_ROLES = ("owner", "member", "viewer")
+# The default for require_member/require_resource and for the role
+# ConditionChecks that writes build inside their transactions: write-only.
+WORKSPACE_ROLES = CONTRIBUTOR_ROLES
 
 # Pass as legacy_roles to accept a USER#/X# link whatever its role (the read
 # rule artifacts-get uses today).
@@ -41,7 +51,7 @@ def workspace_role(table, user_id, workspace_id):
         return None
     item = table.get_item(Key={"pk": f"USER#{user_id}", "sk": f"WORKSPACE#{workspace_id}"}).get("Item")
     role = (item or {}).get("role")
-    return role if role in WORKSPACE_ROLES else None
+    return role if role in MEMBERSHIP_ROLES else None
 
 
 def require_member(table, user_id, workspace_id, roles=WORKSPACE_ROLES):

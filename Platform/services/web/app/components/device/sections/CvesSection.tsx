@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Eye, Link2, ShieldAlert, Unlink } from "lucide-react";
-import type { Device } from "@/lib/devices";
+import { canEditDevice, type Device } from "@/lib/devices";
 import { cveErrorMessage, isNotFound, unlinkCveDevice, type Cve, type CveSummary } from "@/lib/cves";
 import { deviceHref } from "@/lib/routes";
 import type { Scope } from "@/lib/workspaces";
@@ -37,6 +37,8 @@ export default function CvesSection({
   onChanged: (cve: Cve) => void;
   onRemoved: (cveRecordId: string) => void;
 }) {
+  // Viewers see and open linked CVEs; only contributors link or unlink.
+  const canLink = canEditDevice(device);
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [linkNotice, setLinkNotice] = useState<string | null>(null);
@@ -81,9 +83,11 @@ export default function CvesSection({
             <ButtonLink href="/vulnerabilities" variant="secondary" size="sm">
               All vulnerabilities
             </ButtonLink>
-            <Button size="sm" icon={Link2} onClick={openExplorer} disabled={busy !== null}>
-              Link CVEs
-            </Button>
+            {canLink && (
+              <Button size="sm" icon={Link2} onClick={openExplorer} disabled={busy !== null}>
+                Link CVEs
+              </Button>
+            )}
           </>
         }
       />
@@ -115,7 +119,7 @@ export default function CvesSection({
               disabled={busy !== null}
               actions={[
                 { label: "View details", icon: Eye, href: deviceHref(device.deviceId, "cves", { cve: cve.cveRecordId }) },
-                { label: "Unlink from device", icon: Unlink, onSelect: () => void unlink(cve) },
+                canLink && { label: "Unlink from device", icon: Unlink, onSelect: () => void unlink(cve) },
               ]}
             />
           )
@@ -124,11 +128,15 @@ export default function CvesSection({
           <EmptyState
             icon={ShieldAlert}
             title="No CVEs linked to this device"
-            description="Choose from the CVEs recorded in this scope, or record a new one on Vulnerabilities."
+            description={
+              canLink ? "Choose from the CVEs recorded in this scope, or record a new one on Vulnerabilities." : undefined
+            }
             action={
-              <Button size="sm" icon={Link2} onClick={openExplorer}>
-                Link CVEs
-              </Button>
+              canLink ? (
+                <Button size="sm" icon={Link2} onClick={openExplorer}>
+                  Link CVEs
+                </Button>
+              ) : undefined
             }
           />
         }

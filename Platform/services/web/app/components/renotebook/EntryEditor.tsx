@@ -21,6 +21,7 @@ import { useScopeLock } from "@/context/WorkspaceContext";
 import { Alert, Button, ErrorState, LoadingState, formatDate } from "@/app/components/ui";
 import ConflictDialog from "./ConflictDialog";
 import EditorToolbar from "./EditorToolbar";
+import NotebookDocView from "./NotebookDocView";
 import SaveStatus from "./SaveStatus";
 
 /** What the notebook asks of the open editor before switching away from it. */
@@ -53,6 +54,11 @@ interface EditorProps {
    * once the editor closes. Without it, the header shows the state.
    */
   onSaveState?: (save: SaveStateReport | null) => void;
+  /**
+   * Read the entry only (a workspace viewer): no editor, no autosave, no
+   * local drafts and nothing sent to the API but the read.
+   */
+  readOnly?: boolean;
 }
 
 export interface SaveStateReport {
@@ -75,6 +81,78 @@ type Load =
  * the changes).
  */
 export default function EntryEditor(props: EditorProps) {
+  return props.readOnly ? <ReadOnlyEntry {...props} /> : <EditableEntry {...props} />;
+}
+
+/**
+ * The entry as saved, for someone who can read but not edit it. Reloaded when
+ * its saved content changes (the list's contentVersion moves when someone
+ * else saves).
+ */
+function ReadOnlyEntry({ deviceId, entry: listed, sections, headerActions }: EditorProps) {
+  const [load, setLoad] = useState<
+    { kind: "loading" } | { kind: "error"; message: string } | { kind: "loaded"; entry: NotebookEntry; doc: NotebookDoc }
+  >({ kind: "loading" });
+
+  useEffect(() => {
+    let active = true;
+    getEntry(deviceId, listed.entryId).then(
+      (result) => active && setLoad({ kind: "loaded", entry: result.entry, doc: result.doc }),
+      (err) => {
+        if (!active) return;
+        const refusal = notebookRefusal(err);
+        setLoad({
+          kind: "error",
+          message:
+            refusal?.code === "deleted"
+              ? `${refusal.deletedByName ?? "Someone"} deleted this entry.`
+              : notebookErrorMessage(err, "Couldn't open the entry"),
+        });
+      }
+    );
+    return () => {
+      active = false;
+    };
+  }, [deviceId, listed.entryId, listed.contentVersion]);
+
+  if (load.kind === "loading") return <LoadingState label="Opening entry…" />;
+  if (load.kind === "error") return <ErrorState title="Couldn't open the entry" message={load.message} />;
+
+  const meta = load.entry;
+  const changedAt = listed.contentUpdatedAt ?? listed.updatedAt ?? meta.contentUpdatedAt ?? meta.updatedAt;
+  const changedBy = listed.contentUpdatedByName ?? listed.updatedByName ?? meta.contentUpdatedByName;
+  const sectionTitle = sections.find((s) => s.sectionId === listed.sectionId)?.title;
+  return (
+    <div className="flex flex-col min-w-0">
+      <header className="mx-auto w-full max-w-3xl px-5 sm:px-10 pt-6 sm:pt-8 pb-4">
+        <div className="flex items-center gap-3">
+          <p className="min-w-0 flex-1 truncate text-sm text-slate-500">
+            {sectionTitle && (
+              <>
+                <span className="font-medium text-slate-600">{sectionTitle}</span>
+                <span aria-hidden="true"> · </span>
+              </>
+            )}
+            <span title={formatDate(changedAt)}>Updated {formatDate(changedAt)}</span>
+            {changedBy && <span> by {changedBy}</span>}
+          </p>
+          {headerActions}
+        </div>
+        <h2 className="mt-2 text-2xl sm:text-[1.75rem] sm:leading-tight font-semibold tracking-tight text-slate-900 break-words">
+          {listed.title}
+        </h2>
+        <p className="mt-1.5 text-xs text-slate-500">
+          Created by {meta.createdByName ?? "unknown"} · {formatDate(meta.createdAt)}
+        </p>
+      </header>
+      <div className="mx-auto w-full max-w-3xl px-5 sm:px-10 pt-5 pb-16 min-h-[24rem]">
+        <NotebookDocView doc={load.doc} label={`Content of ${listed.title}`} />
+      </div>
+    </div>
+  );
+}
+
+function EditableEntry(props: EditorProps) {
   const { deviceId, userId, entry } = props;
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const scope = useMemo<DraftScope>(() => ({ userId, deviceId, entryId: entry.entryId }), [userId, deviceId, entry.entryId]);

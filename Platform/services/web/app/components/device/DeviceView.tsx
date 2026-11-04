@@ -198,7 +198,7 @@ export default function DeviceView({ deviceId }: { deviceId: string }) {
         </div>
       </div>
 
-      {editing && <EditDeviceDialog device={loaded} onClose={() => setEditing(false)} onSaved={setDevice} />}
+      {editing && canEdit && <EditDeviceDialog device={loaded} onClose={() => setEditing(false)} onSaved={setDevice} />}
 
       {/*
         Uploads and saves on this page hold the workspace (the scope lock).

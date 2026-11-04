@@ -17,6 +17,9 @@ function time(value: string): number {
   return Date.parse(value) || 0;
 }
 
+// Owned first, then shared as a member, then read-only.
+const ROLE_RANK: Record<Workspace["role"], number> = { owner: 0, member: 1, viewer: 2 };
+
 /** Workspaces whose name contains the query (case-insensitive), in the chosen order. */
 export function filterAndSortWorkspaces(workspaces: Workspace[], query: string, sort: WorkspaceSort): Workspace[] {
   const needle = query.trim().toLowerCase();
@@ -25,7 +28,7 @@ export function filterAndSortWorkspaces(workspaces: Workspace[], query: string, 
     updated: (a, b) => time(b.updatedAt) - time(a.updatedAt) || byName(a, b),
     created: (a, b) => time(b.createdAt) - time(a.createdAt) || byName(a, b),
     name: byName,
-    role: (a, b) => (a.role === b.role ? 0 : a.role === "owner" ? -1 : 1) || byName(a, b),
+    role: (a, b) => ROLE_RANK[a.role] - ROLE_RANK[b.role] || byName(a, b),
   };
   return workspaces.filter((w) => !needle || w.name.toLowerCase().includes(needle)).sort(compare[sort]);
 }

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Download, ImageIcon, Maximize2, Pencil, RefreshCw, Replace, Upload } from "lucide-react";
 import { getArtifactDownloadUrl } from "@/lib/artifacts";
 import { IMAGE_TYPE, imageErrorMessage, imageTitle, type ImageArtifact } from "@/lib/images";
-import type { Device } from "@/lib/devices";
+import { canEditDevice, type Device } from "@/lib/devices";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import ArtifactUploader from "@/app/components/ArtifactUploader";
 import {
@@ -50,6 +50,8 @@ export default function DeviceImageGallery({
   const { images, hasMore, loading, error, loadMore, reload, replace } = useDeviceImages(device.deviceId);
   const urls = useImageUrls((images ?? []).filter((image) => image.status === "ready").map((image) => image.artifactId));
 
+  // Viewers see, open and download images; only contributors change them.
+  const canEdit = canEditDevice(device);
   const [uploading, setUploading] = useState(false);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [editing, setEditing] = useState<ImageArtifact | null>(null);
@@ -99,11 +101,11 @@ export default function DeviceImageGallery({
     );
   }
 
-  const uploadButton = (
+  const uploadButton = canEdit ? (
     <Button size="sm" icon={Upload} onClick={() => setUploading(true)}>
       Upload images
     </Button>
-  );
+  ) : null;
 
   return (
     <div className="space-y-4">
@@ -196,8 +198,10 @@ export default function DeviceImageGallery({
           <EmptyState
             icon={ImageIcon}
             title="No images for this device yet"
-            description="Upload JPEG, PNG or WebP photographs of the device, its boards and components."
-            action={uploading ? undefined : uploadButton}
+            description={
+              canEdit ? "Upload JPEG, PNG or WebP photographs of the device, its boards and components." : undefined
+            }
+            action={uploading || !uploadButton ? undefined : uploadButton}
           />
         ) : (
           <div className="p-4 sm:p-5">
@@ -211,8 +215,9 @@ export default function DeviceImageGallery({
                   label={`Actions for ${imageTitle(image)}`}
                   actions={[
                     { label: "View full size", icon: Maximize2, onSelect: () => setViewerIndex(index) },
-                    { label: "Edit details", icon: Pencil, onSelect: () => openEditor(image) },
-                    image.status === "ready" && { label: "Replace image", icon: Replace, onSelect: () => openReplace(image) },
+                    canEdit && { label: "Edit details", icon: Pencil, onSelect: () => openEditor(image) },
+                    canEdit &&
+                      image.status === "ready" && { label: "Replace image", icon: Replace, onSelect: () => openReplace(image) },
                     { label: "Download original", icon: Download, onSelect: () => void downloadFromCard(image) },
                     ...(extraActions?.(image) ?? []),
                   ]}
@@ -247,8 +252,8 @@ export default function DeviceImageGallery({
           onLoadMore={loadMore}
           loadError={error}
           onClose={() => setViewerIndex(null)}
-          onEdit={openEditor}
-          onReplace={openReplace}
+          onEdit={canEdit ? openEditor : undefined}
+          onReplace={canEdit ? openReplace : undefined}
           onDownload={download}
         />
       )}

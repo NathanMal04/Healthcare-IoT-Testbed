@@ -36,11 +36,13 @@ def handler(event, context):
         return _resp(400, {"error": "artifactId is invalid or missing"})
 
     table = dynamodb.Table(TABLE)
-    # Any USER#/ARTIFACT# link may read, whatever its role; 404 otherwise so
-    # the endpoint doesn't reveal which artifact ids exist.
+    # Any USER#/ARTIFACT# link may read and download, whatever its role, and
+    # any member of a workspace artifact's workspace, viewers included; 404
+    # otherwise so the endpoint doesn't reveal which artifact ids exist.
     try:
         item = testbed_authz.require_resource(
-            table, user_id, "ARTIFACT", artifact_id, legacy_roles=testbed_authz.ANY_ROLE
+            table, user_id, "ARTIFACT", artifact_id, legacy_roles=testbed_authz.ANY_ROLE,
+            workspace_roles=testbed_authz.MEMBERSHIP_ROLES,
         )
     except testbed_authz.AuthorizationError:
         return _resp(404, {"error": "Artifact not found"})
@@ -125,7 +127,8 @@ def _viewable_image(table, user_id, artifact_id):
     image with a supported MIME type; None otherwise, whatever the reason."""
     try:
         item = testbed_authz.require_resource(
-            table, user_id, "ARTIFACT", artifact_id, legacy_roles=testbed_authz.ANY_ROLE
+            table, user_id, "ARTIFACT", artifact_id, legacy_roles=testbed_authz.ANY_ROLE,
+            workspace_roles=testbed_authz.MEMBERSHIP_ROLES,
         )
     except testbed_authz.AuthorizationError:
         return None

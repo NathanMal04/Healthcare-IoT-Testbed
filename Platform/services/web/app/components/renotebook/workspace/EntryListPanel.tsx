@@ -43,7 +43,8 @@ export function entryActions(
  * The selected section's entries, in order, as a timeline: when each last
  * changed, its title and who changed it. The open entry is highlighted.
  * Each entry has a menu (rename, move up/down, move to another section,
- * delete), so reordering works with the keyboard and on touch screens.
+ * delete), so reordering works with the keyboard and on touch screens. With
+ * readOnly (a workspace viewer) entries can only be opened.
  */
 const EntryListPanel = forwardRef<
   HTMLHeadingElement,
@@ -57,8 +58,12 @@ const EntryListPanel = forwardRef<
     onSelect: (entry: NotebookEntry) => void;
     onAction: (action: NavAction) => void;
     onMoveEntry: (section: NotebookSection, index: number, delta: -1 | 1) => void;
+    readOnly?: boolean;
   }
->(function EntryListPanel({ notebook, section, selectedEntryId, busy, onClose, onSelect, onAction, onMoveEntry }, headingRef) {
+>(function EntryListPanel(
+  { notebook, section, selectedEntryId, busy, onClose, onSelect, onAction, onMoveEntry, readOnly = false },
+  headingRef
+) {
   const full = !!section && section.entries.length >= notebook.limits.entriesPerSection;
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -73,7 +78,7 @@ const EntryListPanel = forwardRef<
             "Entries"
           )}
         </h2>
-        {section && (
+        {section && !readOnly && (
           <button
             type="button"
             aria-label={`New entry in ${section.title}`}
@@ -153,13 +158,15 @@ const EntryListPanel = forwardRef<
                         </span>
                       )}
                     </button>
-                    <div className="py-2.5 pr-2">
-                      <RowActionsMenu
-                        label={`Actions for entry ${entry.title}`}
-                        disabled={busy}
-                        actions={entryActions(entry, notebook, onAction, onMoveEntry)}
-                      />
-                    </div>
+                    {!readOnly && (
+                      <div className="py-2.5 pr-2">
+                        <RowActionsMenu
+                          label={`Actions for entry ${entry.title}`}
+                          disabled={busy}
+                          actions={entryActions(entry, notebook, onAction, onMoveEntry)}
+                        />
+                      </div>
+                    )}
                   </li>
                 );
               })}
@@ -169,15 +176,17 @@ const EntryListPanel = forwardRef<
           <div className="m-4 rounded-xl border border-dashed border-line px-4 py-6 text-center">
             <FileText className="mx-auto h-5 w-5 text-slate-300" aria-hidden="true" />
             <p className="mt-2 text-sm text-slate-600">No entries yet.</p>
-            <button
-              type="button"
-              className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:underline disabled:opacity-50"
-              disabled={busy}
-              onClick={() => onAction({ kind: "newEntry", section })}
-            >
-              <FilePlus2 className="h-4 w-4" aria-hidden="true" />
-              Add an entry
-            </button>
+            {!readOnly && (
+              <button
+                type="button"
+                className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:underline disabled:opacity-50"
+                disabled={busy}
+                onClick={() => onAction({ kind: "newEntry", section })}
+              >
+                <FilePlus2 className="h-4 w-4" aria-hidden="true" />
+                Add an entry
+              </button>
+            )}
           </div>
         )}
       </div>

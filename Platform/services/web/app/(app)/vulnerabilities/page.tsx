@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { getDevices, type Device } from "@/lib/devices";
 import { cveHref } from "@/lib/routes";
-import { isWorkspaceUnavailable, scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
+import { canContribute, isWorkspaceUnavailable, scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
 import { cveErrorMessage, listCves, type Cve, type CveSummary } from "@/lib/cves";
 import { AddCveDialog, DeleteCveDialog } from "@/app/components/CveDialogs";
 import CveList from "@/app/components/CveList";
@@ -37,6 +37,8 @@ function VulnerabilitiesView() {
   const router = useRouter();
   const { scope, reportWorkspaceUnavailable } = useWorkspace();
   const workspaceId = scopeWorkspaceId(scope);
+  // Viewers browse and open CVEs; only contributors add, edit, link or delete.
+  const canEdit = canContribute(scope);
 
   const [cves, setCves] = useState<CveSummary[] | null>(null);
   const [devices, setDevices] = useState<Device[] | null>(null);
@@ -112,9 +114,11 @@ function VulnerabilitiesView() {
         description="Known vulnerabilities recorded against your devices"
         scope={scope}
         actions={
-          <Button icon={Plus} onClick={() => setAdding(true)}>
-            Add CVE
-          </Button>
+          canEdit ? (
+            <Button icon={Plus} onClick={() => setAdding(true)}>
+              Add CVE
+            </Button>
+          ) : undefined
         }
       />
 
@@ -139,9 +143,9 @@ function VulnerabilitiesView() {
               label={`Actions for ${cve.cveId}`}
               actions={[
                 { label: "View details", icon: Eye, href: cveHref(cve.cveRecordId) },
-                { label: "Edit CVE", icon: Pencil, href: cveHref(cve.cveRecordId, undefined, { edit: true }) },
-                { label: "Link devices", icon: Link2, href: cveHref(cve.cveRecordId, "devices") },
-                {
+                canEdit && { label: "Edit CVE", icon: Pencil, href: cveHref(cve.cveRecordId, undefined, { edit: true }) },
+                canEdit && { label: "Link devices", icon: Link2, href: cveHref(cve.cveRecordId, "devices") },
+                canEdit && {
                   label: "Delete CVE",
                   icon: Trash2,
                   danger: true,
@@ -157,18 +161,20 @@ function VulnerabilitiesView() {
             <EmptyState
               icon={ShieldAlert}
               title={`No CVEs recorded in ${scopeName} yet`}
-              description="Record a known vulnerability and link it to the devices it affects."
+              description={canEdit ? "Record a known vulnerability and link it to the devices it affects." : undefined}
               action={
-                <Button icon={Plus} onClick={() => setAdding(true)}>
-                  Add CVE
-                </Button>
+                canEdit ? (
+                  <Button icon={Plus} onClick={() => setAdding(true)}>
+                    Add CVE
+                  </Button>
+                ) : undefined
               }
             />
           }
         />
       </Card>
 
-      {adding && (
+      {adding && canEdit && (
         <AddCveDialog
           scope={scope}
           devices={devices}

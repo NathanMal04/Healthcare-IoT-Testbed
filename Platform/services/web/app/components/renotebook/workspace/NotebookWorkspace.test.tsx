@@ -489,3 +489,63 @@ describe("ConflictDialog", () => {
     expect(onUseTheirs).toHaveBeenCalled();
   });
 });
+
+describe("NotebookWorkspace: read-only for a workspace viewer", () => {
+  const W = "0192b000-0000-7000-8000-000000000001";
+  const viewerDevice = { ...device, role: "viewer", workspaceId: W } as Device;
+  const viewerScope = { kind: "workspace" as const, workspaceId: W, name: "Senior Design", role: "viewer" as const };
+
+  it("shows entries without an editor, structure controls or autosave", async () => {
+    withEntries();
+    renderWorkspace({ device: viewerDevice, scope: viewerScope });
+
+    // The saved content is shown, in a read-only view: nothing on the page is editable.
+    expect(await screen.findByText("four screws")).toBeTruthy();
+    expect(document.querySelector('[contenteditable="true"]')).toBeNull();
+    const view = screen.getByLabelText("Content of Opening the device");
+    expect(view.getAttribute("aria-readonly")).toBe("true");
+    expect(view.getAttribute("contenteditable")).toBe("false");
+
+    // Nothing that changes the notebook is offered.
+    for (const name of [/Add section/, /^New entry/, "Entry actions", /^Actions for section/, /^Actions for entry/]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
+    // No save state either: nothing is ever saved.
+    expect(within(topBar()).queryByText(/Saved|Saving|Unsaved/)).toBeNull();
+
+    // Reading another entry still works.
+    fireEvent.click(within(entriesNav()).getByRole("button", { name: "Chipset identification" }));
+    expect(await screen.findByText("Realtek RTL8812AU")).toBeTruthy();
+
+    // Typing at the view does nothing, and only reads ever reach the API.
+    fireEvent.keyDown(screen.getByLabelText("Content of Chipset identification"), { key: "a" });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(calls.every((c) => c.startsWith("GET "))).toBe(true);
+    expect(calls).toContain(`GET ${BASE}/entries/e2`);
+    // And no local draft is written.
+    expect(Object.keys(localStorage).filter((k) => k.includes("reNotebook.draft"))).toEqual([]);
+  });
+
+  it("an empty notebook offers nothing to create", async () => {
+    routes[`GET ${BASE}`] = () => ({ notebook: notebook([]) });
+    renderWorkspace({ device: viewerDevice, scope: viewerScope });
+    expect(await screen.findByText("This RE Notebook is empty")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Create the first section" })).toBeNull();
+  });
+
+  it("an empty section offers no new entry", async () => {
+    routes[`GET ${BASE}`] = () => ({ notebook: notebook([section("s2", "Firmware Analysis", [])]) });
+    renderWorkspace({ device: viewerDevice, scope: viewerScope });
+    expect(await screen.findByText("No entries in Firmware Analysis yet")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /New entry|Add an entry/ })).toBeNull();
+  });
+
+  it("a member of the same workspace still gets the editor", async () => {
+    withEntries();
+    renderWorkspace({ device: { ...viewerDevice, role: "member" } as Device, scope: { ...viewerScope, role: "member" } });
+    expect(await screen.findByRole("textbox", { name: "Content of Opening the device" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Entry actions" })).toBeTruthy();
+  });
+});

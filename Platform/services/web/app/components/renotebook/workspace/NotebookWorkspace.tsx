@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { BookOpen, FilePlus2, FolderPlus, NotebookPen, PanelLeft, PanelRight } from "lucide-react";
-import type { Device } from "@/lib/devices";
+import { canEditDevice, type Device } from "@/lib/devices";
 import { findEntry, type NotebookEntry, type NotebookSection } from "@/lib/reNotebook";
 import { maxWidthFor } from "@/lib/reNotebookLayout";
 import type { Scope } from "@/lib/workspaces";
@@ -28,8 +28,9 @@ const CHROME_WIDTH = 48;
 /**
  * The device's RE Notebook as a full-screen workspace: sections as tabs, the
  * selected section's entries on the left, the open entry in the middle, and
- * the device's images and artifacts on the right. Everyone who can see the
- * device can read and contribute; the backend enforces it.
+ * the device's images and artifacts on the right. Everyone who can edit the
+ * device can read and contribute; a workspace viewer can only read (no
+ * editor, autosave or structure changes). The backend enforces both.
  *
  * Leaving the open entry (another entry or section, or Back to Device) first
  * saves it; if that isn't possible (offline, a conflict), the user decides
@@ -54,6 +55,7 @@ export default function NotebookWorkspace({
   onBack: () => void;
 }) {
   const { user } = useAuth();
+  const readOnly = !canEditDevice(device);
   const nb = useNotebook(device.deviceId);
   const notebook = nb.notebook;
   const panels = usePanelLayout(user?.userId);
@@ -265,6 +267,7 @@ export default function NotebookWorkspace({
           notebook={notebook}
           activeSectionId={sectionId}
           busy={nb.busy}
+          readOnly={readOnly}
           onSelect={selectSection}
           onAction={setDialog}
           onMoveSection={(index, delta) => void nb.moveSection(index, delta)}
@@ -310,6 +313,7 @@ export default function NotebookWorkspace({
                 onSelect={(entry) => selectEntry(entry.entryId, entry.sectionId)}
                 onAction={setDialog}
                 onMoveEntry={(s, index, delta) => void nb.moveEntryWithin(s, index, delta)}
+                readOnly={readOnly}
               />
             </div>
           )}
@@ -349,12 +353,18 @@ export default function NotebookWorkspace({
             <EmptyState
               className="py-16"
               icon={NotebookPen}
-              title="Start this device's RE Notebook"
-              description="Organize your reverse-engineering research into sections (for example Physical Teardown, Firmware Analysis, Vulnerability Investigation), each with its own entries. Everyone with access to this device can read and contribute."
+              title={readOnly ? "This RE Notebook is empty" : "Start this device's RE Notebook"}
+              description={
+                readOnly
+                  ? "No research has been written up for this device yet."
+                  : "Organize your reverse-engineering research into sections (for example Physical Teardown, Firmware Analysis, Vulnerability Investigation), each with its own entries. Everyone with access to this device can read and contribute."
+              }
               action={
-                <Button icon={FolderPlus} onClick={() => setDialog({ kind: "newSection" })}>
-                  Create the first section
-                </Button>
+                readOnly ? undefined : (
+                  <Button icon={FolderPlus} onClick={() => setDialog({ kind: "newSection" })}>
+                    Create the first section
+                  </Button>
+                )
               }
             />
           ) : selected && user ? (
@@ -371,7 +381,9 @@ export default function NotebookWorkspace({
               onStructureChanged={() => void nb.reload()}
               onOpenEntry={(entryId) => open(entryId, entryId ? findEntry(notebook, entryId)?.sectionId ?? sectionId : sectionId)}
               onSaveState={setSave}
+              readOnly={readOnly}
               headerActions={
+                !readOnly &&
                 findEntry(notebook, selected.entryId) && (
                   <RowActionsMenu
                     label="Entry actions"
@@ -390,11 +402,16 @@ export default function NotebookWorkspace({
               title={section && !section.entries.length ? `No entries in ${section.title} yet` : entryCount ? "Select an entry" : "No entries yet"}
               description={
                 section && !section.entries.length
-                  ? "Add an entry to start writing. Entries save automatically as you type."
-                  : "Choose an entry from the list to read or edit it."
+                  ? readOnly
+                    ? undefined
+                    : "Add an entry to start writing. Entries save automatically as you type."
+                  : readOnly
+                    ? "Choose an entry from the list to read it."
+                    : "Choose an entry from the list to read or edit it."
               }
               action={
                 section && !section.entries.length ? (
+                  readOnly ? undefined : 
                   <Button icon={FilePlus2} disabled={nb.busy} onClick={() => setDialog({ kind: "newEntry", section })}>
                     New entry
                   </Button>
@@ -440,7 +457,7 @@ export default function NotebookWorkspace({
         {drawer && <div className="fixed inset-0 z-30 bg-slate-900/30" aria-hidden="true" onClick={closeDrawers} />}
       </div>
 
-      {dialog?.kind === "newSection" && limits && (
+      {!readOnly && dialog?.kind === "newSection" && limits && (
         <TitleDialog
           title="New section"
           label="Section title"
@@ -455,7 +472,7 @@ export default function NotebookWorkspace({
           onClose={() => setDialog(null)}
         />
       )}
-      {dialog?.kind === "renameSection" && limits && (
+      {!readOnly && dialog?.kind === "renameSection" && limits && (
         <TitleDialog
           title="Rename section"
           label="Section title"
@@ -466,7 +483,7 @@ export default function NotebookWorkspace({
           onClose={() => setDialog(null)}
         />
       )}
-      {dialog?.kind === "deleteSection" && (
+      {!readOnly && dialog?.kind === "deleteSection" && (
         <ConfirmDialog
           title="Delete section?"
           confirmLabel="Delete section"
@@ -478,7 +495,7 @@ export default function NotebookWorkspace({
           </p>
         </ConfirmDialog>
       )}
-      {dialog?.kind === "newEntry" && limits && (
+      {!readOnly && dialog?.kind === "newEntry" && limits && (
         <TitleDialog
           title="New entry"
           label={`Entry title (in “${dialog.section.title}”)`}
@@ -492,7 +509,7 @@ export default function NotebookWorkspace({
           onClose={() => setDialog(null)}
         />
       )}
-      {dialog?.kind === "renameEntry" && notebook && limits && (
+      {!readOnly && dialog?.kind === "renameEntry" && notebook && limits && (
         <TitleDialog
           title="Rename entry"
           label="Entry title"
@@ -503,7 +520,7 @@ export default function NotebookWorkspace({
           onClose={() => setDialog(null)}
         />
       )}
-      {dialog?.kind === "moveEntry" && notebook && (
+      {!readOnly && dialog?.kind === "moveEntry" && notebook && (
         <MoveEntryDialog
           notebook={notebook}
           entry={dialog.entry}
@@ -511,7 +528,7 @@ export default function NotebookWorkspace({
           onClose={() => setDialog(null)}
         />
       )}
-      {dialog?.kind === "deleteEntry" && notebook && (
+      {!readOnly && dialog?.kind === "deleteEntry" && notebook && (
         <ConfirmDialog
           title="Delete entry?"
           confirmLabel="Delete entry"

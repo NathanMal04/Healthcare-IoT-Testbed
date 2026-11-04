@@ -132,7 +132,7 @@ export default function OverviewSection({
             onRetry={() => void cves.load()}
             onChanged={cves.upsert}
           />
-          <NotebookActivityCard deviceId={device.deviceId} notebook={overview.notebook} />
+          <NotebookActivityCard deviceId={device.deviceId} notebook={overview.notebook} canEdit={canEdit} />
           <RecentImagesCard images={images} imagesHref={href("images")} />
         </div>
       </div>

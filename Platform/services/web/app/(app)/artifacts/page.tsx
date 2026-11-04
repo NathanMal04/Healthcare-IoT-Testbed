@@ -18,7 +18,7 @@ import ArtifactTypeChips from "@/app/components/ArtifactTypeChips";
 import { RUN_SELECTION_KEY, serializeRunSelection } from "@/lib/runs";
 import { NOTEBOOK_SELECTION_KEY } from "@/lib/sessions";
 import { useWorkspace } from "@/context/WorkspaceContext";
-import { isWorkspaceUnavailable, scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
+import { canContribute, isWorkspaceUnavailable, scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
 import { Download, FolderArchive, Layers, NotebookPen, Play, RefreshCw, Upload, X } from "lucide-react";
 import {
   Alert,
@@ -64,6 +64,9 @@ function ArtifactsView() {
   // so a running upload is never hidden or unmounted.
   const { scope, reportWorkspaceUnavailable, scopeLocked } = useWorkspace();
   const workspaceId = scopeWorkspaceId(scope);
+  // Viewers browse and download; uploading, running scripts and staging
+  // files into a notebook are for contributors.
+  const canEdit = canContribute(scope);
 
   const [devices, setDevices] = useState<Device[]>([]);
   const [filters, setFilters] = useState<Filters>({ type: "", tag: "", batchId: "" });
@@ -198,7 +201,8 @@ function ArtifactsView() {
 
   if (loading || !user) return null;
 
-  const columns: Column<Artifact>[] = [
+  // The selection only feeds "Run a script" and "Open in notebook".
+  const selectColumn: Column<Artifact>[] = canEdit ? [
     {
       key: "select",
       header: (
@@ -216,6 +220,10 @@ function ArtifactsView() {
         />
       ),
     },
+  ] : [];
+
+  const columns: Column<Artifact>[] = [
+    ...selectColumn,
     {
       key: "name",
       header: "Name",
@@ -297,12 +305,14 @@ function ArtifactsView() {
           label={`Actions for ${artifact.name}`}
           actions={[
             artifact.status === "ready" && { label: "Download", icon: Download, onSelect: () => void download(artifact) },
-            artifact.status === "ready" && {
+            canEdit &&
+              artifact.status === "ready" && {
               label: "Run a script",
               icon: Play,
               onSelect: () => runOn([artifact.artifactId]),
             },
-            artifact.status === "ready" && {
+            canEdit &&
+              artifact.status === "ready" && {
               label: "Open in notebook",
               icon: NotebookPen,
               onSelect: () => openInNotebook([artifact.artifactId]),
@@ -328,19 +338,21 @@ function ArtifactsView() {
       />
 
       {/* Kept mounted while another category is shown, so files staged here aren't lost. */}
-      <div hidden={filters.type !== "" || categoryUpload !== null}>
-        <ArtifactUploader
-          devices={devices}
-          requireDevice={scope.kind === "workspace"}
-          onFinished={(uploadBatchId) => {
-            if (uploadBatchId) setFilters((f) => ({ type: f.type, tag: "", batchId: uploadBatchId }));
-            else void load(false);
-            setTagInput("");
-          }}
-        />
-      </div>
+      {canEdit && (
+        <div hidden={filters.type !== "" || categoryUpload !== null}>
+          <ArtifactUploader
+            devices={devices}
+            requireDevice={scope.kind === "workspace"}
+            onFinished={(uploadBatchId) => {
+              if (uploadBatchId) setFilters((f) => ({ type: f.type, tag: "", batchId: uploadBatchId }));
+              else void load(false);
+              setTagInput("");
+            }}
+          />
+        </div>
+      )}
 
-      {categoryUpload && (
+      {categoryUpload && canEdit && (
         <ArtifactUploader
           key={categoryUpload}
           devices={devices}
@@ -360,9 +372,9 @@ function ArtifactsView() {
       <Card className="overflow-hidden">
         <CardHeader
           title={scope.kind === "workspace" ? `${scope.name} artifacts` : "Your artifacts"}
-          description="Select ready files to run a script on them."
+          description={canEdit ? "Select ready files to run a script on them." : "Ready files can be downloaded."}
           actions={
-            selectedIds.size > 0 ? (
+            canEdit && selectedIds.size > 0 ? (
               <div className="flex items-center gap-2">
                 <Button size="sm" icon={Play} onClick={() => runOn(Array.from(selectedIds))}>
                   Run a script on selected ({selectedIds.size})
@@ -392,7 +404,7 @@ function ArtifactsView() {
             disabled={scopeLocked}
             disabledTitle="Wait for the running upload to finish"
           />
-          {filters.type && !categoryUpload && (
+          {canEdit && filters.type && !categoryUpload && (
             <Button size="sm" icon={Upload} onClick={() => setCategoryUpload(filters.type || null)} className="ml-auto">
               Upload {ARTIFACT_TYPE_LABELS[filters.type].single}
             </Button>

@@ -129,6 +129,16 @@ CONDITIONS = {
     "attribute_exists(pk) AND expiresAt = :expires AND expiresAt > :now":
         lambda item, v, n: item is not None and item.get("expiresAt") == v[":expires"]
         and item["expiresAt"] > v[":now"],
+    "attribute_exists(pk) AND expiresAt = :expires AND expiresAt > :now AND #role = :role":
+        lambda item, v, n: item is not None and item.get("expiresAt") == v[":expires"]
+        and item["expiresAt"] > v[":now"] and item.get(n["#role"]) == v[":role"],
+    "attribute_exists(pk) AND expiresAt = :expires AND expiresAt > :now AND attribute_not_exists(#role)":
+        lambda item, v, n: item is not None and item.get("expiresAt") == v[":expires"]
+        and item["expiresAt"] > v[":now"] and n["#role"] not in item,
+    "attribute_exists(pk) AND #role <> :owner":
+        lambda item, v, n: item is not None and item.get(n["#role"]) != v[":owner"],
+    "attribute_not_exists(#role) OR #role <> :owner":
+        lambda item, v, n: item is None or item.get(n["#role"]) != v[":owner"],
 }
 
 
@@ -603,7 +613,8 @@ class InviteTests(ApiTestCase):
         self.assertEqual(self.client.calls, [])
 
     def test_client_controlled_fields_rejected(self):
-        for extra in ({"role": "owner"}, {"role": "member"}, {"invitedBy": THIRD_USER},
+        # role may be member or viewer (InviteRoleTests); owner never.
+        for extra in ({"role": "owner"}, {"role": "admin"}, {"role": None}, {"invitedBy": THIRD_USER},
                       {"expiresAt": "2099-01-01T00:00:00+00:00"}, {"workspaceId": WS_B}):
             with self.subTest(extra=extra):
                 self.assertEqual(self.invite(body={"email": JUSTIN, **extra})["statusCode"], 400)
@@ -721,7 +732,8 @@ class ListInvitesTests(ApiTestCase):
         self.assertEqual([i["workspaceId"] for i in invites], [WS_B, WS_A])
         a = self.table.items[(f"INVITEE#{JUSTIN}", f"WORKSPACE#{WS_A}")]
         self.assertEqual(invites[1], {
-            "workspaceId": WS_A, "workspaceName": "Lab", "invitedBy": USER, "invitedByEmail": OWNER_EMAIL,
+            "workspaceId": WS_A, "workspaceName": "Lab", "role": "member",
+            "invitedBy": USER, "invitedByEmail": OWNER_EMAIL,
             "createdAt": a["createdAt"], "expiresAt": a["expiresAt"],
         })
 
@@ -808,7 +820,7 @@ class AcceptTests(ApiTestCase):
         self.assertEqual([(w["workspaceId"], w["role"]) for w in listed], [(WS_A, "member")])
         self.assertEqual(response_body(self.call("GET", "/invites", user=OTHER_USER, email=JUSTIN))["invites"], [])
 
-    def test_role_is_always_member(self):
+    def test_unexpected_invite_role_grants_member(self):
         self.table.items[(f"WORKSPACE#{WS_A}", f"INVITE#{JUSTIN}")]["role"] = "owner"
         self.assertEqual(self.accept()["statusCode"], 200)
         for key in membership_keys(WS_A, OTHER_USER):
@@ -1003,6 +1015,232 @@ class UnknownRouteTests(ApiTestCase):
     def test_unknown_route_is_404(self):
         self.assertEqual(self.call("GET", "/something")["statusCode"], 404)
         self.assertEqual(self.call("POST", "/invites")["statusCode"], 404)
+
+
+
+# --- Viewer role ----------------------------------------------------------------------
+
+VIEWER = "user-sub-9"
+PROF = "prof@university.edu"
+
+
+class InviteRoleTests(InviteTests):
+    """POST /workspaces/{id}/invites with a role. Inherits InviteTests' setUp
+    and helpers; its own tests are re-run harmlessly."""
+
+    def test_owner_can_invite_a_viewer(self):
+        resp = self.invite(body={"email": PROF, "role": "viewer"})
+        self.assertEqual(resp["statusCode"], 201)
+        self.assertEqual(response_body(resp)["invite"]["role"], "viewer")
+        self.assertEqual(self.table.items[(f"WORKSPACE#{WS_A}", f"INVITE#{PROF}")]["role"], "viewer")
+        self.assertEqual(self.table.items[(f"INVITEE#{PROF}", f"WORKSPACE#{WS_A}")]["role"], "viewer")
+
+    def test_explicit_member_role(self):
+        resp = self.invite(body={"email": PROF, "role": "member"})
+        self.assertEqual(resp["statusCode"], 201)
+        self.assertEqual(self.table.items[(f"WORKSPACE#{WS_A}", f"INVITE#{PROF}")]["role"], "member")
+
+    def test_no_role_defaults_to_member(self):
+        self.assertEqual(self.invite(email=PROF)["statusCode"], 201)
+        self.assertEqual(self.table.items[(f"WORKSPACE#{WS_A}", f"INVITE#{PROF}")]["role"], "member")
+
+    def test_owner_and_unknown_roles_rejected(self):
+        for role in ("owner", "Owner", "VIEWER", "admin", "", None, 1, ["viewer"]):
+            with self.subTest(role=role):
+                self.assertEqual(self.invite(body={"email": PROF, "role": role})["statusCode"], 400)
+        self.assertEqual(self.client.calls, [])
+
+    def test_viewer_cannot_invite(self):
+        self.table.items.update({(r["pk"], r["sk"]): r for r in membership_rows(WS_A, VIEWER, "viewer")})
+        resp = self.invite(user=VIEWER, body={"email": PROF, "role": "viewer"}, claim_email="v@example.com")
+        self.assertEqual(resp["statusCode"], 403)
+        self.assertEqual(self.client.calls, [])
+
+
+class AcceptViewerTests(ApiTestCase):
+    def setUp(self):
+        super().setUp()
+        self.use_table(FakeTable(workspace_rows(WS_A) + invite_rows(WS_A, PROF, role="viewer")
+                                 + workspace_rows(WS_B, name="Other")))
+        # invite() writes the role on both rows (InviteRoleTests).
+        self.table.items[(f"INVITEE#{PROF}", f"WORKSPACE#{WS_A}")]["role"] = "viewer"
+
+    def accept(self, user=VIEWER, email=PROF, body=None, workspace_id=WS_A):
+        return self.call("POST", "/workspaces/{workspaceId}/accept", user=user, body=body,
+                         path={"workspaceId": workspace_id}, email=email)
+
+    def test_accept_grants_viewer(self):
+        resp = self.accept()
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertEqual(response_body(resp)["workspace"]["role"], "viewer")
+        for key in membership_keys(WS_A, VIEWER):
+            self.assertEqual(self.table.items[key]["role"], "viewer")
+        self.assertEqual(invite_keys(WS_A, PROF) & set(self.table.items), set())
+
+    def test_body_cannot_escalate(self):
+        for body in ({"role": "member"}, {"role": "owner"}):
+            with self.subTest(body=body):
+                self.assertEqual(self.accept(body=body)["statusCode"], 400)
+        self.assertEqual(membership_keys(WS_A, VIEWER) & set(self.table.items), set())
+
+    def test_role_changed_after_read_is_refused(self):
+        # The invitation was replaced with another role between the read and
+        # the transaction: the role read earlier can't be granted.
+        real_get = self.table.get_item
+
+        def get_item(Key):
+            result = real_get(Key=Key)
+            if Key == {"pk": f"WORKSPACE#{WS_A}", "sk": f"INVITE#{PROF}"}:
+                self.table.items[(Key["pk"], Key["sk"])]["role"] = "member"
+            return result
+
+        with mock.patch.object(self.table, "get_item", side_effect=get_item):
+            resp = self.accept()
+        self.assertEqual(resp["statusCode"], 409)
+        self.assertEqual(membership_keys(WS_A, VIEWER) & set(self.table.items), set())
+
+    def test_viewer_is_listed_and_can_read_workspace_but_not_others(self):
+        self.assertEqual(self.accept()["statusCode"], 200)
+        listed = response_body(self.call("GET", "/workspaces", user=VIEWER))["workspaces"]
+        self.assertEqual([(w["workspaceId"], w["role"]) for w in listed], [(WS_A, "viewer")])
+
+        resp = self.call("GET", "/workspaces/{workspaceId}", user=VIEWER, path={"workspaceId": WS_A})
+        self.assertEqual(resp["statusCode"], 200)
+        body = response_body(resp)
+        self.assertEqual(body["workspace"]["role"], "viewer")
+        self.assertIn(VIEWER, [m["userId"] for m in body["members"]])
+        self.assertNotIn("invites", body)  # pending invitations are for owners
+
+        other = self.call("GET", "/workspaces/{workspaceId}", user=VIEWER, path={"workspaceId": WS_B})
+        self.assertEqual(other["statusCode"], 404)
+
+    def test_invites_list_shows_role(self):
+        invites = response_body(self.call("GET", "/invites", user=VIEWER, email=PROF))["invites"]
+        self.assertEqual([(i["workspaceId"], i["role"]) for i in invites], [(WS_A, "viewer")])
+
+    def test_legacy_invitation_without_role_grants_member(self):
+        # Rows written before roles: no role on either invitation row.
+        for key in invite_keys(WS_A, PROF):
+            self.table.items[key].pop("role", None)
+        invites = response_body(self.call("GET", "/invites", user=VIEWER, email=PROF))["invites"]
+        self.assertEqual(invites[0]["role"], "member")
+        resp = self.accept()
+        self.assertEqual(resp["statusCode"], 200)
+        for key in membership_keys(WS_A, VIEWER):
+            self.assertEqual(self.table.items[key]["role"], "member")
+
+
+class RevokeInviteTests(ApiTestCase):
+    def setUp(self):
+        super().setUp()
+        self.use_table(FakeTable(
+            workspace_rows(WS_A) + invite_rows(WS_A, PROF, role="viewer") + invite_rows(WS_A, JUSTIN)
+            + membership_rows(WS_A, THIRD_USER, "member") + membership_rows(WS_A, VIEWER, "viewer")
+            + workspace_rows(WS_B, user=OTHER_USER)
+        ))
+
+    def revoke(self, email=PROF, user=USER, workspace_id=WS_A, body=None):
+        return self.call("POST", "/workspaces/{workspaceId}/invites/revoke", user=user,
+                         body=body if body is not None else {"email": email}, path={"workspaceId": workspace_id})
+
+    def test_owner_revokes_both_rows(self):
+        resp = self.revoke("PROF@university.edu")
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertEqual(invite_keys(WS_A, PROF) & set(self.table.items), set())
+        self.assertEqual(invite_keys(WS_A, JUSTIN) & set(self.table.items), invite_keys(WS_A, JUSTIN))
+        self.assertEqual(self.client.calls[0][0]["ConditionCheck"]["ConditionExpression"], "#role = :owner")
+
+    def test_revoked_invitation_cannot_be_accepted(self):
+        self.assertEqual(self.revoke()["statusCode"], 200)
+        resp = self.call("POST", "/workspaces/{workspaceId}/accept", user="user-sub-10",
+                         path={"workspaceId": WS_A}, email=PROF)
+        self.assertEqual(resp["statusCode"], 404)
+
+    def test_member_and_viewer_cannot_revoke(self):
+        for user in (THIRD_USER, VIEWER):
+            with self.subTest(user=user):
+                self.assertEqual(self.revoke(user=user)["statusCode"], 403)
+        self.assertEqual(invite_keys(WS_A, PROF) & set(self.table.items), invite_keys(WS_A, PROF))
+
+    def test_non_member_and_other_workspace_owner_get_404(self):
+        self.assertEqual(self.revoke(user="user-sub-77")["statusCode"], 404)
+        self.assertEqual(self.revoke(user=OTHER_USER)["statusCode"], 404)
+        self.assertEqual(self.client.calls, [])
+
+    def test_missing_invitation_is_404(self):
+        self.assertEqual(self.revoke("nobody@example.com")["statusCode"], 404)
+
+    def test_bad_bodies_rejected(self):
+        for body in ({}, {"email": "not-an-email"}, {"email": PROF, "role": "viewer"}):
+            with self.subTest(body=body):
+                self.assertEqual(self.revoke(body=body)["statusCode"], 400)
+
+    def test_owner_check_repeated_in_transaction(self):
+        # Ownership lost between the check and the write.
+        with mock.patch.object(self.module.testbed_authz, "require_member", return_value="owner"):
+            self.table.items[(f"USER#{USER}", f"WORKSPACE#{WS_A}")]["role"] = "member"
+            resp = self.revoke()
+        self.assertEqual(resp["statusCode"], 403)
+        self.assertEqual(invite_keys(WS_A, PROF) & set(self.table.items), invite_keys(WS_A, PROF))
+
+
+class RemoveMemberTests(RevokeInviteTests):
+    def remove(self, member, user=USER, workspace_id=WS_A):
+        return self.call("DELETE", "/workspaces/{workspaceId}/members/{userId}", user=user,
+                         path={"workspaceId": workspace_id, "userId": member})
+
+    def test_owner_removes_viewer_and_access_ends(self):
+        authz = self.module.testbed_authz
+        self.assertEqual(authz.workspace_role(self.table, VIEWER, WS_A), "viewer")
+        resp = self.remove(VIEWER)
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertEqual(membership_keys(WS_A, VIEWER) & set(self.table.items), set())
+        self.assertIsNone(authz.workspace_role(self.table, VIEWER, WS_A))
+        get = self.call("GET", "/workspaces/{workspaceId}", user=VIEWER, path={"workspaceId": WS_A})
+        self.assertEqual(get["statusCode"], 404)
+        self.assertEqual(response_body(self.call("GET", "/workspaces", user=VIEWER))["workspaces"], [])
+
+    def test_owner_removes_member(self):
+        self.assertEqual(self.remove(THIRD_USER)["statusCode"], 200)
+        self.assertEqual(membership_keys(WS_A, THIRD_USER) & set(self.table.items), set())
+
+    def test_owners_cannot_be_removed(self):
+        self.table.items.update({(r["pk"], r["sk"]): r for r in membership_rows(WS_A, "user-sub-8", "owner")})
+        self.assertEqual(self.remove("user-sub-8")["statusCode"], 403)
+        self.assertEqual(self.remove(USER)["statusCode"], 400)
+        self.assertEqual(membership_keys(WS_A, "user-sub-8") & set(self.table.items),
+                         membership_keys(WS_A, "user-sub-8"))
+
+    def test_owner_promoted_mid_request_is_not_removed(self):
+        # Became an owner after the role check: the transaction refuses.
+        real = self.module.testbed_authz.workspace_role
+
+        def stale_role(table, user_id, workspace_id):
+            return "viewer" if user_id == VIEWER else real(table, user_id, workspace_id)
+
+        with mock.patch.object(self.module.testbed_authz, "workspace_role", side_effect=stale_role):
+            self.table.items[(f"USER#{VIEWER}", f"WORKSPACE#{WS_A}")]["role"] = "owner"
+            resp = self.remove(VIEWER)
+        self.assertEqual(resp["statusCode"], 404)
+        self.assertIn((f"USER#{VIEWER}", f"WORKSPACE#{WS_A}"), self.table.items)
+
+    def test_member_and_viewer_cannot_remove(self):
+        self.assertEqual(self.remove(VIEWER, user=THIRD_USER)["statusCode"], 403)
+        self.assertEqual(self.remove(THIRD_USER, user=VIEWER)["statusCode"], 403)
+        self.assertEqual(self.remove(VIEWER, user=VIEWER)["statusCode"], 403)
+        self.assertEqual(self.client.calls, [])
+
+    def test_cross_workspace(self):
+        # The owner of WS_B can't remove someone from WS_A, and WS_A's owner
+        # can't remove WS_B's owner through WS_A.
+        self.assertEqual(self.remove(VIEWER, user=OTHER_USER)["statusCode"], 404)
+        self.assertEqual(self.remove(OTHER_USER)["statusCode"], 404)
+        self.assertEqual(self.client.calls, [])
+
+    def test_invalid_user_ids(self):
+        for bad in ("", "a#b", "x" * 129, "a\nb", None):
+            with self.subTest(bad=bad):
+                self.assertEqual(self.remove(bad)["statusCode"], 400)
 
 
 if __name__ == "__main__":

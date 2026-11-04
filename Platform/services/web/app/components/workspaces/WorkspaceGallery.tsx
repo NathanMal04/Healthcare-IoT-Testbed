@@ -82,7 +82,11 @@ export function WorkspaceCard({
           {workspace.name}
         </button>
         <p className="text-xs text-slate-500 mt-0.5">
-          {workspace.role === "owner" ? "You own this workspace" : "Shared with you"} · Created {formatDay(workspace.createdAt)}
+          {workspace.role === "owner"
+            ? "You own this workspace"
+            : workspace.role === "viewer"
+              ? "Shared with you (read-only)"
+              : "Shared with you"} · Created {formatDay(workspace.createdAt)}
         </p>
         <CountRow counts={scopeCounts(resources, false)} className="mt-3" />
       </div>

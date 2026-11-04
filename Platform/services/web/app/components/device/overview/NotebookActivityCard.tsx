@@ -17,7 +17,16 @@ const SHOWN = 5;
  * full-screen notebook. Editor names and times are shown only when the
  * notebook records them.
  */
-export default function NotebookActivityCard({ deviceId, notebook }: { deviceId: string; notebook: Loadable<Notebook> }) {
+export default function NotebookActivityCard({
+  deviceId,
+  notebook,
+  canEdit = true,
+}: {
+  deviceId: string;
+  notebook: Loadable<Notebook>;
+  /** False for viewers: no invitation to start writing. */
+  canEdit?: boolean;
+}) {
   const summary = notebook.data ? notebookSummary(notebook.data, SHOWN) : null;
   return (
     <Card>
@@ -57,10 +66,15 @@ export default function NotebookActivityCard({ deviceId, notebook }: { deviceId:
           <div className="flex items-start gap-3">
             <NotebookPen className="mt-0.5 h-5 w-5 shrink-0 text-slate-300" aria-hidden="true" />
             <p className="text-sm text-slate-500">
-              No entries yet.{" "}
-              <Link href={notebookHref(deviceId)} className={`font-medium text-brand-700 hover:text-brand-800 ${focusRing}`}>
-                Start the notebook
-              </Link>
+              No entries yet.
+              {canEdit && (
+                <>
+                  {" "}
+                  <Link href={notebookHref(deviceId)} className={`font-medium text-brand-700 hover:text-brand-800 ${focusRing}`}>
+                    Start the notebook
+                  </Link>
+                </>
+              )}
             </p>
           </div>
         ) : (

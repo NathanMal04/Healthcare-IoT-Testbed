@@ -26,7 +26,7 @@ import { formatBytes, listArtifacts, type Artifact } from "@/lib/artifacts";
 import { formatMoney, parseRunSelection } from "@/lib/runs";
 import { notebookToScript } from "@/lib/notebookScript";
 import { useWorkspace } from "@/context/WorkspaceContext";
-import { scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
+import { canContribute, scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
 import {
   Alert,
   Button,
@@ -496,6 +496,10 @@ function NewSessionForm({
 function NotebooksContent() {
   const params = useSearchParams();
   const router = useRouter();
+  // A notebook stages the scope's files; a workspace viewer can't start one
+  // over the workspace's files (the API refuses it), only from Personal.
+  const { scope } = useWorkspace();
+  const canStart = canContribute(scope);
   const sessionId = params.get("id");
   const prefill = { envId: params.get("env") ?? undefined, selection: params.get("selection") === "1" };
   const prefilled = Boolean(prefill.envId || prefill.selection);
@@ -518,6 +522,7 @@ function NotebooksContent() {
         title="Notebooks"
         description="JupyterLab on one of your environments, with the files you choose. No internet; your notebooks folder is kept between sessions."
         actions={
+          canStart &&
           !creating && (
             <Button icon={Plus} onClick={() => setCreating(true)}>
               New notebook
@@ -526,7 +531,7 @@ function NotebooksContent() {
         }
       />
 
-      {creating && list && (
+      {creating && canStart && list && (
         <NewSessionForm
           list={list}
           prefill={prefill}

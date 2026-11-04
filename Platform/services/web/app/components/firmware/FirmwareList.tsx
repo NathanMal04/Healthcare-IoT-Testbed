@@ -20,7 +20,17 @@ import type { ReverseEngineeringStatus } from "@/lib/reverseEngineering";
 import { useScopeLock } from "@/context/WorkspaceContext";
 import { deviceHref } from "@/lib/routes";
 import ReverseEngineeringStatusSelect from "@/app/components/ReverseEngineeringStatusSelect";
-import { Alert, Button, DataTable, Dialog, RowActionsMenu, StatusBadge, formatDate, type Column } from "@/app/components/ui";
+import {
+  Alert,
+  Button,
+  DataTable,
+  Dialog,
+  ReStatusBadge,
+  RowActionsMenu,
+  StatusBadge,
+  formatDate,
+  type Column,
+} from "@/app/components/ui";
 
 type RetryStage = SingleUploadStage | "checking" | "complete";
 
@@ -102,7 +112,11 @@ export function useFirmwareReStatus(setList: (update: (current: Artifact[] | nul
   return { savingReIds, reError, setReError, changeReStatus };
 }
 
-/** The firmware table. Device names are shown when `deviceNames` is given (scope-wide list). */
+/**
+ * The firmware table. Device names are shown when `deviceNames` is given
+ * (scope-wide list). Without onReStatusChange the status is shown read-only,
+ * and without onRetry there is no retry (a viewer's table).
+ */
 export function FirmwareTable({
   firmware,
   deviceNames,
@@ -113,8 +127,8 @@ export function FirmwareTable({
   firmware: Artifact[];
   deviceNames?: ReadonlyMap<string, string>;
   savingReIds: Set<string>;
-  onReStatusChange: (firmware: Artifact, next: ReverseEngineeringStatus) => void;
-  onRetry: (firmware: Artifact) => void;
+  onReStatusChange?: (firmware: Artifact, next: ReverseEngineeringStatus) => void;
+  onRetry?: (firmware: Artifact) => void;
 }) {
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
@@ -187,14 +201,17 @@ export function FirmwareTable({
       key: "re",
       header: "RE status",
       className: "whitespace-nowrap",
-      cell: (f) => (
-        <ReverseEngineeringStatusSelect
-          value={firmwareReverseEngineeringStatus(f)}
-          saving={savingReIds.has(f.artifactId)}
-          onChange={(next) => onReStatusChange(f, next)}
-          ariaLabel={`Reverse-engineering status for firmware ${f.version ?? f.name}`}
-        />
-      ),
+      cell: (f) =>
+        onReStatusChange ? (
+          <ReverseEngineeringStatusSelect
+            value={firmwareReverseEngineeringStatus(f)}
+            saving={savingReIds.has(f.artifactId)}
+            onChange={(next) => onReStatusChange(f, next)}
+            ariaLabel={`Reverse-engineering status for firmware ${f.version ?? f.name}`}
+          />
+        ) : (
+          <ReStatusBadge status={firmwareReverseEngineeringStatus(f)} />
+        ),
     },
     {
       key: "actions",
@@ -214,7 +231,7 @@ export function FirmwareTable({
                 href: deviceHref(f.deviceIds[0], "firmware"),
               },
             f.status === "ready" && { label: "Download", icon: Download, onSelect: () => void download(f) },
-            isRetryable(f) && { label: "Retry upload", icon: RotateCcw, onSelect: () => onRetry(f) },
+            onRetry && isRetryable(f) && { label: "Retry upload", icon: RotateCcw, onSelect: () => onRetry(f) },
           ]}
         />
       ),

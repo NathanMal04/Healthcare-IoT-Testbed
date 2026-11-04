@@ -4,10 +4,17 @@
   GET  /workspaces                          workspaces the caller belongs to, with their role
   GET  /workspaces/{workspaceId}            workspace + members (members only; owners also
                                             see pending invitations)
-  POST /workspaces/{workspaceId}/invites    {email}  owner invites a teammate as a member
+  POST /workspaces/{workspaceId}/invites    {email, role?}  owner invites a teammate as a
+                                            member (default) or a read-only viewer
+  POST /workspaces/{workspaceId}/invites/revoke   {email}  owner withdraws a pending invitation
+  DELETE /workspaces/{workspaceId}/members/{userId}  owner removes a member or viewer
   GET  /invites                             invitations addressed to the caller's email
   POST /workspaces/{workspaceId}/accept     accept the invitation addressed to the caller
   POST /workspaces/{workspaceId}/decline    decline it
+
+Roles: owner and member contribute; a viewer can read and download the
+workspace's resources but change nothing (testbed_authz.MEMBERSHIP_ROLES vs
+CONTRIBUTOR_ROLES). Owners can't be invited or removed.
 
 Membership is the USER#{uid} / WORKSPACE#{wid} row. Access checks go through
 the shared testbed_authz layer, so this Lambda never decides membership
@@ -40,12 +47,16 @@ TABLE = os.environ["METADATA_TABLE_NAME"]
 
 NAME_MAX_LENGTH = 100
 CREATE_FIELDS = {"name"}
-INVITE_FIELDS = {"email"}
+INVITE_FIELDS = {"email", "role"}
+REVOKE_FIELDS = {"email"}
 BATCH_GET_MAX_KEYS = 100
 
 INVITE_TTL = timedelta(days=14)
 MAX_PENDING_INVITES = 50
-INVITE_ROLE = "member"
+# The roles an invitation may grant; owner never. An invitation without a
+# role (none exist, but the rule is explicit) grants member.
+INVITABLE_ROLES = ("member", "viewer")
+DEFAULT_INVITE_ROLE = "member"
 EMAIL_MAX_LENGTH = 254
 
 UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -87,6 +98,11 @@ def handler(event, context):
             return _resp(200, _get_workspace(table, user_id, workspace_id))
         if route == ("POST", "/workspaces/{workspaceId}/invites"):
             return _invite(table, user_id, claims, workspace_id, _json_body(event))
+        if route == ("POST", "/workspaces/{workspaceId}/invites/revoke"):
+            return _revoke_invite(table, user_id, workspace_id, _json_body(event))
+        if route == ("DELETE", "/workspaces/{workspaceId}/members/{userId}"):
+            member_id = (event.get("pathParameters") or {}).get("userId")
+            return _remove_member(table, user_id, workspace_id, member_id)
         if route == ("POST", "/workspaces/{workspaceId}/accept"):
             _empty_body(event)
             return _accept(table, user_id, claims, workspace_id)
@@ -143,7 +159,7 @@ def _list_workspaces(table, user_id):
     roles = {}
     for link in links:
         role = link.get("role")
-        if role in testbed_authz.WORKSPACE_ROLES:
+        if role in testbed_authz.MEMBERSHIP_ROLES:
             roles[link["sk"][len("WORKSPACE#"):]] = role
 
     by_id = _workspaces_by_id(roles)
@@ -158,7 +174,7 @@ def _list_workspaces(table, user_id):
 def _get_workspace(table, user_id, workspace_id):
     # A non-member gets the same 404 as a workspace that doesn't exist.
     try:
-        role = testbed_authz.require_member(table, user_id, workspace_id)
+        role = testbed_authz.require_member(table, user_id, workspace_id, roles=testbed_authz.MEMBERSHIP_ROLES)
     except testbed_authz.AuthorizationError:
         raise RequestError(404, "Workspace not found")
 
@@ -198,6 +214,7 @@ def _invite(table, user_id, claims, workspace_id, body):
 
     _reject_unsupported(body, INVITE_FIELDS)
     email = _email(body.get("email"))
+    role = _invite_role(body.get("role", DEFAULT_INVITE_ROLE))
     inviter_email = _verified_email(claims)
     if email == inviter_email:
         raise RequestError(400, "You can't invite yourself")
@@ -222,12 +239,14 @@ def _invite(table, user_id, claims, workspace_id, body):
     created_at, expires_at = _iso(now), _iso(now + INVITE_TTL)
     invite = {
         "pk": f"WORKSPACE#{workspace_id}", "sk": f"INVITE#{email}", "entity": "workspace-invite",
-        "email": email, "role": INVITE_ROLE, "invitedBy": user_id,
+        "email": email, "role": role, "invitedBy": user_id,
         "createdAt": created_at, "expiresAt": expires_at,
     }
+    # The role here is for display only; accept grants the role on the
+    # INVITE# row above.
     invitee = {
         "pk": f"INVITEE#{email}", "sk": f"WORKSPACE#{workspace_id}", "entity": "invitee-workspace",
-        "workspaceName": workspace.get("name"), "invitedBy": user_id,
+        "workspaceName": workspace.get("name"), "role": role, "invitedBy": user_id,
         "createdAt": created_at, "expiresAt": expires_at,
     }
     if inviter_email:
@@ -278,6 +297,7 @@ def _list_invites(table, claims):
         invites.append({
             "workspaceId": workspace["workspaceId"],
             "workspaceName": workspace.get("name"),
+            "role": row.get("role") if row.get("role") in INVITABLE_ROLES else DEFAULT_INVITE_ROLE,
             "invitedBy": row.get("invitedBy"),
             "invitedByEmail": row.get("invitedByEmail"),
             "createdAt": row.get("createdAt"),
@@ -304,22 +324,27 @@ def _accept(table, user_id, claims, workspace_id):
     if testbed_authz.workspace_role(table, user_id, workspace_id) is not None:
         raise RequestError(409, "You are already a member of this workspace")
 
+    # The role is the one the owner chose, read from the invitation, never
+    # from the request (which has no body). Anything unexpected on the row
+    # grants the default member role, as every invitation did before roles
+    # existed, and never owner.
+    role = invite.get("role") if invite.get("role") in INVITABLE_ROLES else DEFAULT_INVITE_ROLE
     joined_at = _iso(now)
     user_workspace = {
         "pk": f"USER#{user_id}", "sk": f"WORKSPACE#{workspace_id}", "entity": "user-workspace",
-        "role": INVITE_ROLE, "name": workspace.get("name"), "joinedAt": joined_at,
+        "role": role, "name": workspace.get("name"), "joinedAt": joined_at,
     }
     workspace_user = {
         "pk": f"WORKSPACE#{workspace_id}", "sk": f"USER#{user_id}", "entity": "workspace-user",
-        "role": INVITE_ROLE, "email": email, "joinedAt": joined_at,
+        "role": role, "email": email, "joinedAt": joined_at,
     }
     if invite.get("invitedBy"):
         workspace_user["invitedBy"] = invite["invitedBy"]
 
     # The invitation is consumed and the membership created in one step. The
-    # invitation must still be the one read above (same expiresAt) and
-    # unexpired, and neither membership row may exist, so a second accept,
-    # concurrent or not, fails without changing anything.
+    # invitation must still be the one read above (same expiresAt and role)
+    # and unexpired, and neither membership row may exist, so a second
+    # accept, concurrent or not, fails without changing anything.
     _transact(
         [
             {"ConditionCheck": {
@@ -330,8 +355,12 @@ def _accept(table, user_id, claims, workspace_id):
             {"Delete": {
                 "TableName": TABLE,
                 "Key": _key(f"WORKSPACE#{workspace_id}", f"INVITE#{email}"),
-                "ConditionExpression": "attribute_exists(pk) AND expiresAt = :expires AND expiresAt > :now",
-                "ExpressionAttributeValues": _values({":expires": invite["expiresAt"], ":now": joined_at}),
+                "ConditionExpression": _invite_unchanged_condition(invite),
+                "ExpressionAttributeNames": {"#role": "role"},
+                "ExpressionAttributeValues": _values({
+                    ":expires": invite["expiresAt"], ":now": joined_at,
+                    **({":role": invite["role"]} if "role" in invite else {}),
+                }),
             }},
             {"Delete": {
                 "TableName": TABLE,
@@ -350,7 +379,7 @@ def _accept(table, user_id, claims, workspace_id):
         (500, "Failed to accept the invitation"),
     )
 
-    return _resp(200, {"workspace": {**_public_workspace(workspace), "role": INVITE_ROLE}})
+    return _resp(200, {"workspace": {**_public_workspace(workspace), "role": role}})
 
 
 # --- POST /workspaces/{workspaceId}/decline ------------------------------------------
@@ -377,7 +406,117 @@ def _decline(table, claims, workspace_id):
     return _resp(200, {"declined": True, "workspaceId": workspace_id})
 
 
+# --- POST /workspaces/{workspaceId}/invites/revoke ----------------------------------
+
+def _revoke_invite(table, user_id, workspace_id, body):
+    _require_owner(table, user_id, workspace_id, "Only workspace owners can revoke invitations")
+    _reject_unsupported(body, REVOKE_FIELDS)
+    email = _email(body.get("email"))
+
+    invite_key = {"pk": f"WORKSPACE#{workspace_id}", "sk": f"INVITE#{email}"}
+    invitee_key = {"pk": f"INVITEE#{email}", "sk": f"WORKSPACE#{workspace_id}"}
+    if table.get_item(Key=invite_key).get("Item") is None and table.get_item(Key=invitee_key).get("Item") is None:
+        raise RequestError(404, "Invitation not found")
+
+    # Both rows go together, with the owner check repeated inside the
+    # transaction. The deletes are unconditional, like decline, so a
+    # half-present invitation is cleaned up and repeating it changes nothing.
+    _transact(
+        [
+            _owner_check(user_id, workspace_id),
+            {"Delete": {"TableName": TABLE, "Key": _key(invite_key["pk"], invite_key["sk"])}},
+            {"Delete": {"TableName": TABLE, "Key": _key(invitee_key["pk"], invitee_key["sk"])}},
+        ],
+        "revoke_invite", workspace_id,
+        {0: (403, "Only workspace owners can revoke invitations")},
+        (500, "Failed to revoke the invitation"),
+    )
+    return _resp(200, {"revoked": True, "email": email, "workspaceId": workspace_id})
+
+
+# --- DELETE /workspaces/{workspaceId}/members/{userId} -----------------------------
+
+def _remove_member(table, user_id, workspace_id, member_id):
+    _require_owner(table, user_id, workspace_id, "Only workspace owners can remove members")
+    # A Cognito sub; it becomes a key component, so no "#" or control characters.
+    if (not isinstance(member_id, str) or not member_id or len(member_id) > 128 or "#" in member_id
+            or any(ord(c) < 0x20 or ord(c) == 0x7f for c in member_id)):
+        raise RequestError(400, "userId is invalid")
+    if member_id == user_id:
+        raise RequestError(400, "Owners can't remove themselves")
+
+    # Removing the USER#/WORKSPACE# row ends access at once: every endpoint
+    # reads it on every request. Resources the member created stay with the
+    # workspace.
+    role = testbed_authz.workspace_role(table, member_id, workspace_id)
+    if role is None:
+        raise RequestError(404, "Member not found")
+    if role == "owner":
+        raise RequestError(403, "Owners can't be removed")
+
+    _transact(
+        [
+            _owner_check(user_id, workspace_id),
+            {"Delete": {
+                "TableName": TABLE,
+                "Key": _key(f"USER#{member_id}", f"WORKSPACE#{workspace_id}"),
+                "ConditionExpression": "attribute_exists(pk) AND #role <> :owner",
+                "ExpressionAttributeNames": {"#role": "role"},
+                "ExpressionAttributeValues": _values({":owner": "owner"}),
+            }},
+            {"Delete": {
+                "TableName": TABLE,
+                "Key": _key(f"WORKSPACE#{workspace_id}", f"USER#{member_id}"),
+                "ConditionExpression": "attribute_not_exists(#role) OR #role <> :owner",
+                "ExpressionAttributeNames": {"#role": "role"},
+                "ExpressionAttributeValues": _values({":owner": "owner"}),
+            }},
+        ],
+        "remove_member", workspace_id,
+        {0: (403, "Only workspace owners can remove members"),
+         1: (404, "Member not found"),
+         2: (403, "Owners can't be removed")},
+        (500, "Failed to remove the member"),
+    )
+    return _resp(200, {"removed": True, "userId": member_id, "workspaceId": workspace_id})
+
+
 # --- Helpers -----------------------------------------------------------------------
+
+def _require_owner(table, user_id, workspace_id, forbidden_message):
+    # Non-members get the same 404 as a missing workspace; members and
+    # viewers know the workspace exists, so they are told why.
+    try:
+        testbed_authz.require_member(table, user_id, workspace_id, roles=("owner",))
+    except testbed_authz.NotFound:
+        raise RequestError(404, "Workspace not found")
+    except testbed_authz.Forbidden:
+        raise RequestError(403, forbidden_message)
+
+
+def _owner_check(user_id, workspace_id):
+    return {"ConditionCheck": {
+        "TableName": TABLE,
+        "Key": _key(f"USER#{user_id}", f"WORKSPACE#{workspace_id}"),
+        "ConditionExpression": "#role = :owner",
+        "ExpressionAttributeNames": {"#role": "role"},
+        "ExpressionAttributeValues": _values({":owner": "owner"}),
+    }}
+
+
+def _invite_role(value):
+    if value not in INVITABLE_ROLES:
+        raise RequestError(400, f"role must be one of: {', '.join(INVITABLE_ROLES)}")
+    return value
+
+
+def _invite_unchanged_condition(invite):
+    # The role is part of what was read: an invitation replaced (after it
+    # expired) with another role between the read and the write can't be
+    # accepted with the role read earlier.
+    role = "#role = :role" if "role" in invite else "attribute_not_exists(#role)"
+    return f"attribute_exists(pk) AND expiresAt = :expires AND expiresAt > :now AND {role}"
+
 
 def _public_workspace(item):
     return {

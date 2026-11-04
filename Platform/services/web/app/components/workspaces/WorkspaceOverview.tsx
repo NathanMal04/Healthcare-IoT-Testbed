@@ -63,7 +63,7 @@ export function WorkspaceOverview({
 }) {
   const { user } = useAuth();
   const { scope, selectWorkspace, scopeLocked } = useWorkspace();
-  const { detail, error, invite } = useWorkspaceDetail(workspace.workspaceId);
+  const { detail, error, invite, revoke, remove } = useWorkspaceDetail(workspace.workspaceId);
   // The top bar's breadcrumb names the workspace.
   usePageCrumbs([{ label: "Workspaces", href: "/workspaces" }, { label: workspace.name }]);
   const [tab, setTab] = useState<TabId>("members");
@@ -105,7 +105,7 @@ export function WorkspaceOverview({
         </Button>
       }
     >
-      Switch to {workspace.name} to open these items and make changes.
+      Switch to {workspace.name} to open these items{workspace.role === "viewer" ? "" : " and make changes"}.
     </Alert>
   );
 
@@ -131,7 +131,12 @@ export function WorkspaceOverview({
               {selected && <SelectedPill />}
             </div>
             <p className="text-sm text-slate-500 mt-1">
-              {isOwner ? "You own this workspace and can invite members." : "You are a member of this workspace."} Created{" "}
+              {isOwner
+                ? "You own this workspace and can invite members."
+                : workspace.role === "viewer"
+                  ? "You can view this workspace's research (read-only)."
+                  : "You are a member of this workspace."}{" "}
+              Created{" "}
               {formatDay(workspace.createdAt)}.
             </p>
           </div>
@@ -176,7 +181,11 @@ export function WorkspaceOverview({
                 {error && <Alert tone="error" className="mb-4">{error}</Alert>}
                 {detail ? (
                   detail.members.length > 0 ? (
-                    <MembersTable members={detail.members} currentUserId={user?.userId ?? null} />
+                    <MembersTable
+                      members={detail.members}
+                      currentUserId={user?.userId ?? null}
+                      onRemove={isOwner ? remove : undefined}
+                    />
                   ) : (
                     <EmptyState icon={Users} title="No members yet" className="py-8" />
                   )
@@ -204,7 +213,7 @@ export function WorkspaceOverview({
               </div>
               <div className="p-5">
                 {error && <Alert tone="error" className="mb-4">{error}</Alert>}
-                {detail ? <PendingInvitesTable detail={detail} /> : !error && <LoadingState />}
+                {detail ? <PendingInvitesTable detail={detail} onRevoke={revoke} /> : !error && <LoadingState />}
               </div>
             </Card>
           </TabPanel>
@@ -255,7 +264,7 @@ export function WorkspaceOverview({
       </div>
 
       {inviting && detail && (
-        <Dialog title="Invite a member" subtitle={`They'll join ${workspace.name} as a member`} onClose={() => setInviting(false)} wide>
+        <Dialog title="Invite someone" subtitle={`They'll join ${workspace.name} as a member or a read-only viewer`} onClose={() => setInviting(false)} wide>
           <InviteMemberForm onInvite={invite} />
         </Dialog>
       )}

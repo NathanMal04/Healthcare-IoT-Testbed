@@ -75,7 +75,8 @@ def handler(event, context):
         # USER->DEVICE relationship. A workspace device: any member.
         try:
             device = testbed_authz.require_resource(
-                table, user_id, "DEVICE", device_id, legacy_roles=testbed_authz.ANY_ROLE
+                table, user_id, "DEVICE", device_id, legacy_roles=testbed_authz.ANY_ROLE,
+                workspace_roles=testbed_authz.MEMBERSHIP_ROLES,
             )
         except testbed_authz.AuthorizationError:
             return _resp(403, {"error": "Not authorized for this device"})
@@ -89,7 +90,8 @@ def handler(event, context):
             return _resp(400, {"error": "batchId is invalid"})
         try:
             batch = testbed_authz.require_resource(
-                table, user_id, "BATCH", batch_id, legacy_roles=testbed_authz.ANY_ROLE
+                table, user_id, "BATCH", batch_id, legacy_roles=testbed_authz.ANY_ROLE,
+                workspace_roles=testbed_authz.MEMBERSHIP_ROLES,
             )
         except testbed_authz.AuthorizationError:
             return _resp(404, {"error": "Upload batch not found"})
@@ -109,7 +111,8 @@ def handler(event, context):
         # The owner of a personal run, or any member of a workspace run's
         # workspace; its outputs have the run's scope.
         try:
-            run = testbed_authz.require_resource(table, user_id, "RUN", run_id, legacy_roles=testbed_authz.ANY_ROLE)
+            run = testbed_authz.require_resource(table, user_id, "RUN", run_id, legacy_roles=testbed_authz.ANY_ROLE,
+                                                 workspace_roles=testbed_authz.MEMBERSHIP_ROLES)
         except testbed_authz.AuthorizationError:
             return _resp(404, {"error": "Run not found"})
         scope = run.get("workspaceId")
@@ -168,7 +171,7 @@ def handler(event, context):
 def _is_workspace_member(table, user_id, workspace_id):
     # A non-member gets the same answer as a workspace that doesn't exist.
     try:
-        testbed_authz.require_member(table, user_id, workspace_id)
+        testbed_authz.require_member(table, user_id, workspace_id, roles=testbed_authz.MEMBERSHIP_ROLES)
     except testbed_authz.AuthorizationError:
         return False
     return table.get_item(Key={"pk": f"WORKSPACE#{workspace_id}", "sk": "METADATA"}).get("Item") is not None

@@ -289,6 +289,34 @@ describe("DeviceImageGallery", () => {
     expect(onSet).toHaveBeenCalledWith("img-02");
   });
 
+  it("lets a workspace viewer view and download images, but not upload, edit or replace them", async () => {
+    serve({ pages: { first: { artifacts: range(1, 2) } }, viewUrls: okUrls });
+    const viewer = { ...DEVICE, role: "viewer", workspaceId: "0192b000-0000-7000-8000-000000000001" } as Device;
+    render(<DeviceImageGallery device={viewer} />);
+    await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(2));
+    expect(screen.queryByRole("button", { name: "Upload images" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions for Photo 1" }));
+    expect(screen.getByRole("menuitem", { name: "View full size" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Download original" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Edit details" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Replace image" })).toBeNull();
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+
+    // The full-size viewer offers no edits either.
+    fireEvent.click(screen.getByRole("button", { name: "View Photo 1" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).queryByRole("button", { name: /Edit|Replace/ })).toBeNull();
+    expect(within(dialog).getByRole("button", { name: /Download/ })).toBeTruthy();
+  });
+
+  it("offers a viewer no upload in the empty state", async () => {
+    serve({ pages: { first: { artifacts: [] } }, viewUrls: okUrls });
+    render(<DeviceImageGallery device={{ ...DEVICE, role: "viewer", workspaceId: "w" } as Device} />);
+    await waitFor(() => expect(screen.getByText("No images for this device yet")).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "Upload images" })).toBeNull();
+  });
+
   it("shows empty and error states", async () => {
     serve({ pages: { first: { artifacts: [] } }, viewUrls: okUrls });
     render(<DeviceImageGallery device={DEVICE} />);

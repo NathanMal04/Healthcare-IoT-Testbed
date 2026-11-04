@@ -14,8 +14,8 @@ export interface DeviceActionHandlers {
 
 /**
  * The ⋮ menu for a device, the same in the list and the grid. Links go to
- * the existing Device Details sections; "Edit details" is offered only to
- * those who may edit (the API enforces the same rule).
+ * the existing Device Details sections; "Edit details" and "Upload firmware"
+ * are offered only to those who may edit (the API enforces the same rule).
  */
 export function DeviceActionsMenu({ device, handlers }: { device: Device; handlers: DeviceActionHandlers }) {
   return (
@@ -28,7 +28,11 @@ export function DeviceActionsMenu({ device, handlers }: { device: Device; handle
         { label: "View images", icon: Images, href: deviceHref(device.deviceId, "images") },
         { label: "View CVEs", icon: ShieldAlert, href: deviceHref(device.deviceId, "cves") },
         { label: "Open RE Notebook", icon: BookOpen, href: notebookHref(device.deviceId) },
-        { label: "Upload firmware", icon: Upload, onSelect: () => handlers.onUploadFirmware(device) },
+        canEditDevice(device) && {
+          label: "Upload firmware",
+          icon: Upload,
+          onSelect: () => handlers.onUploadFirmware(device),
+        },
       ]}
     />
   );

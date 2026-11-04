@@ -31,7 +31,7 @@ import {
 import { deviceHref } from "@/lib/routes";
 import { useAuth } from "@/context/AuthContext";
 import { useWorkspace } from "@/context/WorkspaceContext";
-import { isWorkspaceUnavailable, scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
+import { canContribute, isWorkspaceUnavailable, scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
 import AddDeviceDialog from "@/app/components/AddDeviceDialog";
 import EditDeviceDialog from "@/app/components/EditDeviceDialog";
 import FirmwareUploadDialog from "@/app/components/firmware/FirmwareUploadDialog";
@@ -214,11 +214,12 @@ function DevicesView() {
   const openDevice = (device: Device) => router.push(deviceHref(device.deviceId));
 
   // --- Render ---------------------------------------------------------------------
-  const addButton = (
+  // Viewers browse the workspace's devices; only contributors add them.
+  const addButton = canContribute(scope) ? (
     <Button icon={Plus} onClick={() => setAdding(true)}>
       Add device
     </Button>
-  );
+  ) : undefined;
 
   let body: React.ReactNode;
   if (devicesError) {
@@ -240,7 +241,9 @@ function DevicesView() {
       <EmptyState
         icon={Cpu}
         title={scope.kind === "workspace" ? "No devices in this workspace yet" : "No devices yet"}
-        description="Register a device to start uploading its firmware and recording its vulnerabilities."
+        description={
+          addButton ? "Register a device to start uploading its firmware and recording its vulnerabilities." : undefined
+        }
         action={addButton}
       />
     );
@@ -327,7 +330,7 @@ function DevicesView() {
         )}
       </Card>
 
-      {adding && <AddDeviceDialog scope={scope} onClose={() => setAdding(false)} onCreated={loadDevices} />}
+      {adding && addButton && <AddDeviceDialog scope={scope} onClose={() => setAdding(false)} onCreated={loadDevices} />}
       {editing && (
         <EditDeviceDialog
           device={editing}

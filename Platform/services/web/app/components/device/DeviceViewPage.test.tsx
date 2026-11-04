@@ -740,10 +740,10 @@ describe("Device editing and profile picture", () => {
     expect(screen.queryByRole("dialog", { name: "Edit device dialog" })).toBeNull();
   });
 
-  it("shows the edit button and read-only picture to viewers", async () => {
+  it("shows viewers no edit button and a read-only picture", async () => {
     api.getDevice.mockResolvedValue(device({ role: "viewer" }));
     await renderPage();
-    expect(screen.getByRole("button", { name: "Edit Device" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit Device" })).toBeNull();
     expect(stubs.props.DeviceProfilePicture.canEdit).toBe(false);
   });
 
@@ -1361,5 +1361,54 @@ describe("Device overview data", () => {
     expect(screen.getByRole("heading", { name: "Specifications" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Linked vulnerabilities" })).toBeTruthy();
     await waitFor(() => expect(screen.getByRole("link", { name: /Other files: 2/ })).toBeTruthy());
+  });
+});
+
+// --- Workspace viewers ------------------------------------------------------------
+
+describe("Device page for a workspace viewer", () => {
+  const VIEWER_SCOPE = { ...WS, role: "viewer" };
+  const viewerDevice = () => device({ role: "viewer", workspaceId: "ws-1" });
+
+  beforeEach(() => {
+    setScope(VIEWER_SCOPE);
+    api.getDevice.mockResolvedValue(viewerDevice());
+  });
+
+  it("reads the overview with no editing controls", async () => {
+    await renderPage();
+    expect(screen.queryByRole("button", { name: "Edit Device" })).toBeNull();
+    // Reading the RE Notebook is still offered.
+    expect(screen.getByRole("link", { name: "Open RE Notebook" })).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: /Reverse-engineering status/ })).toBeNull();
+  });
+
+  it("lists and downloads artifacts but offers no upload", async () => {
+    api.getArtifactDownloadUrl.mockResolvedValue("https://download");
+    await renderPage(`id=${DEVICE_ID}&tab=artifacts`);
+    await screen.findByText("a-1.bin");
+    expect(screen.queryByRole("button", { name: /^Upload/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "PCAP" }));
+    expect(screen.queryByRole("button", { name: "Upload PCAP" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "PCAP" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for a-1.bin" }));
+    expect(screen.getByRole("menuitem", { name: "Download" })).toBeTruthy();
+  });
+
+  it("shows firmware read-only: no upload, retry or status changes", async () => {
+    await renderPage(`id=${DEVICE_ID}&tab=firmware`);
+    expect(await screen.findByText("pump-2.4.bin")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Upload firmware" })).toBeNull();
+    expect(stubs.props.FirmwareTable.onReStatusChange).toBeUndefined();
+    expect(stubs.props.FirmwareTable.onRetry).toBeUndefined();
+  });
+
+  it("opens linked CVEs but can't link or unlink them", async () => {
+    await renderPage(`id=${DEVICE_ID}&tab=cves`);
+    await screen.findByRole("list", { name: "Linked CVE list" });
+    expect(screen.queryByRole("button", { name: "Link CVEs" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Actions for CVE-2024-0001" }));
+    expect(screen.getByRole("menuitem", { name: "View details" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Unlink from device" })).toBeNull();
   });
 });

@@ -35,7 +35,7 @@ export {
 export { Button, ButtonLink } from "./Button";
 export { Badge, ReStatusBadge, SeverityBadge, StatusBadge, type BadgeTone } from "./Badge";
 export { Card, CardHeader, MetricCard } from "./Card";
-export { PageHeader, ScopeLabel } from "./PageHeader";
+export { PageHeader, ReadOnlyMark, ScopeLabel } from "./PageHeader";
 export { Alert, EmptyState, ErrorState, LoadingState, Skeleton, SkeletonText, type StateHeadingLevel } from "./States";
 export {
   DataTable,

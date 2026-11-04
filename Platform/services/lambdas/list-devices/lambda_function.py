@@ -83,7 +83,7 @@ def _list_workspace_devices(table, user_id, workspace_id):
 
     # A non-member gets the same 404 as a workspace that doesn't exist.
     try:
-        role = testbed_authz.require_member(table, user_id, workspace_id)
+        role = testbed_authz.require_member(table, user_id, workspace_id, roles=testbed_authz.MEMBERSHIP_ROLES)
     except testbed_authz.AuthorizationError:
         return _resp(404, {"error": "Workspace not found"})
     if table.get_item(Key={"pk": f"WORKSPACE#{workspace_id}", "sk": "METADATA"}).get("Item") is None:
@@ -123,7 +123,7 @@ def _get_device(table, user_id, raw_id):
     # link is never consulted for it). Same status codes as PATCH.
     try:
         item = testbed_authz.require_resource(table, user_id, "DEVICE", device_id,
-                                              legacy_roles=testbed_authz.ANY_ROLE)
+                                              legacy_roles=testbed_authz.ANY_ROLE, workspace_roles=testbed_authz.MEMBERSHIP_ROLES)
     except testbed_authz.NotFound:
         return _resp(404, {"error": "Device not found"})
     except testbed_authz.Forbidden:

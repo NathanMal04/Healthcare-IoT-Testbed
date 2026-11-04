@@ -130,7 +130,7 @@ def handler(event, context):
             return _resp(404, {"error": "Unknown route"})
 
         if method == "GET":
-            return _resp(200, {"cve": _public_cve(_authorized_cve(table, user_id, record_id))})
+            return _resp(200, {"cve": _public_cve(_authorized_cve(table, user_id, record_id, read=True))})
         if method == "PATCH":
             return _update_cve(table, user_id, record_id, _json_body(event))
         if method == "DELETE":
@@ -225,8 +225,9 @@ def _list_cves(table, user_id, params):
     if "workspaceId" in params:
         workspace_id = _uuid(params["workspaceId"], "workspaceId")
         # A non-member gets the same 404 as a workspace that doesn't exist.
+        # Viewers may list.
         try:
-            testbed_authz.require_member(table, user_id, workspace_id)
+            testbed_authz.require_member(table, user_id, workspace_id, roles=testbed_authz.MEMBERSHIP_ROLES)
         except testbed_authz.AuthorizationError:
             raise RequestError(404, "Workspace not found")
         if table.get_item(Key={"pk": f"WORKSPACE#{workspace_id}", "sk": "METADATA"}).get("Item") is None:
@@ -717,12 +718,15 @@ def _uuid(value, name):
 
 # --- Authorization and reads --------------------------------------------------------
 
-def _authorized_cve(table, user_id, record_id):
+def _authorized_cve(table, user_id, record_id, read=False):
     """The CVE's METADATA if the caller may use it: the owner of a personal
-    CVE, or any member of a workspace CVE's workspace (never a leftover
-    USER#/CVE# row). 404 either way otherwise, so ids aren't revealed."""
+    CVE, or any contributor of a workspace CVE's workspace (never a leftover
+    USER#/CVE# row); with read=True, workspace viewers too. 404 either way
+    otherwise, so ids aren't revealed."""
+    roles = testbed_authz.MEMBERSHIP_ROLES if read else testbed_authz.CONTRIBUTOR_ROLES
     try:
-        return testbed_authz.require_resource(table, user_id, "CVE", record_id, legacy_roles=("owner",))
+        return testbed_authz.require_resource(table, user_id, "CVE", record_id, legacy_roles=("owner",),
+                                              workspace_roles=roles)
     except testbed_authz.AuthorizationError:
         raise RequestError(404, "CVE not found")
 

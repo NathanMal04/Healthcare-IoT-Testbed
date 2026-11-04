@@ -124,7 +124,8 @@ def handler(event, context):
             return _start(table, user_id, body)
         if (method, resource) == ("GET", "/runs"):
             if "workspaceId" in query:
-                workspace_id = _workspace_scope(table, user_id, query["workspaceId"])
+                workspace_id = _workspace_scope(table, user_id, query["workspaceId"],
+                                                roles=testbed_authz.MEMBERSHIP_ROLES)
                 return _resp(200, {"runs": _list_workspace_runs(table, workspace_id), "workspaceId": workspace_id})
             return _resp(200, {"runs": _list_runs(table, user_id)})
 
@@ -737,7 +738,8 @@ def _run_detail(table, user_id, run):
 
 def _can_cancel(table, user_id, run):
     """The creator of a run, or an owner of a workspace run's workspace. The
-    caller is already authorized to view the run."""
+    caller is already authorized to view the run (a viewer may view, but
+    never starts runs and isn't an owner, so never cancels)."""
     if run.get("createdBy") == user_id:
         return True
     if run.get("workspaceId"):
@@ -783,20 +785,26 @@ def _child_log(table, run, raw_index):
 
 def _authorized_run(table, user_id, run_id):
     """The run's METADATA if the caller may view it: the USER#/RUN# link of a
-    personal run, or membership of a workspace run's workspace (a leftover
-    USER#/RUN# row grants nothing). 404 otherwise, so ids aren't revealed."""
+    personal run, or membership of a workspace run's workspace, viewers
+    included (a leftover USER#/RUN# row grants nothing). 404 otherwise, so
+    ids aren't revealed. Cancelling is decided by _can_cancel."""
     try:
-        return testbed_authz.require_resource(table, user_id, "RUN", run_id, legacy_roles=testbed_authz.ANY_ROLE)
+        return testbed_authz.require_resource(table, user_id, "RUN", run_id, legacy_roles=testbed_authz.ANY_ROLE,
+                                              workspace_roles=testbed_authz.MEMBERSHIP_ROLES)
     except testbed_authz.AuthorizationError:
         raise RequestError(404, "Run not found")
 
 
-def _workspace_scope(table, user_id, raw):
-    """A workspaceId the caller is a member of, of a workspace that exists. A
-    non-member gets the same 404 as a workspace that doesn't exist."""
+def _workspace_scope(table, user_id, raw, roles=testbed_authz.CONTRIBUTOR_ROLES):
+    """A workspaceId the caller has one of `roles` in, of a workspace that
+    exists: contributors by default (estimate and start), any member for
+    listing. A non-member gets the same 404 as a workspace that doesn't
+    exist; a viewer asking to run gets 403."""
     workspace_id = _uuid(raw, "workspaceId")
     try:
-        testbed_authz.require_member(table, user_id, workspace_id)
+        testbed_authz.require_member(table, user_id, workspace_id, roles=roles)
+    except testbed_authz.Forbidden:
+        raise RequestError(403, "Viewers can't run scripts in this workspace")
     except testbed_authz.AuthorizationError:
         raise RequestError(404, "Workspace not found")
     if table.get_item(Key={"pk": f"WORKSPACE#{workspace_id}", "sk": "METADATA"}).get("Item") is None:

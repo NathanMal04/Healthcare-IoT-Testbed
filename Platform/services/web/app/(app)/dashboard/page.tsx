@@ -9,7 +9,7 @@ import { listCves, type CveSummary } from "@/lib/cves";
 import { REVERSE_ENGINEERING_STATUS_LABELS, type ReverseEngineeringStatus } from "@/lib/reverseEngineering";
 import { countLabel, recentCves, reProgress, severityCounts } from "@/lib/dashboard";
 import { useWorkspace } from "@/context/WorkspaceContext";
-import { isWorkspaceUnavailable, scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
+import { canContribute, isWorkspaceUnavailable, scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
 import {
   Alert,
   Button,
@@ -58,6 +58,7 @@ const RE_ORDER: ReverseEngineeringStatus[] = ["complete", "in_progress", "not_st
 function DashboardView() {
   const { scope, invitations, openPanel, reportWorkspaceUnavailable } = useWorkspace();
   const workspaceId = scopeWorkspaceId(scope);
+  const canEdit = canContribute(scope);
   const [overview, setOverview] = useState<Overview | null>(null);
 
   const isMountedRef = useRef(true);
@@ -238,9 +239,11 @@ function DashboardView() {
               icon={ShieldAlert}
               title="No vulnerabilities recorded yet"
               action={
-                <ButtonLink href="/vulnerabilities" variant="secondary" size="sm" icon={Plus}>
-                  Add a CVE
-                </ButtonLink>
+                canEdit ? (
+                  <ButtonLink href="/vulnerabilities" variant="secondary" size="sm" icon={Plus}>
+                    Add a CVE
+                  </ButtonLink>
+                ) : undefined
               }
             />
           ) : (
@@ -269,10 +272,21 @@ function DashboardView() {
       <Card>
         <CardHeader title="Quick actions" />
         <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <QuickAction href="/devices" icon={Cpu} title="Manage devices" text="Register devices and track their progress" />
-          <QuickAction href="/firmware" icon={Upload} title="Upload firmware" text="Add a firmware version to a device" />
-          <QuickAction href="/artifacts" icon={FolderArchive} title="Upload artifacts" text="Captures, logs, binaries and more" />
-          <QuickAction href="/vulnerabilities" icon={ShieldAlert} title="Record a CVE" text="Link known vulnerabilities to devices" />
+          {canEdit ? (
+            <>
+              <QuickAction href="/devices" icon={Cpu} title="Manage devices" text="Register devices and track their progress" />
+              <QuickAction href="/firmware" icon={Upload} title="Upload firmware" text="Add a firmware version to a device" />
+              <QuickAction href="/artifacts" icon={FolderArchive} title="Upload artifacts" text="Captures, logs, binaries and more" />
+              <QuickAction href="/vulnerabilities" icon={ShieldAlert} title="Record a CVE" text="Link known vulnerabilities to devices" />
+            </>
+          ) : (
+            <>
+              <QuickAction href="/devices" icon={Cpu} title="Browse devices" text="Devices and their research progress" />
+              <QuickAction href="/firmware" icon={Microchip} title="Browse firmware" text="Firmware versions under analysis" />
+              <QuickAction href="/artifacts" icon={FolderArchive} title="Browse artifacts" text="Captures, logs, binaries and more" />
+              <QuickAction href="/vulnerabilities" icon={ShieldAlert} title="Browse CVEs" text="Known vulnerabilities and affected devices" />
+            </>
+          )}
         </div>
       </Card>
 

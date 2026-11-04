@@ -68,11 +68,25 @@ resource "aws_api_gateway_resource" "workspaces_workspace_id" {
 }
 
 resource "aws_api_gateway_resource" "workspaces_workspace_id_action" {
-  for_each = toset(["invites", "accept", "decline"])
+  for_each = toset(["invites", "accept", "decline", "members"])
 
   rest_api_id = module.api.rest_api_id
   parent_id   = aws_api_gateway_resource.workspaces_workspace_id.id
   path_part   = each.key
+}
+
+# POST /workspaces/{workspaceId}/invites/revoke
+resource "aws_api_gateway_resource" "workspaces_invites_revoke" {
+  rest_api_id = module.api.rest_api_id
+  parent_id   = aws_api_gateway_resource.workspaces_workspace_id_action["invites"].id
+  path_part   = "revoke"
+}
+
+# DELETE /workspaces/{workspaceId}/members/{userId}
+resource "aws_api_gateway_resource" "workspaces_member_id" {
+  rest_api_id = module.api.rest_api_id
+  parent_id   = aws_api_gateway_resource.workspaces_workspace_id_action["members"].id
+  path_part   = "{userId}"
 }
 
 resource "aws_api_gateway_resource" "invites" {
@@ -113,6 +127,16 @@ locals {
       resource_id = aws_api_gateway_resource.workspaces_workspace_id_action["decline"].id
       method      = "POST"
       path        = "workspaces/*/decline"
+    }
+    "workspaces-id-invites-revoke-POST" = {
+      resource_id = aws_api_gateway_resource.workspaces_invites_revoke.id
+      method      = "POST"
+      path        = "workspaces/*/invites/revoke"
+    }
+    "workspaces-id-members-id-DELETE" = {
+      resource_id = aws_api_gateway_resource.workspaces_member_id.id
+      method      = "DELETE"
+      path        = "workspaces/*/members/*"
     }
     "invites-GET" = {
       resource_id = aws_api_gateway_resource.invites.id

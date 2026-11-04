@@ -7,7 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useScopeLock, useWorkspace } from "@/context/WorkspaceContext";
 import { getDevices, type Device } from "@/lib/devices";
 import { deviceHref } from "@/lib/routes";
-import { isWorkspaceUnavailable, scopeWorkspaceId, type Scope } from "@/lib/workspaces";
+import { canContribute, isWorkspaceUnavailable, scopeWorkspaceId, type Scope } from "@/lib/workspaces";
 import {
   MAX_DEVICES_PER_CVE,
   SEVERITY_LABELS,
@@ -94,6 +94,8 @@ export default function CveDetails({
   const { user } = useAuth();
   const { scope, reportWorkspaceUnavailable } = useWorkspace();
   const workspaceId = scopeWorkspaceId(scope);
+  // Viewers read the CVE and its links; only contributors edit, link or delete.
+  const canEdit = canContribute(scope);
 
   const [cve, setCve] = useState<Cve | null>(null);
   const [devices, setDevices] = useState<Device[] | null>(null);
@@ -103,7 +105,7 @@ export default function CveDetails({
   const [tab, setTab] = useState<CveTabId>(initialTab);
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [editing, setEditing] = useState(initialEdit);
+  const [editing, setEditing] = useState(initialEdit && canEdit);
   const [deleting, setDeleting] = useState(false);
 
   // A write belongs to this scope; keep it from changing mid-request.
@@ -293,27 +295,29 @@ export default function CveDetails({
             </p>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" icon={Pencil} onClick={openEdit} disabled={busy !== null}>
-            Edit
-          </Button>
-          <RowActionsMenu
-            trigger="button"
-            label={`More actions for ${cve.cveId}`}
-            disabled={busy !== null}
-            actions={[
-              {
-                label: "Delete CVE",
-                icon: Trash2,
-                danger: true,
-                onSelect: () => {
-                  setActionError(null);
-                  setDeleting(true);
+        {canEdit && (
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" icon={Pencil} onClick={openEdit} disabled={busy !== null}>
+              Edit
+            </Button>
+            <RowActionsMenu
+              trigger="button"
+              label={`More actions for ${cve.cveId}`}
+              disabled={busy !== null}
+              actions={[
+                {
+                  label: "Delete CVE",
+                  icon: Trash2,
+                  danger: true,
+                  onSelect: () => {
+                    setActionError(null);
+                    setDeleting(true);
+                  },
                 },
-              },
-            ]}
-          />
-        </div>
+              ]}
+            />
+          </div>
+        )}
       </div>
 
       {actionError && !editing && !deleting && (
@@ -358,7 +362,7 @@ export default function CveDetails({
             description={`${deviceCount} of ${MAX_DEVICES_PER_CVE}`}
             actions={
               <Button variant="link" size="sm" onClick={() => selectTab("devices")}>
-                {deviceCount ? "Manage" : "Link a device"}
+                {!canEdit ? "View" : deviceCount ? "Manage" : "Link a device"}
               </Button>
             }
           />
@@ -414,9 +418,11 @@ export default function CveDetails({
                 icon={FileText}
                 title="No description recorded"
                 action={
-                  <Button variant="secondary" size="sm" icon={Pencil} onClick={openEdit}>
-                    Add a description
-                  </Button>
+                  canEdit ? (
+                    <Button variant="secondary" size="sm" icon={Pencil} onClick={openEdit}>
+                      Add a description
+                    </Button>
+                  ) : undefined
                 }
               />
             )}
@@ -451,9 +457,11 @@ export default function CveDetails({
                 icon={Link2}
                 title="No references recorded"
                 action={
-                  <Button variant="secondary" size="sm" icon={Pencil} onClick={openEdit}>
-                    Add references
-                  </Button>
+                  canEdit ? (
+                    <Button variant="secondary" size="sm" icon={Pencil} onClick={openEdit}>
+                      Add references
+                    </Button>
+                  ) : undefined
                 }
               />
             )}
@@ -467,13 +475,13 @@ export default function CveDetails({
             devicesById={devicesById}
             deviceNames={deviceNames}
             busy={busy}
-            onLink={link}
-            onUnlink={(id) => void unlink(id)}
+            onLink={canEdit ? link : undefined}
+            onUnlink={canEdit ? (id) => void unlink(id) : undefined}
           />
         )}
       </TabPanel>
 
-      {editing && (
+      {editing && canEdit && (
         <EditCveDialog
           cve={cve}
           saving={busy === "save"}
@@ -486,7 +494,7 @@ export default function CveDetails({
         />
       )}
 
-      {deleting && (
+      {deleting && canEdit && (
         <DeleteCveDialog
           cve={cve}
           scope={scope}
@@ -640,8 +648,9 @@ function LinkedDevicesTab({
   devicesById: ReadonlyMap<string, Device>;
   deviceNames: ReadonlyMap<string, string>;
   busy: string | null;
-  onLink: (deviceId: string) => Promise<boolean>;
-  onUnlink: (deviceId: string) => void;
+  /** Without onLink and onUnlink the tab is read-only (a viewer's). */
+  onLink?: (deviceId: string) => Promise<boolean>;
+  onUnlink?: (deviceId: string) => void;
 }) {
   const [toLink, setToLink] = useState("");
   const linkedIds = cve.deviceIds;
@@ -652,7 +661,7 @@ function LinkedDevicesTab({
   const rows: LinkedRow[] = sortedDeviceIds(linkedIds, deviceNames).map((id) => ({ id, device: devicesById.get(id) }));
 
   async function link() {
-    if (!toLink || busy) return;
+    if (!toLink || busy || !onLink) return;
     if (await onLink(toLink)) setToLink("");
   }
 
@@ -687,7 +696,7 @@ function LinkedDevicesTab({
             disabled={busy !== null}
             actions={[
               row.device && { label: "View device", icon: Eye, href: deviceHref(row.id) },
-              { label: "Unlink from CVE", icon: Unlink, onSelect: () => onUnlink(row.id) },
+              onUnlink && { label: "Unlink from CVE", icon: Unlink, onSelect: () => onUnlink(row.id) },
             ]}
           />
         ),
@@ -700,37 +709,39 @@ function LinkedDevicesTab({
         title="Linked devices"
         description={`Devices in ${scopeName} affected by this CVE · ${linkedIds.length} of ${MAX_DEVICES_PER_CVE}`}
       />
-      <div className="px-5 py-3 border-b border-line flex flex-wrap items-center gap-2">
-        {devices === null ? (
-          <p className="text-xs text-slate-500">Devices couldn&apos;t be loaded, so none can be linked right now.</p>
-        ) : atLimit ? (
-          <p className="text-xs text-slate-500">A CVE can be linked to at most {MAX_DEVICES_PER_CVE} devices.</p>
-        ) : linkable.length === 0 ? (
-          <p className="text-xs text-slate-500">
-            {devices.length ? "Every device in this scope is already linked." : "No devices in this scope yet."}
-          </p>
-        ) : (
-          <>
-            <select
-              value={toLink}
-              onChange={(e) => setToLink(e.target.value)}
-              disabled={busy !== null}
-              aria-label="Device to link"
-              className={`${selectClass} w-full sm:w-72`}
-            >
-              <option value="">Link a device…</option>
-              {linkable.map((d) => (
-                <option key={d.deviceId} value={d.deviceId}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-            <Button size="sm" variant="secondary" icon={Link2} onClick={() => void link()} disabled={!toLink || busy !== null}>
-              {busy === "link" ? "Linking…" : "Link"}
-            </Button>
-          </>
-        )}
-      </div>
+      {onLink && (
+        <div className="px-5 py-3 border-b border-line flex flex-wrap items-center gap-2">
+          {devices === null ? (
+            <p className="text-xs text-slate-500">Devices couldn&apos;t be loaded, so none can be linked right now.</p>
+          ) : atLimit ? (
+            <p className="text-xs text-slate-500">A CVE can be linked to at most {MAX_DEVICES_PER_CVE} devices.</p>
+          ) : linkable.length === 0 ? (
+            <p className="text-xs text-slate-500">
+              {devices.length ? "Every device in this scope is already linked." : "No devices in this scope yet."}
+            </p>
+          ) : (
+            <>
+              <select
+                value={toLink}
+                onChange={(e) => setToLink(e.target.value)}
+                disabled={busy !== null}
+                aria-label="Device to link"
+                className={`${selectClass} w-full sm:w-72`}
+              >
+                <option value="">Link a device…</option>
+                {linkable.map((d) => (
+                  <option key={d.deviceId} value={d.deviceId}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+              <Button size="sm" variant="secondary" icon={Link2} onClick={() => void link()} disabled={!toLink || busy !== null}>
+                {busy === "link" ? "Linking…" : "Link"}
+              </Button>
+            </>
+          )}
+        </div>
+      )}
       {rows.length === 0 ? (
         <EmptyState
           icon={Cpu}

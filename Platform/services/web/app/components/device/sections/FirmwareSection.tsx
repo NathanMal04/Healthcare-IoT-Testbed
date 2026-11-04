@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Microchip, Upload } from "lucide-react";
-import type { Device } from "@/lib/devices";
+import { canEditDevice, type Device } from "@/lib/devices";
 import type { Artifact } from "@/lib/artifacts";
 import FirmwareUploadDialog from "@/app/components/firmware/FirmwareUploadDialog";
 import { FirmwareRetryDialog, FirmwareTable, useFirmwareReStatus } from "@/app/components/firmware/FirmwareList";
@@ -25,17 +25,20 @@ export default function FirmwareSection({
   const [uploading, setUploading] = useState(false);
   const [retryFirmware, setRetryFirmware] = useState<Artifact | null>(null);
   const { savingReIds, reError, setReError, changeReStatus } = useFirmwareReStatus(setFirmware);
+  // Viewers see the versions and their status, and can download them.
+  const canEdit = canEditDevice(device);
+  const uploadButton = canEdit ? (
+    <Button size="sm" icon={Upload} onClick={() => setUploading(true)}>
+      Upload firmware
+    </Button>
+  ) : undefined;
 
   return (
     <Card className="overflow-hidden">
       <CardHeader
         title="Firmware"
         description="Firmware versions uploaded for this device"
-        actions={
-          <Button size="sm" icon={Upload} onClick={() => setUploading(true)}>
-            Upload firmware
-          </Button>
-        }
+        actions={uploadButton}
       />
       {reError && (
         <Alert tone="error" className="mx-5 mt-3" onDismiss={() => setReError(null)}>
@@ -50,18 +53,14 @@ export default function FirmwareSection({
         <EmptyState
           icon={Microchip}
           title="No firmware uploaded yet"
-          action={
-            <Button size="sm" icon={Upload} onClick={() => setUploading(true)}>
-              Upload firmware
-            </Button>
-          }
+          action={uploadButton}
         />
       ) : (
         <FirmwareTable
           firmware={firmware}
           savingReIds={savingReIds}
-          onReStatusChange={(f, next) => void changeReStatus(f, next)}
-          onRetry={setRetryFirmware}
+          onReStatusChange={canEdit ? (f, next) => void changeReStatus(f, next) : undefined}
+          onRetry={canEdit ? setRetryFirmware : undefined}
         />
       )}
 

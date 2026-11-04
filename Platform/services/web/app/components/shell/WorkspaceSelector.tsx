@@ -2,7 +2,8 @@
 
 import { Building2, ChevronDown, UserRound, Users } from "lucide-react";
 import { useWorkspace } from "@/context/WorkspaceContext";
-import { scopeKey, workspaceScope } from "@/lib/workspaces";
+import { isReadOnlyScope, scopeKey, workspaceScope } from "@/lib/workspaces";
+import { ReadOnlyMark } from "@/app/components/ui";
 
 const CREATE_OPTION = "__create__";
 const SELECT_CLASS =
@@ -53,14 +54,15 @@ export default function WorkspaceSelector({
 
   const ScopeIcon = scopeReady && scope.kind === "workspace" ? Building2 : UserRound;
   const scopeName = !scopeReady ? "Loading" : scope.kind === "workspace" ? scope.name : "Personal";
+  const readOnly = scopeReady && isReadOnlyScope(scope);
 
   if (variant === "rail") {
     return (
       <button
         type="button"
         onClick={onExpand}
-        aria-label={`Scope: ${scopeName}. Expand the navigation to switch`}
-        title={`Scope: ${scopeName}`}
+        aria-label={`Scope: ${scopeName}${readOnly ? " (read-only)" : ""}. Expand the navigation to switch`}
+        title={`Scope: ${scopeName}${readOnly ? " (read-only)" : ""}`}
         className="group relative h-10 w-10 inline-flex items-center justify-center rounded-lg border border-line bg-white text-slate-600 shadow-sm hover:text-slate-900 hover:border-line-strong outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
       >
         <ScopeIcon className="h-[18px] w-[18px]" aria-hidden="true" />
@@ -110,6 +112,11 @@ export default function WorkspaceSelector({
         <ChevronDown className="h-4 w-4 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" aria-hidden="true" />
       </div>
 
+      {readOnly && (
+        <p className="px-1">
+          <ReadOnlyMark />
+        </p>
+      )}
       {scopeLocked && (
         <p id="scope-locked-reason" className="px-1 text-2xs text-slate-500">
           Finish the upload or change in progress before switching.

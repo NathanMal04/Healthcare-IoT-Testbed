@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Building2, FolderOpen, Inbox, Info, Mail, ShieldCheck, UserPlus, Users } from "lucide-react";
+import { Building2, FolderOpen, Inbox, Info, Mail, ShieldCheck, UserMinus, UserPlus, Users, X, type LucideIcon } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import {
@@ -12,6 +12,9 @@ import {
   getWorkspace,
   inviteWorkspaceMember,
   isWorkspaceUnavailable,
+  removeWorkspaceMember,
+  revokeWorkspaceInvite,
+  type InviteRole,
   type WorkspaceDetail,
   type WorkspaceInvite,
   type WorkspaceMember,
@@ -210,27 +213,49 @@ export function useWorkspaceDetail(workspaceId: string) {
   }, [load]);
 
   const invite = useCallback(
-    async (email: string): Promise<WorkspaceInvite> => {
-      const created = await inviteWorkspaceMember(workspaceId, email);
+    async (email: string, role: InviteRole): Promise<WorkspaceInvite> => {
+      const created = await inviteWorkspaceMember(workspaceId, email, role);
       await load();
       return created;
     },
     [workspaceId, load]
   );
 
-  return { detail, error, invite };
+  const revoke = useCallback(
+    async (email: string): Promise<void> => {
+      await revokeWorkspaceInvite(workspaceId, email);
+      await load();
+    },
+    [workspaceId, load]
+  );
+
+  const remove = useCallback(
+    async (userId: string): Promise<void> => {
+      await removeWorkspaceMember(workspaceId, userId);
+      await load();
+    },
+    [workspaceId, load]
+  );
+
+  return { detail, error, invite, revoke, remove };
 }
 
 function MembersDialog({ workspaceId }: { workspaceId: string }) {
   const { user } = useAuth();
   const { closePanel } = useWorkspace();
-  const { detail, error, invite } = useWorkspaceDetail(workspaceId);
+  const { detail, error, invite, revoke, remove } = useWorkspaceDetail(workspaceId);
 
   return (
     <Dialog title={detail?.workspace.name ?? "Workspace"} subtitle="Members and invitations" onClose={closePanel} wide>
       {error && <Alert tone="error" className="mb-4">{error}</Alert>}
       {detail ? (
-        <MembersPanel detail={detail} currentUserId={user?.userId ?? null} onInvite={invite} />
+        <MembersPanel
+          detail={detail}
+          currentUserId={user?.userId ?? null}
+          onInvite={invite}
+          onRevoke={revoke}
+          onRemove={remove}
+        />
       ) : (
         !error && <LoadingState />
       )}
@@ -239,7 +264,65 @@ function MembersDialog({ workspaceId }: { workspaceId: string }) {
 }
 
 export function RoleBadge({ role }: { role: WorkspaceRole }) {
-  return role === "owner" ? <Badge tone="brand">Owner</Badge> : <Badge tone="neutral">Member</Badge>;
+  if (role === "owner") return <Badge tone="brand">Owner</Badge>;
+  if (role === "viewer") return <Badge tone="neutral">Viewer</Badge>;
+  return <Badge tone="neutral">Member</Badge>;
+}
+
+/**
+ * A row action that asks for confirmation inline before running, and shows
+ * its own error. Used to remove members and revoke invitations.
+ */
+function ConfirmAction({
+  label,
+  confirmLabel,
+  icon: Icon,
+  ariaLabel,
+  onConfirm,
+}: {
+  label: string;
+  confirmLabel: string;
+  icon: LucideIcon;
+  ariaLabel: string;
+  onConfirm: () => Promise<void>;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run() {
+    setBusy(true);
+    setError(null);
+    try {
+      await onConfirm();
+    } catch (err) {
+      setError(describeError(err, `Couldn't ${label.toLowerCase()}`));
+      setConfirming(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      {confirming ? (
+        <div className="flex items-center gap-1.5">
+          <button type="button" className={secondaryButton} disabled={busy} onClick={() => setConfirming(false)}>
+            Cancel
+          </button>
+          <button type="button" className={primaryButton} disabled={busy} onClick={() => void run()}>
+            {busy ? "…" : confirmLabel}
+          </button>
+        </div>
+      ) : (
+        <button type="button" className={secondaryButton} aria-label={ariaLabel} onClick={() => setConfirming(true)}>
+          <Icon className="h-4 w-4" aria-hidden="true" />
+          {label}
+        </button>
+      )}
+      {error && <p className="text-xs text-red-600 max-w-[16rem] text-right" role="alert">{error}</p>}
+    </div>
+  );
 }
 
 export function Avatar({ email, size = "md" }: { email: string | null; size?: "sm" | "md" }) {
@@ -254,8 +337,20 @@ export function Avatar({ email, size = "md" }: { email: string | null; size?: "s
   );
 }
 
-/** A workspace's members: who they are, their role and when they joined. */
-export function MembersTable({ members, currentUserId }: { members: WorkspaceMember[]; currentUserId: string | null }) {
+/**
+ * A workspace's members: who they are, their role and when they joined. With
+ * onRemove (owners), members and viewers other than owners can be removed;
+ * the backend refuses anyone else, and never removes an owner.
+ */
+export function MembersTable({
+  members,
+  currentUserId,
+  onRemove,
+}: {
+  members: WorkspaceMember[];
+  currentUserId: string | null;
+  onRemove?: (userId: string) => Promise<void>;
+}) {
   const columns: Column<WorkspaceMember>[] = [
     {
       key: "member",
@@ -279,6 +374,26 @@ export function MembersTable({ members, currentUserId }: { members: WorkspaceMem
       hideBelow: "sm",
       className: "align-middle whitespace-nowrap",
     },
+    ...(onRemove
+      ? [
+          {
+            key: "actions",
+            header: <span className="sr-only">Actions</span>,
+            headerClassName: "text-right",
+            className: "align-middle text-right",
+            cell: (member: WorkspaceMember) =>
+              member.role !== "owner" && member.userId !== currentUserId ? (
+                <ConfirmAction
+                  label="Remove"
+                  confirmLabel="Remove access"
+                  icon={UserMinus}
+                  ariaLabel={`Remove ${member.email ?? "this member"} from the workspace`}
+                  onConfirm={() => onRemove(member.userId)}
+                />
+              ) : null,
+          } satisfies Column<WorkspaceMember>,
+        ]
+      : []),
   ];
   return (
     <div className="border border-line rounded-lg overflow-hidden">
@@ -291,8 +406,13 @@ export function MembersTable({ members, currentUserId }: { members: WorkspaceMem
  * The owner's invite form. The backend re-checks ownership on every
  * invitation; onInvite reloads the workspace so pending invitations update.
  */
-export function InviteMemberForm({ onInvite }: { onInvite: (email: string) => Promise<WorkspaceInvite> }) {
+export function InviteMemberForm({
+  onInvite,
+}: {
+  onInvite: (email: string, role: InviteRole) => Promise<WorkspaceInvite>;
+}) {
   const [email, setEmail] = useState("");
+  const [role, setRole] = useState<InviteRole>("member");
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteDone, setInviteDone] = useState<string | null>(null);
@@ -305,10 +425,11 @@ export function InviteMemberForm({ onInvite }: { onInvite: (email: string) => Pr
     setInviteError(null);
     setInviteDone(null);
     try {
-      const invite = await onInvite(trimmed);
+      const invite = await onInvite(trimmed, role);
       setEmail("");
       setInviteDone(
-        `Invitation created for ${invite.email}. They will see it when they sign in with this verified email address.`
+        `${invite.role === "viewer" ? "Viewer invitation" : "Invitation"} created for ${invite.email}. ` +
+          "They will see it when they sign in with this verified email address."
       );
     } catch (err) {
       setInviteError(describeError(err, "Couldn't create the invitation"));
@@ -332,14 +453,27 @@ export function InviteMemberForm({ onInvite }: { onInvite: (email: string) => Pr
             className={`${inputClass} pl-9`}
           />
         </div>
+        <select
+          value={role}
+          onChange={(e) => setRole(e.target.value as InviteRole)}
+          disabled={inviting}
+          aria-label="Role"
+          className={`${inputClass} sm:w-36`}
+        >
+          <option value="member">Member</option>
+          <option value="viewer">Viewer</option>
+        </select>
         <button type="submit" disabled={inviting || !email.trim()} className={primaryButton}>
           <UserPlus className="h-4 w-4" aria-hidden="true" />
-          {inviting ? "Inviting…" : "Invite member"}
+          {inviting ? "Inviting…" : role === "viewer" ? "Invite viewer" : "Invite member"}
         </button>
       </form>
       <p className="text-xs text-slate-500 mt-1.5 flex items-center gap-1">
         <Info className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        Invitations are shown in the app; no email is sent. They join as a member.
+        Invitations are shown in the app; no email is sent.{" "}
+        {role === "viewer"
+          ? "A viewer can browse and download everything in this workspace but can't change anything."
+          : "Members can add and change research in this workspace."}
       </p>
       {inviteDone && <Alert tone="success" className="mt-2">{inviteDone}</Alert>}
       {inviteError && <Alert tone="error" className="mt-2">{inviteError}</Alert>}
@@ -347,8 +481,17 @@ export function InviteMemberForm({ onInvite }: { onInvite: (email: string) => Pr
   );
 }
 
-/** Invitations the workspace has sent that haven't been answered (owners only). */
-export function PendingInvitesTable({ detail }: { detail: WorkspaceDetail }) {
+/**
+ * Invitations the workspace has sent that haven't been answered (owners
+ * only). With onRevoke, each can be withdrawn.
+ */
+export function PendingInvitesTable({
+  detail,
+  onRevoke,
+}: {
+  detail: WorkspaceDetail;
+  onRevoke?: (email: string) => Promise<void>;
+}) {
   const emailsById = new Map(detail.members.map((m) => [m.userId, m.email]));
   const invites = detail.invites ?? [];
   if (invites.length === 0) {
@@ -374,6 +517,12 @@ export function PendingInvitesTable({ detail }: { detail: WorkspaceDetail }) {
       className: "align-middle",
     },
     {
+      key: "role",
+      header: "Role",
+      cell: (invite) => <RoleBadge role={invite.role} />,
+      className: "align-middle",
+    },
+    {
       key: "by",
       header: "Invited by",
       cell: (invite) => (
@@ -390,6 +539,25 @@ export function PendingInvitesTable({ detail }: { detail: WorkspaceDetail }) {
       className: "align-middle whitespace-nowrap",
     },
     { key: "status", header: "Status", cell: () => <Badge tone="warning" dot>Pending</Badge>, className: "align-middle" },
+    ...(onRevoke
+      ? [
+          {
+            key: "actions",
+            header: <span className="sr-only">Actions</span>,
+            headerClassName: "text-right",
+            className: "align-middle text-right",
+            cell: (invite: WorkspaceInvite) => (
+              <ConfirmAction
+                label="Revoke"
+                confirmLabel="Revoke invitation"
+                icon={X}
+                ariaLabel={`Revoke the invitation for ${invite.email}`}
+                onConfirm={() => onRevoke(invite.email)}
+              />
+            ),
+          } satisfies Column<WorkspaceInvite>,
+        ]
+      : []),
   ];
   return (
     <div className="border border-line rounded-lg overflow-hidden">
@@ -407,10 +575,14 @@ export function MembersPanel({
   detail,
   currentUserId,
   onInvite,
+  onRevoke,
+  onRemove,
 }: {
   detail: WorkspaceDetail;
   currentUserId: string | null;
-  onInvite: (email: string) => Promise<WorkspaceInvite>;
+  onInvite: (email: string, role: InviteRole) => Promise<WorkspaceInvite>;
+  onRevoke: (email: string) => Promise<void>;
+  onRemove: (userId: string) => Promise<void>;
 }) {
   const isOwner = detail.workspace.role === "owner";
   return (
@@ -419,19 +591,19 @@ export function MembersPanel({
         <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
           Members ({detail.members.length})
         </h3>
-        <MembersTable members={detail.members} currentUserId={currentUserId} />
+        <MembersTable members={detail.members} currentUserId={currentUserId} onRemove={isOwner ? onRemove : undefined} />
       </section>
 
       {isOwner ? (
         <>
           <section>
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Invite a member</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Invite someone</h3>
             <InviteMemberForm onInvite={onInvite} />
           </section>
 
           <section>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Pending invitations</h3>
-            <PendingInvitesTable detail={detail} />
+            <PendingInvitesTable detail={detail} onRevoke={onRevoke} />
           </section>
         </>
       ) : (
@@ -529,7 +701,12 @@ export function InvitationsList({ onAccepted }: { onAccepted?: () => void }) {
                     <Building2 className="h-4 w-4" aria-hidden="true" />
                   </span>
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-800 truncate">{invitation.workspaceName}</p>
+                    <p className="text-sm font-medium text-slate-800 truncate">
+                      {invitation.workspaceName}{" "}
+                      <span className="font-normal text-slate-500">
+                        as {invitation.role === "viewer" ? "a viewer (read-only)" : "a member"}
+                      </span>
+                    </p>
                     <p className="text-xs text-slate-500">
                       Invited by {invitation.invitedByEmail ?? "a workspace owner"} · Expires{" "}
                       {formatDate(invitation.expiresAt)}

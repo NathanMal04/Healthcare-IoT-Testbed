@@ -19,7 +19,7 @@ import { formatBytes, getArtifactDownloadUrl, listArtifacts, type Artifact } fro
 import NewRunForm from "@/app/components/NewRunForm";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { useAuth } from "@/context/AuthContext";
-import { isWorkspaceUnavailable, scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
+import { canContribute, isWorkspaceUnavailable, scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
 import {
   Alert,
   Button,
@@ -272,6 +272,8 @@ function RunsContent() {
   const router = useRouter();
   const { scope, reportWorkspaceUnavailable } = useWorkspace();
   const workspaceId = scopeWorkspaceId(scope);
+  // Viewers see runs, results and logs; only contributors start runs.
+  const canRun = canContribute(scope);
   const runId = params.get("id");
   const prefill = {
     moduleId: params.get("module") ?? undefined,
@@ -310,6 +312,7 @@ function RunsContent() {
             : "Scripts running in bulk over your artifacts."
         }
         actions={
+          canRun &&
           !creating && (
             <Button icon={Plus} onClick={() => setCreating(true)}>
               New run
@@ -318,7 +321,7 @@ function RunsContent() {
         }
       />
 
-      {creating && (
+      {creating && canRun && (
         <NewRunForm
           prefill={prefill}
           onCancel={() => {

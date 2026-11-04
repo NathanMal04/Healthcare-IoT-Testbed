@@ -70,9 +70,11 @@ export default function DeviceHeader({
           <ButtonLink href={notebookHref(device.deviceId)} variant="primary" size="sm" icon={NotebookPen}>
             Open RE Notebook
           </ButtonLink>
-          <Button variant="secondary" size="sm" icon={Pencil} onClick={onEdit}>
-            Edit Device
-          </Button>
+          {canEdit && (
+            <Button variant="secondary" size="sm" icon={Pencil} onClick={onEdit}>
+              Edit Device
+            </Button>
+          )}
         </div>
       </header>
 

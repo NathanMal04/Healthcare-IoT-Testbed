@@ -10,7 +10,7 @@ import {
   type ReverseEngineeringStatus,
 } from "@/lib/reverseEngineering";
 import { useWorkspace } from "@/context/WorkspaceContext";
-import { isWorkspaceUnavailable, scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
+import { canContribute, isWorkspaceUnavailable, scopeKey, scopeWorkspaceId } from "@/lib/workspaces";
 import FirmwareUploadDialog from "@/app/components/firmware/FirmwareUploadDialog";
 import { FirmwareRetryDialog, FirmwareTable, useFirmwareReStatus } from "@/app/components/firmware/FirmwareList";
 import {
@@ -38,6 +38,8 @@ export default function FirmwarePage() {
 function FirmwareView() {
   const { scope, reportWorkspaceUnavailable } = useWorkspace();
   const workspaceId = scopeWorkspaceId(scope);
+  // Viewers browse and download; only contributors upload or change status.
+  const canEdit = canContribute(scope);
 
   const [firmware, setFirmware] = useState<Artifact[] | null>(null);
   const [nextToken, setNextToken] = useState<string | undefined>();
@@ -118,9 +120,11 @@ function FirmwareView() {
         description="Firmware versions uploaded for your devices"
         scope={scope}
         actions={
-          <Button icon={Upload} onClick={() => setUploading(true)}>
-            Upload firmware
-          </Button>
+          canEdit ? (
+            <Button icon={Upload} onClick={() => setUploading(true)}>
+              Upload firmware
+            </Button>
+          ) : undefined
         }
       />
 
@@ -170,11 +174,13 @@ function FirmwareView() {
           <EmptyState
             icon={Microchip}
             title="No firmware uploaded yet"
-            description="Firmware always belongs to a device: choose the device when you upload."
+            description={canEdit ? "Firmware always belongs to a device: choose the device when you upload." : undefined}
             action={
-              <Button icon={Upload} onClick={() => setUploading(true)}>
-                Upload firmware
-              </Button>
+              canEdit ? (
+                <Button icon={Upload} onClick={() => setUploading(true)}>
+                  Upload firmware
+                </Button>
+              ) : undefined
             }
           />
         ) : visible.length === 0 ? (
@@ -188,8 +194,8 @@ function FirmwareView() {
             firmware={visible}
             deviceNames={deviceNames}
             savingReIds={savingReIds}
-            onReStatusChange={(f, next) => void changeReStatus(f, next)}
-            onRetry={setRetryFirmware}
+            onReStatusChange={canEdit ? (f, next) => void changeReStatus(f, next) : undefined}
+            onRetry={canEdit ? setRetryFirmware : undefined}
           />
         )}
 

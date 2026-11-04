@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Download, FolderArchive, Upload } from "lucide-react";
-import type { Device } from "@/lib/devices";
+import { canEditDevice, type Device } from "@/lib/devices";
 import {
   ARTIFACT_TYPE_LABELS,
   formatBytes,
@@ -32,6 +32,8 @@ import {
 
 /** Every file linked to the device, by category, with the uploader and downloads. */
 export default function ArtifactsSection({ device }: { device: Device }) {
+  // Viewers browse and download; only contributors upload.
+  const canUpload = canEditDevice(device);
   // The uploader locks the scope while it runs, so it can't be closed, nor
   // the category changed, mid-upload.
   const { scopeLocked } = useWorkspace();
@@ -151,7 +153,7 @@ export default function ArtifactsSection({ device }: { device: Device }) {
           title="Artifacts"
           description="Every file linked to this device, including firmware"
           actions={
-            upload ? (
+            !canUpload ? undefined : upload ? (
               <Button
                 variant="secondary"
                 size="sm"

@@ -1,6 +1,13 @@
 import { ApiError, apiRequest } from "@/lib/api";
 
-export type WorkspaceRole = "owner" | "member";
+/**
+ * owner and member contribute; a viewer can browse and download everything in
+ * the workspace but change nothing. The backend enforces this on every route.
+ */
+export type WorkspaceRole = "owner" | "member" | "viewer";
+
+/** The roles an owner can invite someone as. */
+export type InviteRole = "member" | "viewer";
 
 /** A workspace, with the signed-in user's role in it (GET/POST /workspaces). */
 export interface Workspace {
@@ -42,6 +49,8 @@ export interface WorkspaceDetail {
 export interface WorkspaceInvitation {
   workspaceId: string;
   workspaceName: string;
+  /** The role accepting grants. */
+  role: InviteRole;
   invitedBy: string;
   invitedByEmail: string | null;
   createdAt: string;
@@ -64,9 +73,24 @@ export function getWorkspace(workspaceId: string): Promise<WorkspaceDetail> {
 }
 
 /** Creates an in-app invitation; no email is sent. */
-export async function inviteWorkspaceMember(workspaceId: string, email: string): Promise<WorkspaceInvite> {
+export async function inviteWorkspaceMember(
+  workspaceId: string,
+  email: string,
+  role: InviteRole = "member"
+): Promise<WorkspaceInvite> {
   const path = `/workspaces/${encodeURIComponent(workspaceId)}/invites`;
-  return (await apiRequest<{ invite: WorkspaceInvite }>("POST", path, { body: { email } })).invite;
+  return (await apiRequest<{ invite: WorkspaceInvite }>("POST", path, { body: { email, role } })).invite;
+}
+
+/** Withdraws a pending invitation (owners only). */
+export function revokeWorkspaceInvite(workspaceId: string, email: string): Promise<{ revoked: boolean }> {
+  return apiRequest("POST", `/workspaces/${encodeURIComponent(workspaceId)}/invites/revoke`, { body: { email } });
+}
+
+/** Removes a member or viewer; their access ends immediately (owners only). */
+export function removeWorkspaceMember(workspaceId: string, userId: string): Promise<{ removed: boolean }> {
+  const path = `/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}`;
+  return apiRequest("DELETE", path);
 }
 
 export async function listMyInvitations(): Promise<WorkspaceInvitation[]> {
@@ -100,6 +124,20 @@ export const PERSONAL_SCOPE: Scope = { kind: "personal" };
 
 export function workspaceScope(workspace: Workspace): Scope {
   return { kind: "workspace", workspaceId: workspace.workspaceId, name: workspace.name, role: workspace.role };
+}
+
+/**
+ * Whether the user may change things in this scope: always in Personal, and
+ * for owners and members of a workspace. False for viewers (and any role this
+ * client doesn't know). Only hides controls; the backend enforces it.
+ */
+export function canContribute(scope: Scope): boolean {
+  return scope.kind === "personal" || scope.role === "owner" || scope.role === "member";
+}
+
+/** True for a workspace the user can only view. */
+export function isReadOnlyScope(scope: Scope): boolean {
+  return !canContribute(scope);
 }
 
 /** The workspaceId to send to scoped endpoints, or undefined for Personal. */
