@@ -13,6 +13,7 @@ import {
   type NotebookRefusal,
   type NotebookSection,
 } from "@/lib/reNotebook";
+import type { Device } from "@/lib/devices";
 import { docText, normalizeDoc, sameDoc, type NotebookDoc, type NotebookNode } from "@/lib/reNotebookDoc";
 import { notebookExtensions } from "@/lib/reNotebookEditor";
 import { EntryAutosave, type AutosaveState } from "@/lib/reNotebookAutosave";
@@ -21,6 +22,8 @@ import { useScopeLock } from "@/context/WorkspaceContext";
 import { Alert, Button, ErrorState, LoadingState, formatDate } from "@/app/components/ui";
 import ConflictDialog from "./ConflictDialog";
 import EditorToolbar from "./EditorToolbar";
+import InsertImageDialog, { type InsertedImage } from "./InsertImageDialog";
+import { notebookImageNodeView } from "./NotebookImage";
 import NotebookDocView from "./NotebookDocView";
 import SaveStatus from "./SaveStatus";
 
@@ -37,6 +40,10 @@ export interface EditorHandle {
 
 interface EditorProps {
   deviceId: string;
+  /** The notebook's device: images are inserted from (and uploaded to) its gallery. */
+  device: Device;
+  /** An image was uploaded to the device's gallery from the editor. */
+  onGalleryChanged?: () => void;
   userId: string;
   entry: NotebookEntry;
   sections: NotebookSection[];
@@ -201,6 +208,8 @@ function EditableEntry(props: EditorProps) {
 
 function LoadedEditor({
   deviceId,
+  device,
+  onGalleryChanged,
   entry: listed,
   sections,
   scope,
@@ -223,6 +232,9 @@ function LoadedEditor({
   const [conflictOpen, setConflictOpen] = useState(false);
   const [deleted, setDeleted] = useState<{ refusal: NotebookRefusal; mine: NotebookDoc } | null>(null);
   const [recovery, setRecovery] = useState<EntryDraft | null>(loaded.draft);
+  const [insertingImage, setInsertingImage] = useState(false);
+  /** The image picked in the dialog, inserted once the dialog has closed. */
+  const pendingImageRef = useRef<InsertedImage | null>(null);
   const autosaveRef = useRef<EntryAutosave | null>(null);
   const copyIdRef = useRef<string | null>(null);
   const callbacks = useRef({ onSaved, onHandle, onSaveState });
@@ -234,7 +246,7 @@ function LoadedEditor({
   }, [state]);
   useEffect(() => () => callbacks.current.onSaveState?.(null), []);
 
-  const extensions = useMemo(() => notebookExtensions(), []);
+  const extensions = useMemo(() => notebookExtensions({ imageNodeView: notebookImageNodeView }), []);
   const editor = useEditor({
     extensions,
     content: loaded.doc,
@@ -310,6 +322,24 @@ function LoadedEditor({
     // access); an invalid document stays editable so it can be fixed.
     if (editor && !editor.isDestroyed) editor.setEditable(!blocked && !state.stopped, false);
   }, [editor, blocked, state.stopped]);
+
+  // Inserted after the dialog has closed and given focus back to whatever
+  // had it (perhaps the toolbar button), so the editor takes focus last: at
+  // the selection it kept, with the cursor after the new image.
+  useEffect(() => {
+    const image = pendingImageRef.current;
+    if (insertingImage || !image) return;
+    pendingImageRef.current = null;
+    // Outside React's commit: the image's node view renders synchronously.
+    queueMicrotask(() => {
+      if (!editor || editor.isDestroyed || !editor.isEditable) return;
+      editor
+        .chain()
+        .focus()
+        .insertContent({ type: "image", attrs: { artifactId: image.artifactId, alt: image.alt || null } })
+        .run();
+    });
+  }, [insertingImage, editor]);
 
   // The workspace can't be switched while changes are unsaved.
   useScopeLock(state.status !== "saved");
@@ -454,11 +484,22 @@ function LoadedEditor({
 
       {editor ? (
         <div className="relative">
-          <EditorToolbar editor={editor} disabled={blocked} />
+          <EditorToolbar editor={editor} disabled={blocked} onInsertImage={() => setInsertingImage(true)} />
           <EditorContent editor={editor} />
         </div>
       ) : (
         <LoadingState label="Starting the editor…" />
+      )}
+
+      {insertingImage && editor && (
+        <InsertImageDialog
+          device={device}
+          onInsert={(image) => {
+            pendingImageRef.current = image;
+          }}
+          onGalleryChanged={onGalleryChanged}
+          onClose={() => setInsertingImage(false)}
+        />
       )}
 
       {conflict && conflictOpen && conflict.refusal.doc && conflict.refusal.entry && (

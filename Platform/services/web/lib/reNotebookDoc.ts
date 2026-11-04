@@ -10,8 +10,12 @@
 // (lambdas/tests/fixtures/re_notebook_docs.json).
 //
 // Supported: paragraphs, headings 1-3, bold, italic, inline code, links
-// (http, https, mailto), bullet and numbered lists, quotes, code blocks and
-// line breaks. Nothing else is stored or shown.
+// (http, https, mailto), bullet and numbered lists, quotes, code blocks, line
+// breaks and images. Nothing else is stored or shown.
+//
+// An image is one of the device's gallery images, referenced by its
+// artifactId (and optional alt text) only: never a URL, which is short-lived
+// and fetched each time the image is shown (lib/images.ts).
 
 export interface NotebookMark {
   type: string;
@@ -36,13 +40,18 @@ export const MAX_NODES = 60_000;
 export const MAX_HREF_LENGTH = 2048;
 export const HEADING_LEVELS = [1, 2, 3] as const;
 const MAX_ORDERED_LIST_START = 1_000_000;
+export const MAX_IMAGES = 100;
+export const MAX_ALT_LENGTH = 200;
+const ARTIFACT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+// eslint-disable-next-line no-control-regex
+const ALT_CONTROL_CHARS = /[\x00-\x1f\x7f]/;
 const LANGUAGE_PATTERN = /^[A-Za-z0-9+#._-]{1,32}$/;
 const LINK_SCHEMES = new Set(["http", "https", "mailto"]);
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
 const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
 
-export const BLOCK_NODES = ["paragraph", "heading", "blockquote", "bulletList", "orderedList", "codeBlock"] as const;
+export const BLOCK_NODES = ["paragraph", "heading", "blockquote", "bulletList", "orderedList", "codeBlock", "image"] as const;
 export const INLINE_NODES = ["text", "hardBreak"] as const;
 export const NODE_TYPES = ["doc", ...BLOCK_NODES, "listItem", ...INLINE_NODES] as const;
 export const MARK_TYPES = ["bold", "italic", "code", "link"] as const;
@@ -60,8 +69,9 @@ const NODES: Record<string, { children: Set<string>; min: number }> = {
   codeBlock: { children: new Set(["text"]), min: 0 },
   hardBreak: { children: new Set(), min: 0 },
   text: { children: new Set(), min: 0 },
+  image: { children: new Set(), min: 0 },
 };
-const LEAVES = new Set(["hardBreak", "text"]);
+const LEAVES = new Set(["hardBreak", "text", "image"]);
 
 // --- Links ---------------------------------------------------------------------
 
@@ -120,10 +130,23 @@ function normalizeAttrs(node: NotebookNode): Record<string, unknown> | undefined
       return typeof attrs.language === "string" && LANGUAGE_PATTERN.test(attrs.language)
         ? { language: attrs.language }
         : undefined;
+    case "image": {
+      // Only the reference and its alt text; anything else (a src from
+      // pasted HTML) is left out, and a missing id is reported by validation.
+      const alt = typeof attrs.alt === "string" ? cleanAlt(attrs.alt) : "";
+      return { artifactId: attrs.artifactId, ...(alt ? { alt } : {}) };
+    }
     default:
       // Unknown nodes keep theirs, so validation reports them.
       return NODES[node.type] || !node.attrs ? undefined : node.attrs;
   }
+}
+
+/** Alt text as stored: one trimmed line of at most MAX_ALT_LENGTH characters ("" for none). */
+export function cleanAlt(value: string): string {
+  // eslint-disable-next-line no-control-regex
+  const line = value.replace(/[\x00-\x1f\x7f]+/g, " ").trim();
+  return [...line].slice(0, MAX_ALT_LENGTH).join("").trim();
 }
 
 function normalizeMark(mark: NotebookMark): NotebookMark[] {
@@ -144,7 +167,7 @@ class DocError extends Error {}
 
 /** The backend's rules (re_notebook_doc.validate), with the same messages. */
 export function validateDoc(doc: unknown): DocValidation {
-  const state = { nodes: 0, text: 0 };
+  const state = { nodes: 0, text: 0, images: 0 };
   try {
     if (!isObject(doc) || doc.type !== "doc") throw new DocError("content must be a document");
     checkNode(doc as unknown as NotebookNode, state, 1, false);
@@ -157,7 +180,12 @@ export function validateDoc(doc: unknown): DocValidation {
   }
 }
 
-function checkNode(node: unknown, state: { nodes: number; text: number }, depth: number, marksAllowed: boolean) {
+function checkNode(
+  node: unknown,
+  state: { nodes: number; text: number; images: number },
+  depth: number,
+  marksAllowed: boolean
+) {
   if (!isObject(node)) throw new DocError("content contains an invalid node");
   const kind = node.type;
   if (typeof kind !== "string" || !NODES[kind]) throw new DocError("content contains unsupported formatting");
@@ -181,6 +209,11 @@ function checkNode(node: unknown, state: { nodes: number; text: number }, depth:
     if (typeof text !== "string" || !text) throw new DocError("content contains an invalid text node");
     if (CONTROL_CHARS.test(text) || LONE_SURROGATE.test(text)) throw new DocError("content contains invalid characters");
     state.text += [...text].length;
+    return;
+  }
+  if (kind === "image") {
+    state.images += 1;
+    if (state.images > MAX_IMAGES) throw new DocError(`content has too many images (at most ${MAX_IMAGES})`);
     return;
   }
   if (kind === "hardBreak") return;
@@ -208,6 +241,28 @@ function checkAttrs(kind: string, attrs: unknown) {
       !(HEADING_LEVELS as readonly number[]).includes(attrs.level as number)
     ) {
       throw new DocError("content contains an invalid heading");
+    }
+    return;
+  }
+  if (kind === "image") {
+    if (!isObject(attrs) || !("artifactId" in attrs) || Object.keys(attrs).some((k) => k !== "artifactId" && k !== "alt")) {
+      throw new DocError("content contains an invalid image");
+    }
+    if (typeof attrs.artifactId !== "string" || !ARTIFACT_ID_PATTERN.test(attrs.artifactId)) {
+      throw new DocError("content contains an invalid image");
+    }
+    if ("alt" in attrs) {
+      const alt = attrs.alt;
+      if (
+        typeof alt !== "string" ||
+        !alt ||
+        alt !== alt.trim() ||
+        [...alt].length > MAX_ALT_LENGTH ||
+        ALT_CONTROL_CHARS.test(alt) ||
+        LONE_SURROGATE.test(alt)
+      ) {
+        throw new DocError("content contains an invalid image");
+      }
     }
     return;
   }
@@ -275,6 +330,11 @@ export function docText(doc: NotebookNode): string {
       lines.push(prefix + inlineText(node));
       return;
     }
+    if (node.type === "image") {
+      const alt = typeof node.attrs?.alt === "string" ? node.attrs.alt : "";
+      lines.push(prefix + (alt ? `[Image: ${alt}]` : "[Image]"));
+      return;
+    }
     if (node.type === "bulletList" || node.type === "orderedList") {
       let n = typeof node.attrs?.start === "number" ? (node.attrs.start as number) : 1;
       for (const item of node.content ?? []) {
@@ -292,6 +352,21 @@ export function docText(doc: NotebookNode): string {
 
 function inlineText(node: NotebookNode): string {
   return (node.content ?? []).map((child) => (child.type === "hardBreak" ? "\n" : child.text ?? "")).join("");
+}
+
+/** The artifactIds of the document's images, each once, in document order. */
+export function docImageIds(doc: NotebookNode): string[] {
+  const ids: string[] = [];
+  const walk = (node: NotebookNode) => {
+    if (node.type === "image") {
+      const id = node.attrs?.artifactId;
+      if (typeof id === "string" && !ids.includes(id)) ids.push(id);
+      return;
+    }
+    node.content?.forEach(walk);
+  };
+  walk(doc);
+  return ids;
 }
 
 /** Whether two documents have the same content. */

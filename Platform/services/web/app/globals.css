@@ -76,9 +76,146 @@
   .re-notebook-doc[contenteditable="true"] {
     @apply cursor-text;
   }
+  /* Images (NotebookImage.tsx): a block of their own, as wide as the text at most. */
+  .re-notebook-image img {
+    @apply block h-auto max-w-full mx-auto rounded-lg border border-line bg-surface-sunken;
+    max-height: 36rem;
+  }
+  .re-notebook-image-frame {
+    @apply block;
+  }
+  .re-notebook-image-placeholder {
+    @apply flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-line bg-surface-sunken px-4 py-8 text-center text-slate-400;
+  }
+  .re-notebook-image.is-selected img,
+  .re-notebook-image.is-selected .re-notebook-image-placeholder {
+    @apply ring-2 ring-brand-500 ring-offset-2;
+  }
+  .re-notebook-doc[contenteditable="true"] .re-notebook-image {
+    @apply cursor-grab;
+  }
   /* The notebook workspace fills the window; dvh keeps it clear of mobile browser bars. */
   .re-notebook-viewport {
     height: 100vh;
     height: 100dvh;
+  }
+}
+
+/* The notebook export (workspace/NotebookExport.tsx): laid out off screen so
+   its images load, and the only thing printed while the export is open. */
+.re-notebook-print {
+  position: fixed;
+  top: 0;
+  left: -10000px;
+  width: 720px;
+  pointer-events: none;
+  background: #fff;
+  color: #0f172a;
+}
+.re-notebook-print-cover h1 {
+  @apply mt-2 text-4xl font-semibold tracking-tight text-slate-900;
+}
+.re-notebook-print-eyebrow {
+  @apply text-xs font-semibold uppercase tracking-widest text-brand-700;
+}
+.re-notebook-print-meta {
+  @apply mt-1 text-xs text-slate-500;
+}
+.re-notebook-print-cover .re-notebook-print-meta {
+  @apply mt-3 text-sm;
+}
+.re-notebook-print-contents {
+  @apply mt-12;
+}
+.re-notebook-print-contents h2 {
+  @apply mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500;
+}
+.re-notebook-print-contents > ol {
+  @apply list-decimal space-y-2 pl-6 text-base font-medium text-slate-800;
+}
+.re-notebook-print-contents ol ol {
+  @apply mt-1 list-[lower-alpha] space-y-0.5 pl-6 text-sm font-normal text-slate-600;
+}
+.re-notebook-print-section-title {
+  @apply border-b-2 border-slate-900 pb-2 text-3xl font-semibold tracking-tight text-slate-900;
+}
+.re-notebook-print-entry {
+  @apply mt-8;
+}
+.re-notebook-print-entry-title {
+  @apply text-xl font-semibold text-slate-900;
+}
+.re-notebook-print-entry .re-notebook-doc {
+  @apply mt-4;
+}
+/* Entry headings sit below the section and entry titles. */
+.re-notebook-print .re-notebook-doc h1 {
+  @apply text-lg;
+}
+.re-notebook-print .re-notebook-doc h2 {
+  @apply text-base;
+}
+.re-notebook-print .re-notebook-doc h3 {
+  @apply text-[0.9375rem];
+}
+.re-notebook-print-empty,
+.re-notebook-print-missing {
+  @apply mt-4 text-sm italic text-slate-500;
+}
+
+@media print {
+  @page {
+    margin: 16mm 15mm;
+  }
+  body.re-notebook-printing {
+    background: #fff !important;
+  }
+  body.re-notebook-printing > *:not(.re-notebook-print) {
+    display: none !important;
+  }
+  body.re-notebook-printing .re-notebook-print {
+    position: static;
+    left: auto;
+    width: auto;
+    pointer-events: auto;
+  }
+  .re-notebook-print-cover {
+    break-after: page;
+  }
+  .re-notebook-print-section + .re-notebook-print-section {
+    break-before: page;
+  }
+  .re-notebook-print h1,
+  .re-notebook-print h2,
+  .re-notebook-print h3,
+  .re-notebook-print-meta {
+    break-after: avoid;
+  }
+  .re-notebook-print .re-notebook-image,
+  .re-notebook-print blockquote,
+  .re-notebook-print li,
+  .re-notebook-print tr {
+    break-inside: avoid;
+  }
+  .re-notebook-print .re-notebook-image img {
+    max-height: 210mm;
+  }
+  /* Browsers leave out backgrounds by default: code stays readable without them. */
+  .re-notebook-print .re-notebook-doc pre {
+    background: #f1f5f9;
+    color: #0f172a;
+    border: 1px solid #cbd5e1;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  /* A link's address, for a printed copy. */
+  .re-notebook-print .re-notebook-doc a[href]::after {
+    content: " (" attr(href) ")";
+    color: #475569;
+    font-size: 0.85em;
+    overflow-wrap: anywhere;
+  }
+  .re-notebook-print .re-notebook-image-retry {
+    display: none;
   }
 }

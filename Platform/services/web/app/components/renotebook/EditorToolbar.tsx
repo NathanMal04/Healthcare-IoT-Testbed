@@ -5,6 +5,7 @@ import { useEditorState, type Editor } from "@tiptap/react";
 import {
   Bold,
   Code,
+  ImagePlus,
   Italic,
   Link2,
   List,
@@ -28,10 +29,20 @@ const STYLES = [
 /**
  * The formatting the notebook supports, and nothing else: text style
  * (paragraph or heading 1-3), bold, italic, inline code, link, bullet and
- * numbered lists, quote, code block, undo and redo. Keyboard shortcuts (Ctrl/⌘
- * B, I, Z, Shift+Z, …) work as usual.
+ * numbered lists, quote, code block, images (one of the device's, through
+ * `onInsertImage`), undo and redo. Keyboard shortcuts (Ctrl/⌘ B, I, Z,
+ * Shift+Z, …) work as usual.
  */
-export default function EditorToolbar({ editor, disabled }: { editor: Editor; disabled?: boolean }) {
+export default function EditorToolbar({
+  editor,
+  disabled,
+  onInsertImage,
+}: {
+  editor: Editor;
+  disabled?: boolean;
+  /** Opens the image picker; the button is left out without it. */
+  onInsertImage?: () => void;
+}) {
   const [linkOpen, setLinkOpen] = useState(false);
   const state = useEditorState({
     editor,
@@ -99,6 +110,14 @@ export default function EditorToolbar({ editor, disabled }: { editor: Editor; di
           <Tool label="Quote" icon={Quote} active={state.blockquote} disabled={off} onClick={() => chain().toggleBlockquote().run()} />
           <Tool label="Code block" icon={SquareCode} active={state.codeBlock} disabled={off} onClick={() => chain().toggleCodeBlock().run()} />
         </Group>
+        {onInsertImage && (
+          <>
+            <Divider />
+            <Group label="Insert">
+              <Tool label="Insert image" icon={ImagePlus} disabled={off} onClick={onInsertImage} />
+            </Group>
+          </>
+        )}
         <span className="ml-auto" aria-hidden="true" />
         <Group label="History">
           <Tool label="Undo" icon={Undo2} disabled={off || !state.canUndo} onClick={() => chain().undo().run()} />

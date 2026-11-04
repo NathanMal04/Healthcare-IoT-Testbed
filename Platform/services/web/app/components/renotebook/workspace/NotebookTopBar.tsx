@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Maximize2, Minimize2, PanelLeft, PanelRight } from "lucide-react";
+import { ArrowLeft, FileDown, Maximize2, Minimize2, PanelLeft, PanelRight } from "lucide-react";
 import type { Device } from "@/lib/devices";
 import type { Scope } from "@/lib/workspaces";
 import ProfileAvatar from "@/app/components/images/ProfileAvatar";
@@ -53,8 +53,8 @@ function IconToggle({
 
 /**
  * The notebook workspace's compact top bar: back to the device, the device
- * and notebook it is, the save state, and the layout controls. In Focus Mode
- * only Back, the save state and Exit Focus Mode remain.
+ * and notebook it is, the save state, Export PDF and the layout controls. In
+ * Focus Mode only Back, the save state and Exit Focus Mode remain.
  */
 export default function NotebookTopBar({
   device,
@@ -69,6 +69,7 @@ export default function NotebookTopBar({
   onToggleLeft,
   onToggleRight,
   onFocus,
+  onExport,
 }: {
   device: Device;
   scope: Scope;
@@ -83,6 +84,8 @@ export default function NotebookTopBar({
   onToggleLeft: () => void;
   onToggleRight: () => void;
   onFocus: (focus: boolean) => void;
+  /** Exports the whole notebook; the button is left out without it. */
+  onExport?: () => void;
 }) {
   return (
     <header className="h-14 shrink-0 bg-white border-b border-line">
@@ -135,6 +138,17 @@ export default function NotebookTopBar({
             />
           ) : (
             <>
+              {onExport && (
+                <button
+                  type="button"
+                  onClick={onExport}
+                  title="Export the whole notebook as a PDF"
+                  className="h-9 inline-flex items-center justify-center gap-1.5 rounded-lg px-2 text-sm font-medium text-slate-600 transition-colors hover:bg-surface-sunken hover:text-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                >
+                  <FileDown className="h-[18px] w-[18px]" aria-hidden="true" />
+                  <span className="sr-only md:not-sr-only">Export PDF</span>
+                </button>
+              )}
               {showPanelToggles && (
                 <>
                   <span className="hidden sm:block h-6 w-px bg-line" aria-hidden="true" />

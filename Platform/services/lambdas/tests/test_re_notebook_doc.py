@@ -82,6 +82,44 @@ class LimitTests(unittest.TestCase):
         self.assertEqual(docs.serialize(a), docs.serialize(docs.EMPTY_DOC))
 
 
+IMG_A = "0192d000-0000-7000-8000-000000000001"
+IMG_B = "0192d000-0000-7000-8000-000000000002"
+
+
+def image(artifact_id, **attrs):
+    return {"type": "image", "attrs": {"artifactId": artifact_id, **attrs}}
+
+
+class ImageTests(unittest.TestCase):
+    def test_image_limit(self):
+        docs.validate(doc(*[image(IMG_A) for _ in range(docs.MAX_IMAGES)]))
+        with self.assertRaisesRegex(docs.DocumentError, "too many images"):
+            docs.validate(doc(*[image(IMG_A) for _ in range(docs.MAX_IMAGES + 1)]))
+
+    def test_images_in_quotes_count_towards_the_limit(self):
+        quoted = {"type": "blockquote", "content": [image(IMG_B)]}
+        with self.assertRaisesRegex(docs.DocumentError, "too many images"):
+            docs.validate(doc(quoted, *[image(IMG_A) for _ in range(docs.MAX_IMAGES)]))
+
+    def test_alt_text_length(self):
+        docs.validate(doc(image(IMG_A, alt="x" * docs.MAX_ALT_LENGTH)))
+        with self.assertRaisesRegex(docs.DocumentError, "invalid image"):
+            docs.validate(doc(image(IMG_A, alt="x" * (docs.MAX_ALT_LENGTH + 1))))
+
+    def test_images_add_no_text(self):
+        _, length = docs.validate(doc(paragraph("ab"), image(IMG_A, alt="Board")))
+        self.assertEqual(length, 2)
+
+    def test_image_ids_are_unique_and_in_document_order(self):
+        document = doc(
+            image(IMG_B),
+            {"type": "bulletList", "content": [{"type": "listItem", "content": [paragraph("x"), image(IMG_A)]}]},
+            image(IMG_B),
+        )
+        self.assertEqual(docs.image_ids(document), [IMG_B, IMG_A])
+        self.assertEqual(docs.image_ids(doc(paragraph("none"))), [])
+
+
 class LinkTests(unittest.TestCase):
     def test_allowed(self):
         for href in ("https://example.org/a?b=c#d", "http://10.0.0.1:8080/", "mailto:lab@example.org",

@@ -38,13 +38,21 @@ function downloadInBackground(url: string) {
  * The device's own files beside the notebook: its artifacts and its image
  * gallery, read-only. Both come from the existing device APIs (nothing is
  * copied); images show through short-lived view URLs, and artifacts can be
- * downloaded. Linking them into entries comes later.
+ * downloaded. `refreshKey` changes when something was added to them (an
+ * image uploaded from the editor), and both lists reload.
  */
 const ContextPanel = forwardRef<
   HTMLHeadingElement,
-  { device: Device; onClose?: () => void }
->(function ContextPanel({ device, onClose }, headingRef) {
+  { device: Device; onClose?: () => void; refreshKey?: number }
+>(function ContextPanel({ device, onClose, refreshKey = 0 }, headingRef) {
   const gallery = useDeviceImages(device.deviceId);
+  const { reload: reloadGallery } = gallery;
+  const shownKey = useRef(refreshKey);
+  useEffect(() => {
+    if (refreshKey === shownKey.current) return;
+    shownKey.current = refreshKey;
+    void reloadGallery();
+  }, [refreshKey, reloadGallery]);
   const urls = useImageUrls((gallery.images ?? []).filter((i) => i.status === "ready").map((i) => i.artifactId));
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -81,7 +89,7 @@ const ContextPanel = forwardRef<
             <Alert onDismiss={() => setDownloadError(null)}>{downloadError}</Alert>
           </div>
         )}
-        <ArtifactsSection device={device} urls={urls} onDownload={download} />
+        <ArtifactsSection device={device} urls={urls} onDownload={download} refreshKey={refreshKey} />
         <ImagesSection
           device={device}
           images={gallery.images}
@@ -127,10 +135,12 @@ function ArtifactsSection({
   device,
   urls,
   onDownload,
+  refreshKey,
 }: {
   device: Device;
   urls: ImageUrls;
   onDownload: (artifact: Artifact) => Promise<void>;
+  refreshKey: number;
 }) {
   const [type, setType] = useState<ArtifactType | "">("");
   const [artifacts, setArtifacts] = useState<Artifact[] | null>(null);
@@ -171,6 +181,14 @@ function ArtifactsSection({
       loadIds.current++;
     };
   }, [load]);
+
+  // Something was added: reload in place (the list stays shown meanwhile).
+  const shownKey = useRef(refreshKey);
+  useEffect(() => {
+    if (refreshKey === shownKey.current) return;
+    shownKey.current = refreshKey;
+    void load();
+  }, [refreshKey, load]);
 
   return (
     <section aria-labelledby="re-notebook-artifacts" className="p-4 space-y-3">

@@ -37,7 +37,8 @@ module "re_notebook_api_fn" {
 # order lists, content, soft deletes), Delete (an empty section) and
 # ConditionCheck (the device's scope and the caller's membership or
 # ownership, in every write). Reads: the authorization GetItems, the
-# notebook's GetItems and its SECTION#/ENTRY# queries. No Scan.
+# notebook's GetItems and its SECTION#/ENTRY# queries, and, when a save adds
+# an image reference, the image's METADATA and gallery row. No Scan.
 resource "aws_iam_policy" "re_notebook_api" {
   name = "${var.name}-lambda-re-notebook-api"
 

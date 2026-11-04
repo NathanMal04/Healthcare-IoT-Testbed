@@ -4,14 +4,16 @@ import { useEffect, useMemo } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { notebookExtensions } from "@/lib/reNotebookEditor";
 import type { NotebookDoc } from "@/lib/reNotebookDoc";
+import { notebookImageNodeView } from "./NotebookImage";
 
 /**
  * A saved document, read-only. Rendered by the editor's own schema (ProseMirror
  * builds the DOM node by node), never from HTML, so only the supported
- * formatting can appear and links are only ever http(s) or mailto.
+ * formatting can appear and links are only ever http(s) or mailto. Images
+ * get their URLs from the NotebookImagesProvider above it.
  */
 export default function NotebookDocView({ doc, label }: { doc: NotebookDoc; label: string }) {
-  const extensions = useMemo(() => notebookExtensions(), []);
+  const extensions = useMemo(() => notebookExtensions({ imageNodeView: notebookImageNodeView }), []);
   const editor = useEditor({
     extensions,
     content: doc,

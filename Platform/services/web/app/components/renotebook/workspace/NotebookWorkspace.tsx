@@ -12,8 +12,10 @@ import { Alert, Button, Dialog, EmptyState, ErrorState, LoadingState, RowActions
 import EntryEditor, { type EditorHandle, type SaveStateReport } from "../EntryEditor";
 import { ConfirmDialog, MoveEntryDialog, TitleDialog } from "../NotebookDialogs";
 import { useNotebook } from "../useNotebook";
+import { NotebookImagesProvider } from "../NotebookImage";
 import ContextPanel from "./ContextPanel";
 import EntryListPanel, { entryActions } from "./EntryListPanel";
+import NotebookExport from "./NotebookExport";
 import NotebookTopBar, { CONTEXT_PANEL_REGION, ENTRIES_PANEL_REGION } from "./NotebookTopBar";
 import PanelResizer from "./PanelResizer";
 import SectionTabs, { ENTRIES_PANEL_ID } from "./SectionTabs";
@@ -28,7 +30,8 @@ const CHROME_WIDTH = 48;
 /**
  * The device's RE Notebook as a full-screen workspace: sections as tabs, the
  * selected section's entries on the left, the open entry in the middle, and
- * the device's images and artifacts on the right. Everyone who can edit the
+ * the device's images and artifacts on the right; Export PDF prints the
+ * whole notebook (anyone who can read it). Everyone who can edit the
  * device can read and contribute; a workspace viewer can only read (no
  * editor, autosave or structure changes). The backend enforces both.
  *
@@ -37,14 +40,17 @@ const CHROME_WIDTH = 48;
  * whether to leave, and the changes stay as a local draft either way. Panel
  * changes (collapse, resize, Focus Mode, window size) never close the editor.
  */
-export default function NotebookWorkspace({
-  device,
-  scope,
-  initialSectionId,
-  initialEntryId,
-  onLocationChange,
-  onBack,
-}: {
+export default function NotebookWorkspace(props: WorkspaceProps) {
+  // One image-URL cache for the notebook's documents (editor, read-only
+  // views, conflict dialog); the export has its own, fetched fresh.
+  return (
+    <NotebookImagesProvider>
+      <Workspace {...props} />
+    </NotebookImagesProvider>
+  );
+}
+
+interface WorkspaceProps {
   device: Device;
   scope: Scope;
   initialSectionId?: string | null;
@@ -53,7 +59,16 @@ export default function NotebookWorkspace({
   onLocationChange?: (sectionId: string | null, entryId: string | null) => void;
   /** Goes back to the device; called once the open entry is saved or left. */
   onBack: () => void;
-}) {
+}
+
+function Workspace({
+  device,
+  scope,
+  initialSectionId,
+  initialEntryId,
+  onLocationChange,
+  onBack,
+}: WorkspaceProps) {
   const { user } = useAuth();
   const readOnly = !canEditDevice(device);
   const nb = useNotebook(device.deviceId);
@@ -66,6 +81,10 @@ export default function NotebookWorkspace({
   const [notice, setNotice] = useState<string | null>(null);
   const [save, setSave] = useState<SaveStateReport | null>(null);
   const [contextLoaded, setContextLoaded] = useState(false);
+  /** Export PDF is open; `unsaved`: the open entry's changes couldn't be saved first. */
+  const [exporting, setExporting] = useState<{ unsaved: boolean } | null>(null);
+  /** Bumped when an image is uploaded from the editor, so the context panel shows it. */
+  const [galleryVersion, setGalleryVersion] = useState(0);
   const [containerWidth, setContainerWidth] = useState(0);
   const handleRef = useRef<EditorHandle | null>(null);
   const lastSelected = useRef<NotebookEntry | null>(null);
@@ -151,6 +170,13 @@ export default function NotebookWorkspace({
     }
     setNotice(null);
     proceed();
+  }
+
+  /** Saves the open entry first, so the export has what's on screen. */
+  async function startExport() {
+    const handle = handleRef.current;
+    const unsaved = !!handle?.hasUnsaved() && !(await handle.flush());
+    setExporting({ unsaved });
   }
 
   function selectEntry(entryId: string | null, entrySectionId: string | null) {
@@ -260,6 +286,7 @@ export default function NotebookWorkspace({
         onToggleLeft={() => panels.toggle("left")}
         onToggleRight={() => panels.toggle("right")}
         onFocus={panels.setFocus}
+        onExport={hasSections ? () => void startExport() : undefined}
       />
 
       {hasSections && !panels.focus && (
@@ -371,6 +398,8 @@ export default function NotebookWorkspace({
             <EntryEditor
               key={selected.entryId}
               deviceId={device.deviceId}
+              device={device}
+              onGalleryChanged={() => setGalleryVersion((v) => v + 1)}
               userId={user.userId}
               entry={selected}
               sections={notebook.sections}
@@ -442,7 +471,12 @@ export default function NotebookWorkspace({
           style={panels.right === "inline" ? { width: rightWidth } : undefined}
         >
           {hasSections && contextLoaded && (
-            <ContextPanel ref={contextHeadingRef} device={device} onClose={panels.right === "drawer" ? closeDrawers : undefined} />
+            <ContextPanel
+              ref={contextHeadingRef}
+              device={device}
+              refreshKey={galleryVersion}
+              onClose={panels.right === "drawer" ? closeDrawers : undefined}
+            />
           )}
         </aside>
         {showRightRail && (
@@ -557,6 +591,15 @@ export default function NotebookWorkspace({
             the app yet.
           </p>
         </ConfirmDialog>
+      )}
+
+      {exporting && (
+        <NotebookExport
+          device={device}
+          scope={scope}
+          unsavedOpenEntry={exporting.unsaved}
+          onClose={() => setExporting(null)}
+        />
       )}
 
       {leaving && (

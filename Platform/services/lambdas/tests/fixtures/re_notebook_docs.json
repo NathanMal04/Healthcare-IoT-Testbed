@@ -56,6 +56,24 @@
         {"type": "paragraph", "content": [{"type": "text", "marks": [{"type": "bold"}], "text": "x"}, {"type": "hardBreak", "marks": [{"type": "bold"}]}]},
         {"type": "heading", "attrs": {"level": 2}}
       ]}
+    },
+    {
+      "name": "images between paragraphs, with and without alt text",
+      "editorHtml": "<p>Board, top side:</p><img data-artifact-id=\"0192d000-0000-7000-8000-000000000001\" alt=\"PCB top\"><img data-artifact-id=\"0192d000-0000-7000-8000-000000000002\"><p>Next</p>",
+      "doc": {"type": "doc", "content": [
+        {"type": "paragraph", "content": [{"type": "text", "text": "Board, top side:"}]},
+        {"type": "image", "attrs": {"alt": "PCB top", "artifactId": "0192d000-0000-7000-8000-000000000001"}},
+        {"type": "image", "attrs": {"artifactId": "0192d000-0000-7000-8000-000000000002"}},
+        {"type": "paragraph", "content": [{"type": "text", "text": "Next"}]}
+      ]}
+    },
+    {
+      "name": "an image alone, in a quote and in a list item",
+      "doc": {"type": "doc", "content": [
+        {"type": "image", "attrs": {"artifactId": "0192d000-0000-7000-8000-000000000001"}},
+        {"type": "blockquote", "content": [{"type": "image", "attrs": {"artifactId": "0192d000-0000-7000-8000-000000000001"}}]},
+        {"type": "bulletList", "content": [{"type": "listItem", "content": [{"type": "paragraph"}, {"type": "image", "attrs": {"artifactId": "0192d000-0000-7000-8000-000000000002"}}]}]}
+      ]}
     }
   ],
   "invalid": [
@@ -63,7 +81,23 @@
     {"name": "not a document", "doc": {"type": "paragraph"}},
     {"name": "document without blocks", "doc": {"type": "doc", "content": []}},
     {"name": "document without content", "doc": {"type": "doc"}},
-    {"name": "unknown node", "doc": {"type": "doc", "content": [{"type": "image", "attrs": {"src": "https://x.org/a.png"}}]}},
+    {"name": "unknown node", "doc": {"type": "doc", "content": [{"type": "table"}]}},
+    {"name": "image with a URL instead of an id", "doc": {"type": "doc", "content": [{"type": "image", "attrs": {"src": "https://x.org/a.png"}}]}},
+    {"name": "image with a URL as its id", "doc": {"type": "doc", "content": [{"type": "image", "attrs": {"artifactId": "https://x.org/a.png"}}]}},
+    {"name": "image with a URL next to its id", "doc": {"type": "doc", "content": [{"type": "image", "attrs": {"artifactId": "0192d000-0000-7000-8000-000000000001", "src": "https://x.org/a.png"}}]}},
+    {"name": "image without attributes", "doc": {"type": "doc", "content": [{"type": "image"}]}},
+    {"name": "image without an id", "doc": {"type": "doc", "content": [{"type": "image", "attrs": {"alt": "x"}}]}},
+    {"name": "image id in upper case", "doc": {"type": "doc", "content": [{"type": "image", "attrs": {"artifactId": "0192D000-0000-7000-8000-000000000001"}}]}},
+    {"name": "image id as a number", "doc": {"type": "doc", "content": [{"type": "image", "attrs": {"artifactId": 12}}]}},
+    {"name": "image with a null id", "doc": {"type": "doc", "content": [{"type": "image", "attrs": {"artifactId": null}}]}},
+    {"name": "image with empty alt text", "doc": {"type": "doc", "content": [{"type": "image", "attrs": {"artifactId": "0192d000-0000-7000-8000-000000000001", "alt": ""}}]}},
+    {"name": "image alt text with a leading space", "doc": {"type": "doc", "content": [{"type": "image", "attrs": {"artifactId": "0192d000-0000-7000-8000-000000000001", "alt": " x"}}]}},
+    {"name": "image alt text with a line break", "doc": {"type": "doc", "content": [{"type": "image", "attrs": {"artifactId": "0192d000-0000-7000-8000-000000000001", "alt": "a\nb"}}]}},
+    {"name": "image alt text that is too long", "doc": {"type": "doc", "content": [{"type": "image", "attrs": {"artifactId": "0192d000-0000-7000-8000-000000000001", "alt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}]}},
+    {"name": "image with content", "doc": {"type": "doc", "content": [{"type": "image", "attrs": {"artifactId": "0192d000-0000-7000-8000-000000000001"}, "content": [{"type": "text", "text": "x"}]}]}},
+    {"name": "image inside a paragraph", "doc": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "image", "attrs": {"artifactId": "0192d000-0000-7000-8000-000000000001"}}]}]}},
+    {"name": "image with marks", "doc": {"type": "doc", "content": [{"type": "image", "attrs": {"artifactId": "0192d000-0000-7000-8000-000000000001"}, "marks": [{"type": "bold"}]}]}},
+    {"name": "list item starting with an image", "doc": {"type": "doc", "content": [{"type": "bulletList", "content": [{"type": "listItem", "content": [{"type": "image", "attrs": {"artifactId": "0192d000-0000-7000-8000-000000000001"}}]}]}]}},
     {"name": "horizontal rule (switched off)", "doc": {"type": "doc", "content": [{"type": "horizontalRule"}]}},
     {"name": "underline (switched off)", "doc": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "marks": [{"type": "underline"}], "text": "x"}]}]}},
     {"name": "strike (switched off)", "doc": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "marks": [{"type": "strike"}], "text": "x"}]}]}},

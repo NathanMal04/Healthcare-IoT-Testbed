@@ -6,8 +6,12 @@ import { Editor } from "@tiptap/core";
 import {
   EMPTY_DOC,
   MARK_TYPES,
+  MAX_ALT_LENGTH,
   MAX_DOC_BYTES,
+  MAX_IMAGES,
   NODE_TYPES,
+  cleanAlt,
+  docImageIds,
   docText,
   isAllowedHref,
   normalizeDoc,
@@ -157,5 +161,72 @@ describe("docText", () => {
     const doc = FIXTURES.valid.find((c) => c.name === "every supported format")!.doc;
     expect(docText(doc)).toBe("T\na b c d l\nn\n• u\n3. o\n> q\nx=1\n");
     expect(docText(EMPTY_DOC)).toBe("");
+  });
+});
+
+describe("images", () => {
+  const A = "0192d000-0000-7000-8000-000000000001";
+  const B = "0192d000-0000-7000-8000-000000000002";
+  const image = (artifactId: string, alt?: string): NotebookNode => ({
+    type: "image",
+    attrs: alt === undefined ? { artifactId } : { artifactId, alt },
+  });
+  const doc = (...content: NotebookNode[]): NotebookDoc => ({ type: "doc", content });
+
+  it("stores only the image's id and alt text", () => {
+    const editor = editorWith({ type: "doc", content: [{ type: "image", attrs: { artifactId: A, alt: null } }] });
+    expect(normalizeDoc(editor.getJSON() as NotebookNode)).toEqual(doc(image(A)));
+    // Anything else on the node (a URL from somewhere) is left out.
+    expect(
+      normalizeDoc({ type: "doc", content: [{ type: "image", attrs: { artifactId: A, alt: " PCB\ntop ", src: "https://x.org/a.png" } }] })
+    ).toEqual(doc(image(A, "PCB top")));
+  });
+
+  it("never turns a pasted image into a reference", () => {
+    for (const html of [
+      '<img src="https://x.org/a.png">',
+      '<img data-artifact-id="not-an-id" src="https://x.org/a.png">',
+      `<img data-artifact-id="${A.toUpperCase()}">`,
+    ]) {
+      const result = normalizeDoc(editorWith(html).getJSON() as NotebookNode);
+      expect(docImageIds(result)).toEqual([]);
+      expect(JSON.stringify(result)).not.toContain("x.org");
+    }
+  });
+
+  it("renders an image without a URL", () => {
+    const editor = editorWith(doc(image(A, "PCB top")));
+    const html = editor.getHTML();
+    expect(html).toContain(`<img data-notebook-image="" data-artifact-id="${A}" alt="PCB top">`);
+    expect(html).not.toContain("src=");
+  });
+
+  it("allows at most MAX_IMAGES images, and short alt text", () => {
+    expect(validateDoc(doc(...Array.from({ length: MAX_IMAGES }, () => image(A))))).toMatchObject({ ok: true });
+    expect(validateDoc(doc(...Array.from({ length: MAX_IMAGES + 1 }, () => image(A))))).toEqual({
+      ok: false,
+      error: `content has too many images (at most ${MAX_IMAGES})`,
+    });
+    expect(validateDoc(doc(image(A, "x".repeat(MAX_ALT_LENGTH))))).toMatchObject({ ok: true });
+    expect(validateDoc(doc(image(A, "x".repeat(MAX_ALT_LENGTH + 1))))).toEqual({
+      ok: false,
+      error: "content contains an invalid image",
+    });
+  });
+
+  it("cleans alt text to one short line", () => {
+    expect(cleanAlt("  PCB\ttop\r\nside  ")).toBe("PCB top side");
+    expect(cleanAlt("é".repeat(MAX_ALT_LENGTH + 5))).toHaveLength(MAX_ALT_LENGTH);
+    expect(cleanAlt("\n")).toBe("");
+  });
+
+  it("lists the referenced images once each, in document order", () => {
+    const quoted: NotebookNode = { type: "blockquote", content: [image(A)] };
+    expect(docImageIds(doc(image(B), quoted, image(B)))).toEqual([B, A]);
+    expect(docImageIds(EMPTY_DOC)).toEqual([]);
+  });
+
+  it("shows images in plain text by their alt text", () => {
+    expect(docText(doc(image(A, "PCB top"), image(B)))).toBe("[Image: PCB top]\n[Image]");
   });
 });

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 vi.mock("@/lib/api", () => {
@@ -14,7 +14,18 @@ vi.mock("@/lib/api", () => {
   }
   return { ApiError, apiRequest: vi.fn() };
 });
-vi.mock("@/context/WorkspaceContext", () => ({ useScopeLock: () => undefined }));
+vi.mock("@/context/WorkspaceContext", () => ({
+  useScopeLock: () => undefined,
+  ScopeLockReporter: ({ children }: { children: React.ReactNode }) => children,
+}));
+// The gallery uploader has its own tests: here it reports one ready upload.
+vi.mock("@/app/components/ArtifactUploader", () => ({
+  default: ({ onFinished }: { onFinished: (batch: string | undefined, failed: number, ready: string[]) => void }) => (
+    <button type="button" onClick={() => onFinished("b1", 0, ["0192d000-0000-7000-8000-0000000000aa"])}>
+      Fake upload
+    </button>
+  ),
+}));
 vi.mock("@/context/AuthContext", () => ({ useAuth: () => ({ user: { userId: "user-1", username: "u" }, loading: false }) }));
 // The real menu reads the signed-in user's attributes from Cognito.
 vi.mock("@/app/components/shell/UserMenu", () => ({ default: () => <span>user menu</span> }));
@@ -22,6 +33,7 @@ vi.mock("@/app/components/shell/UserMenu", () => ({ default: () => <span>user me
 import { ApiError, apiRequest } from "@/lib/api";
 import type { Artifact } from "@/lib/artifacts";
 import type { Device } from "@/lib/devices";
+import type { ImageArtifact } from "@/lib/images";
 import type { Notebook, NotebookEntry, NotebookSection } from "@/lib/reNotebook";
 import type { NotebookDoc } from "@/lib/reNotebookDoc";
 import { PANEL_LIMITS } from "@/lib/reNotebookLayout";
@@ -449,6 +461,254 @@ describe("NotebookWorkspace: device context", () => {
     fireEvent.change(panel.getByLabelText("Artifact type"), { target: { value: "firmware" } });
     expect(await panel.findByText("firmware.bin")).toBeTruthy();
     expect(panel.queryByText("boot-log.pcap")).toBeNull();
+  });
+});
+
+describe("NotebookWorkspace: images", () => {
+  const IMG_1 = "0192d000-0000-7000-8000-000000000001";
+  const IMG_2 = "0192d000-0000-7000-8000-000000000002";
+  const galleryImage = (artifactId: string, title: string): ImageArtifact =>
+    ({
+      artifactId, name: `${title}.png`, type: "image", status: "ready", statusReason: null, sizeBytes: 1000,
+      originalFilename: `${title}.png`, tags: [], deviceIds: [D], attemptId: "t", createdAt: "2026-10-01T10:00:00Z",
+      uploadedAt: null, title, description: null, mimeType: "image/png", capturedAt: null, updatedAt: null,
+    }) as unknown as ImageArtifact;
+  const withImage = (...artifactIds: string[]): NotebookDoc => ({
+    type: "doc",
+    content: [
+      { type: "paragraph", content: [{ type: "text", text: "four screws" }] },
+      ...artifactIds.map((artifactId, i) => ({ type: "image", attrs: { artifactId, alt: `Photo ${i + 1}` } })),
+    ],
+  });
+  /** Answers view-URL requests: a URL for each id in `ok`, 404 for the rest. */
+  function viewUrls(ok: string[]) {
+    routes["POST /artifacts/view-urls"] = (body) => ({
+      results: (body as { artifactIds: string[] }).artifactIds.map((artifactId) =>
+        ok.includes(artifactId)
+          ? { artifactId, ok: true, url: `https://s3.example/${artifactId}?sig=1`, mimeType: "image/png", expiresIn: 300 }
+          : { artifactId, ok: false, status: 404, error: "Image not found" }
+      ),
+    });
+  }
+  const viewUrlCalls = () =>
+    request.mock.calls.filter(([method, path]) => method === "POST" && path === "/artifacts/view-urls");
+
+  it("shows an entry's images through short-lived URLs, and a placeholder for one that's gone", async () => {
+    withEntries();
+    routes[`GET ${BASE}/entries/e1`] = () => ({ entry: full().sections[0].entries[0], doc: withImage(IMG_1, IMG_2) });
+    viewUrls([IMG_1]);
+    renderWorkspace();
+    const img = (await screen.findByAltText("Photo 1")) as HTMLImageElement;
+    expect(img.src).toBe(`https://s3.example/${IMG_1}?sig=1`);
+    expect(await screen.findByText("Image unavailable")).toBeTruthy();
+    expect(screen.getByText("Photo 2")).toBeTruthy(); // the placeholder names the missing image
+    // One request for both images.
+    expect(viewUrlCalls()).toHaveLength(1);
+    expect((viewUrlCalls()[0][2] as { body: { artifactIds: string[] } }).body.artifactIds.sort()).toEqual([IMG_1, IMG_2]);
+  });
+
+  it("inserts a gallery image by its id, and autosave stores only the id", async () => {
+    // jsdom has no layout: ProseMirror scrolls the inserted image into view.
+    const range = Range.prototype as unknown as Record<string, unknown>;
+    range.getClientRects = () => [];
+    range.getBoundingClientRect = () => ({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 });
+    onTestFinished(() => {
+      delete range.getClientRects;
+      delete range.getBoundingClientRect;
+    });
+    withEntries();
+    viewUrls([IMG_1]);
+    routes[`GET /devices/${D}/artifacts`] = (_body, query) =>
+      (query as { type?: string }).type === "image" ? { artifacts: [galleryImage(IMG_1, "PCB top")] } : { artifacts: [] };
+    const saves: unknown[] = [];
+    routes[`PUT ${BASE}/entries/e1/content`] = (body) => {
+      saves.push(body);
+      return { entry: entry("e1", "s1", "Opening the device", { contentVersion: 2 }) };
+    };
+    renderWorkspace();
+    await screen.findByText("four screws");
+    fireEvent.click(screen.getByRole("button", { name: "Insert image" }));
+    const dialog = within(await screen.findByRole("dialog", { name: /Insert image/ }));
+    const insert = dialog.getByRole("button", { name: "Insert image" });
+    expect((insert as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(await dialog.findByRole("button", { name: "Select PCB top" }));
+    fireEvent.click(insert);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Insert image/ })).toBeNull());
+
+    // Shown in the entry with a view URL ...
+    const shown = await waitFor(() => {
+      const img = document.querySelector<HTMLImageElement>('.re-notebook-doc img[alt="PCB top"]');
+      expect(img).toBeTruthy();
+      return img!;
+    });
+    expect(shown.src).toBe(`https://s3.example/${IMG_1}?sig=1`);
+    // The editor has focus again, for typing on after the image.
+    await waitFor(() => expect(document.activeElement?.classList.contains("ProseMirror")).toBe(true));
+    // ... but saved as a reference only.
+    await waitFor(() => expect(saves).toHaveLength(1), { timeout: 5000 });
+    const saved = saves[0] as { doc: NotebookDoc; expectedContentVersion: number };
+    expect(saved.expectedContentVersion).toBe(1);
+    expect(saved.doc.content).toContainEqual({ type: "image", attrs: { artifactId: IMG_1, alt: "PCB top" } });
+    expect(JSON.stringify(saved)).not.toMatch(/https?:|s3\.example|sig=/);
+  }, 10000);
+
+  it("inserts a newly uploaded image and shows it in the context panel at once", async () => {
+    const range = Range.prototype as unknown as Record<string, unknown>;
+    range.getClientRects = () => [];
+    range.getBoundingClientRect = () => ({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 });
+    onTestFinished(() => {
+      delete range.getClientRects;
+      delete range.getBoundingClientRect;
+    });
+    const NEW = "0192d000-0000-7000-8000-0000000000aa";
+    withEntries();
+    viewUrls([NEW]);
+    let uploaded = false;
+    routes[`GET /devices/${D}/artifacts`] = (_body, query) =>
+      (query as { type?: string }).type === "image" && uploaded ? { artifacts: [galleryImage(NEW, "Serial header")] } : { artifacts: [] };
+    routes[`GET /artifacts/${NEW}`] = () => ({ artifact: galleryImage(NEW, "Serial header") });
+    routes[`PUT ${BASE}/entries/e1/content`] = () => ({ entry: entry("e1", "s1", "Opening the device", { contentVersion: 2 }) });
+    renderWorkspace();
+    await screen.findByText("four screws");
+    const panel = within(document.getElementById("re-notebook-context-panel")!);
+    expect(await panel.findByText("No images of this device yet.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Insert image" }));
+    const dialog = within(await screen.findByRole("dialog", { name: /Insert image/ }));
+    fireEvent.click(dialog.getByRole("tab", { name: "Upload new" }));
+    uploaded = true;
+    fireEvent.click(dialog.getByRole("button", { name: "Fake upload" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Insert image/ })).toBeNull());
+
+    await waitFor(() => expect(document.querySelector('.re-notebook-doc img[alt="Serial header"]')).toBeTruthy());
+    // The context panel's gallery reloaded without a page refresh.
+    expect(await panel.findByRole("button", { name: /Serial header/ })).toBeTruthy();
+  }, 10000);
+
+  it("offers no Insert image to a workspace viewer", async () => {
+    withEntries();
+    renderWorkspace({ device: { ...device, workspaceId: "w1", role: "viewer" } as Device, scope: { kind: "workspace", workspaceId: "w1", name: "Lab", role: "viewer" } });
+    await screen.findByText("four screws");
+    expect(screen.queryByRole("button", { name: "Insert image" })).toBeNull();
+  });
+});
+
+describe("NotebookWorkspace: Export PDF", () => {
+  const IMG_1 = "0192d000-0000-7000-8000-000000000001";
+  let print: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    print = vi.spyOn(window, "print").mockImplementation(() => undefined);
+  });
+  afterEach(() => print.mockRestore());
+
+  const printRoot = () => document.querySelector<HTMLElement>(".re-notebook-print");
+  /** jsdom never loads images: tells the export each one loaded. */
+  async function loadPrintImages(count: number) {
+    await waitFor(() => expect(printRoot()?.querySelectorAll("img").length).toBe(count));
+    printRoot()!.querySelectorAll("img").forEach((img) => fireEvent.load(img));
+  }
+
+  it("prints every section and entry in order, with their images, once all are loaded", async () => {
+    withEntries();
+    routes[`GET ${BASE}/entries/e2`] = () => ({
+      entry: full().sections[0].entries[1],
+      doc: {
+        type: "doc",
+        content: [
+          { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "RTL8812AU" }] },
+          { type: "image", attrs: { artifactId: IMG_1, alt: "Chip close-up" } },
+          { type: "codeBlock", content: [{ type: "text", text: "lsusb -v" }] },
+        ],
+      },
+    });
+    routes["POST /artifacts/view-urls"] = (body) => ({
+      results: (body as { artifactIds: string[] }).artifactIds.map((artifactId) => ({
+        artifactId, ok: true, url: `https://s3.example/${artifactId}`, mimeType: "image/png", expiresIn: 300,
+      })),
+    });
+    renderWorkspace();
+    await screen.findByText("four screws");
+    calls = [];
+    fireEvent.click(within(topBar()).getByRole("button", { name: "Export PDF" }));
+    expect(await screen.findByRole("dialog", { name: /Export PDF/ })).toBeTruthy();
+    expect(document.body.classList.contains("re-notebook-printing")).toBe(true);
+
+    await loadPrintImages(1);
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+    // Read fresh: the notebook, then each entry.
+    expect(calls).toEqual(expect.arrayContaining([`GET ${BASE}`, `GET ${BASE}/entries/e1`, `GET ${BASE}/entries/e2`]));
+
+    const root = printRoot()!;
+    expect(root.querySelector("h1")!.textContent).toBe(device.name);
+    expect([...root.querySelectorAll(".re-notebook-print-section-title")].map((h) => h.textContent)).toEqual([
+      "Physical Teardown",
+      "Firmware Analysis",
+    ]);
+    expect([...root.querySelectorAll(".re-notebook-print-entry-title")].map((h) => h.textContent)).toEqual([
+      "Opening the device",
+      "Chipset identification",
+    ]);
+    expect(within(root).getByText("four screws")).toBeTruthy();
+    expect(within(root).getByRole("heading", { name: "RTL8812AU", hidden: true })).toBeTruthy();
+    expect(within(root).getByText("lsusb -v").closest("pre")).toBeTruthy();
+    expect(within(root).getByAltText("Chip close-up").getAttribute("loading")).toBe("eager");
+    expect(within(root).getByText("No entries in this section.")).toBeTruthy();
+    // The contents list every section and entry.
+    expect(within(root.querySelector("nav")!).getAllByRole("listitem", { hidden: true }).map((li) => li.firstChild?.textContent)).toEqual([
+      "Physical Teardown",
+      "Opening the device",
+      "Chipset identification",
+      "Firmware Analysis",
+    ]);
+
+    const exportDialog = within(screen.getByRole("dialog", { name: /Export PDF/ }));
+    fireEvent.click(exportDialog.getAllByRole("button", { name: "Close" }).at(-1)!);
+    await waitFor(() => expect(printRoot()).toBeNull());
+    expect(document.body.classList.contains("re-notebook-printing")).toBe(false);
+  });
+
+  it("says what's missing and waits for the user before printing", async () => {
+    withEntries();
+    routes[`GET ${BASE}/entries/e1`] = () => ({
+      entry: full().sections[0].entries[0],
+      doc: { type: "doc", content: [{ type: "image", attrs: { artifactId: IMG_1, alt: "Gone" } }] },
+    });
+    routes["POST /artifacts/view-urls"] = (body) => ({
+      results: (body as { artifactIds: string[] }).artifactIds.map((artifactId) => ({ artifactId, ok: false, status: 404, error: "Image not found" })),
+    });
+    renderWorkspace();
+    await screen.findByText("Image unavailable");
+    let failE2 = true;
+    routes[`GET ${BASE}/entries/e2`] = () => {
+      if (failE2) throw new ApiError("Internal error", 500);
+      return { entry: full().sections[0].entries[1], doc: paragraph("x") };
+    };
+    fireEvent.click(within(topBar()).getByRole("button", { name: "Export PDF" }));
+    const dialog = within(await screen.findByRole("dialog", { name: /Export PDF/ }));
+    expect(await dialog.findByText(/One entry couldn't be read/)).toBeTruthy();
+    expect(dialog.getByText(/“Chipset identification”/)).toBeTruthy();
+    expect(dialog.getByText(/One image couldn't be shown/)).toBeTruthy();
+    expect(within(printRoot()!).getByText(/This entry couldn't be read for the export/)).toBeTruthy();
+    expect(print).not.toHaveBeenCalled();
+    fireEvent.click(dialog.getByRole("button", { name: "Print anyway" }));
+    expect(print).toHaveBeenCalledTimes(1);
+    failE2 = false;
+  });
+
+  it("is offered to workspace viewers, and names the workspace", async () => {
+    withEntries();
+    renderWorkspace({ device: { ...device, workspaceId: "w1", role: "viewer" } as Device, scope: { kind: "workspace", workspaceId: "w1", name: "Lab", role: "viewer" } });
+    await screen.findByText("four screws");
+    fireEvent.click(within(topBar()).getByRole("button", { name: "Export PDF" }));
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+    expect(within(printRoot()!).getByText(/^Lab · Exported/)).toBeTruthy();
+  });
+
+  it("isn't offered for a notebook without sections", async () => {
+    routes[`GET ${BASE}`] = () => ({ notebook: notebook([]) });
+    renderWorkspace();
+    await screen.findByRole("button", { name: "Create the first section" });
+    expect(screen.queryByRole("button", { name: "Export PDF" })).toBeNull();
   });
 });
 

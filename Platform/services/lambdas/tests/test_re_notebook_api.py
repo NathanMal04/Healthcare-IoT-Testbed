@@ -481,6 +481,149 @@ class ContentTests(NotebookTestCase):
         self.assertEqual(self.save(self.eid, paragraph_doc("still saves"), 1)[0], 200)
 
 
+IMG_P = "0192d000-0000-7000-8000-000000000001"  # ready image of DEV_P
+IMG_P2 = "0192d000-0000-7000-8000-000000000002"  # ready image of DEV_P2 (same owner)
+IMG_A = "0192d000-0000-7000-8000-00000000000a"  # ready image of DEV_A (WS_A)
+IMG_B = "0192d000-0000-7000-8000-00000000000b"  # ready image of DEV_B (WS_B)
+
+
+def image_rows(artifact_id, device_id, workspace_id=None, owner=USER, link=True, **fields):
+    """An image artifact as artifacts-presign/-complete store it: METADATA, the
+    uploader's link (personal images only) and the device's gallery row."""
+    meta = {"pk": f"ARTIFACT#{artifact_id}", "sk": "METADATA", "entity": "artifact", "artifactId": artifact_id,
+            "type": "image", "status": "ready", "mimeType": "image/png", "deviceIds": {device_id},
+            "name": "board.png", "s3Bucket": "bucket", "s3Key": f"images/{artifact_id}", **fields}
+    rows = [meta]
+    if workspace_id is None:
+        rows.append({"pk": f"USER#{owner}", "sk": f"ARTIFACT#{artifact_id}", "role": "owner"})
+    else:
+        meta["workspaceId"] = workspace_id
+    if link:
+        rows.append({"pk": f"DEVICE#{device_id}", "sk": f"ARTIFACT#image#{artifact_id}"})
+    return rows
+
+
+def image_doc(*artifact_ids, text="Board"):
+    return {"type": "doc", "content": [
+        {"type": "paragraph", "content": [{"type": "text", "text": text}]},
+        *[{"type": "image", "attrs": {"artifactId": a, "alt": "PCB"}} for a in artifact_ids],
+    ]}
+
+
+class ImageReferenceTests(NotebookTestCase):
+    def setUp(self):
+        super().setUp()
+        for rows_ in (image_rows(IMG_P, DEV_P), image_rows(IMG_P2, DEV_P2),
+                      image_rows(IMG_A, DEV_A, WS_A), image_rows(IMG_B, DEV_B, WS_B, owner=OTHER)):
+            for r in rows_:
+                self.table.items[(r["pk"], r["sk"])] = r
+        self.sid = self.add_section()["sectionId"]
+        self.eid = self.add_entry(self.sid)["entryId"]
+
+    def add_image(self, artifact_id, device, workspace_id=None, **fields):
+        for r in image_rows(artifact_id, device, workspace_id, **fields):
+            self.table.items[(r["pk"], r["sk"])] = r
+
+    def test_an_image_of_the_device_is_saved_by_id_and_read_back(self):
+        status, body = self.save(self.eid, image_doc(IMG_P), 1)
+        self.assertEqual(status, 200, body)
+        stored = json.loads(self.row(DEV_P, f"CONTENT#{self.eid}")["doc"])
+        self.assertEqual(stored, image_doc(IMG_P))
+        # Only the reference is stored: no URL, bucket or key.
+        self.assertNotIn("http", self.row(DEV_P, f"CONTENT#{self.eid}")["doc"])
+        self.assertNotIn("images/", self.row(DEV_P, f"CONTENT#{self.eid}")["doc"])
+        status, entry = self.entry(self.eid)
+        self.assertEqual((status, entry["doc"]), (200, image_doc(IMG_P)))
+        self.assertEqual(entry["entry"]["textLength"], len("Board"))
+
+    def test_workspace_members_insert_the_workspace_devices_images(self):
+        sid = self.add_section(device=DEV_A, user=MEMBER)["sectionId"]
+        eid = self.add_entry(sid, device=DEV_A, user=MEMBER)["entryId"]
+        status, body = self.save(eid, image_doc(IMG_A), 1, device=DEV_A, user=MEMBER)
+        self.assertEqual(status, 200, body)
+
+    def test_only_ready_images_of_this_device_in_its_scope_are_accepted(self):
+        pending = "0192d000-0000-7000-8000-0000000000c1"
+        failed = "0192d000-0000-7000-8000-0000000000c2"
+        firmware = "0192d000-0000-7000-8000-0000000000c3"
+        unlinked = "0192d000-0000-7000-8000-0000000000c4"
+        svg = "0192d000-0000-7000-8000-0000000000c5"
+        others = "0192d000-0000-7000-8000-0000000000c6"
+        self.add_image(pending, DEV_P, status="uploading")
+        self.add_image(failed, DEV_P, status="failed")
+        self.add_image(firmware, DEV_P, type="firmware")
+        self.add_image(unlinked, DEV_P, link=False)
+        self.add_image(svg, DEV_P, mimeType="image/svg+xml")
+        self.add_image(others, DEV_O, owner=OTHER)
+        # Linked to DEV_P on paper, but stored in a workspace: another scope.
+        scoped = "0192d000-0000-7000-8000-0000000000c7"
+        self.add_image(scoped, DEV_P, WS_A)
+        cases = {
+            "another device's image (same owner)": IMG_P2,
+            "a workspace device's image": IMG_A,
+            "another workspace's image": IMG_B,
+            "another user's image": others,
+            "an image in another scope": scoped,
+            "a pending upload": pending,
+            "a failed upload": failed,
+            "not an image": firmware,
+            "an image whose gallery row is gone": unlinked,
+            "an unsupported format": svg,
+            "an id that doesn't exist": MISSING.replace("11111111", "0192d000"),
+        }
+        for label, artifact_id in cases.items():
+            with self.subTest(label):
+                status, body = self.save(self.eid, image_doc(IMG_P, artifact_id), 1)
+                self.assertEqual(status, 400, body)
+                # One answer whatever the reason, so ids can't be probed; the
+                # editor treats it like any invalid document.
+                self.assertEqual(body["code"], "invalid_document")
+                self.assertEqual(body["error"], self.module.INVALID_IMAGE)
+                self.assertEqual(body["artifactIds"], [artifact_id])
+        self.assertEqual(self.row(DEV_P, f"CONTENT#{self.eid}")["contentVersion"], 1)
+
+    def test_a_workspace_device_refuses_personal_and_other_workspace_images(self):
+        sid = self.add_section(device=DEV_A)["sectionId"]
+        eid = self.add_entry(sid, device=DEV_A)["entryId"]
+        for artifact_id in (IMG_P, IMG_B):
+            with self.subTest(artifact_id=artifact_id):
+                status, body = self.save(eid, image_doc(artifact_id), 1, device=DEV_A)
+                self.assertEqual((status, body["code"]), (400, "invalid_document"))
+
+    def test_stored_references_are_kept_when_the_image_is_gone(self):
+        self.assertEqual(self.save(self.eid, image_doc(IMG_P), 1)[0], 200)
+        # The image leaves the gallery (or stops being ready) afterwards.
+        del self.table.items[(f"ARTIFACT#{IMG_P}", "METADATA")]
+        status, body = self.save(self.eid, image_doc(IMG_P, text="Edited around it"), 2)
+        self.assertEqual(status, 200, body)
+        # But it can't be added again elsewhere.
+        eid2 = self.add_entry(self.sid, "Second")["entryId"]
+        status, body = self.save(eid2, image_doc(IMG_P), 1)
+        self.assertEqual((status, body["code"]), (400, "invalid_document"))
+
+    def test_a_stale_save_is_a_conflict_not_an_image_error(self):
+        self.assertEqual(self.save(self.eid, paragraph_doc("theirs"), 1)[0], 200)
+        status, body = self.save(self.eid, image_doc(IMG_P2), 1)
+        self.assertEqual((status, body["code"]), (409, "conflict"))
+
+    def test_images_already_stored_are_not_checked_again(self):
+        self.assertEqual(self.save(self.eid, image_doc(IMG_P, IMG_P), 1)[0], 200)
+        reads = []
+        original = self.table.get_item
+        self.table.get_item = lambda Key, ConsistentRead=False: reads.append(Key["pk"]) or original(Key, ConsistentRead)
+        self.assertEqual(self.save(self.eid, image_doc(IMG_P, text="again"), 2)[0], 200)
+        self.assertNotIn(f"ARTIFACT#{IMG_P}", reads)
+
+    def test_viewers_cannot_save_images(self):
+        sid = self.add_section(device=DEV_A)["sectionId"]
+        eid = self.add_entry(sid, device=DEV_A)["entryId"]
+        viewer = "user-sub-viewer"
+        self.table.items[(f"USER#{viewer}", f"WORKSPACE#{WS_A}")] = {
+            "pk": f"USER#{viewer}", "sk": f"WORKSPACE#{WS_A}", "role": "viewer"}
+        status, _ = self.save(eid, image_doc(IMG_A), 1, device=DEV_A, user=viewer)
+        self.assertEqual(status, 404)
+
+
 class MoveTests(NotebookTestCase):
     def move(self, entry_id, target, version, position=None):
         body = {"targetSectionId": target, "expectedVersion": version}

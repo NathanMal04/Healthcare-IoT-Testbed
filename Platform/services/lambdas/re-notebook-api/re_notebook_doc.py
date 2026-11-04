@@ -15,6 +15,7 @@ Schema (the editor's, with the same content rules):
   blockquote   block+                     codeBlock    text* (no marks), attrs {language?}
   bulletList   listItem+                  orderedList  listItem+, attrs {start?}
   listItem     paragraph block*
+  image        (no content), attrs {artifactId, alt?}   (a block, like a paragraph)
   inline       text | hardBreak
   marks        bold, italic, code (alone: it excludes every other mark), link {href}
 
@@ -22,8 +23,15 @@ Links are http(s) or mailto only, so a stored link can never become a
 javascript: or data: URL. The same rules, and a shared set of test documents
 (tests/fixtures/re_notebook_docs.json), are used by the web app.
 
-Future node types (gallery images, artifact and CVE references) will be
-added here as new entries of NODES, referencing records by id only.
+An image references one of the device's gallery images by its artifactId
+only: never a URL (view URLs are short-lived and fetched when the image is
+shown), and never the file itself. That the id is a ready image of the
+entry's device is checked by the API when a save adds it (image_ids lists
+the references); here only its form is. At most MAX_IMAGES per document, so
+one view-URL request can show them all.
+
+Future node types (artifact and CVE references) will be added here as new
+entries of NODES, referencing records by id only.
 """
 import json
 import re
@@ -36,13 +44,16 @@ MAX_DEPTH = 40
 MAX_NODES = 60_000
 MAX_HREF_LENGTH = 2048
 MAX_ORDERED_LIST_START = 1_000_000
+MAX_IMAGES = 100
+MAX_ALT_LENGTH = 200
+ARTIFACT_ID_PATTERN = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 HEADING_LEVELS = (1, 2, 3)
 LANGUAGE_PATTERN = re.compile(r"[A-Za-z0-9+#._-]{1,32}")
 LINK_SCHEMES = ("http", "https", "mailto")
 # C0 controls other than tab, newline and carriage return, and DEL.
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
-BLOCK = frozenset({"paragraph", "heading", "blockquote", "bulletList", "orderedList", "codeBlock"})
+BLOCK = frozenset({"paragraph", "heading", "blockquote", "bulletList", "orderedList", "codeBlock", "image"})
 INLINE = frozenset({"text", "hardBreak"})
 MARKS = frozenset({"bold", "italic", "code", "link"})
 
@@ -59,8 +70,11 @@ NODES = {
     "codeBlock": (frozenset({"text"}), 0),
     "hardBreak": (frozenset(), 0),
     "text": (frozenset(), 0),
+    "image": (frozenset(), 0),
 }
-LEAVES = frozenset({"hardBreak", "text"})
+LEAVES = frozenset({"hardBreak", "text", "image"})
+# Image alt text is one line: no control characters at all.
+ALT_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 EMPTY_DOC = {"type": "doc", "content": [{"type": "paragraph"}]}
 
@@ -77,7 +91,7 @@ def serialize(doc):
 def validate(doc):
     """Checks a document; returns (serialized JSON, text length). Raises
     DocumentError with a message safe to show to the user."""
-    state = {"nodes": 0, "text": 0}
+    state = {"nodes": 0, "text": 0, "images": 0}
     if not isinstance(doc, dict) or doc.get("type") != "doc":
         raise DocumentError("content must be a document")
     _node(doc, state, depth=1, marks_allowed=False)
@@ -126,6 +140,11 @@ def _node(node, state, depth, marks_allowed):
             raise DocumentError("content contains invalid characters")
         state["text"] += len(text)
         return
+    if kind == "image":
+        state["images"] += 1
+        if state["images"] > MAX_IMAGES:
+            raise DocumentError(f"content has too many images (at most {MAX_IMAGES})")
+        return
     if kind == "hardBreak":
         return
 
@@ -147,6 +166,18 @@ def _attrs(kind, attrs):
         if not isinstance(attrs, dict) or set(attrs) != {"level"} or not _is_int(attrs["level"]) \
                 or attrs["level"] not in HEADING_LEVELS:
             raise DocumentError("content contains an invalid heading")
+        return
+    if kind == "image":
+        if not isinstance(attrs, dict) or "artifactId" not in attrs or set(attrs) - {"artifactId", "alt"}:
+            raise DocumentError("content contains an invalid image")
+        artifact_id = attrs["artifactId"]
+        if not isinstance(artifact_id, str) or not ARTIFACT_ID_PATTERN.fullmatch(artifact_id):
+            raise DocumentError("content contains an invalid image")
+        if "alt" in attrs:
+            alt = attrs["alt"]
+            if not isinstance(alt, str) or not alt or alt != alt.strip() or len(alt) > MAX_ALT_LENGTH \
+                    or ALT_CONTROL_CHARS.search(alt):
+                raise DocumentError("content contains an invalid image")
         return
     if attrs is None:
         return
@@ -184,6 +215,25 @@ def _marks(marks):
     if "code" in seen and len(seen) > 1:
         # Inline code excludes every other mark in the editor.
         raise DocumentError("content contains unsupported formatting")
+
+
+def image_ids(doc):
+    """The artifactIds the document's images reference, each once, in order.
+    Only for documents that passed validate() (or were stored after it)."""
+    ids, stack = [], [doc]
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, dict):
+            continue
+        if node.get("type") == "image":
+            artifact_id = (node.get("attrs") or {}).get("artifactId")
+            if isinstance(artifact_id, str) and artifact_id not in ids:
+                ids.append(artifact_id)
+            continue
+        children = node.get("content")
+        if isinstance(children, list):
+            stack.extend(reversed(children))
+    return ids
 
 
 def is_allowed_href(href):

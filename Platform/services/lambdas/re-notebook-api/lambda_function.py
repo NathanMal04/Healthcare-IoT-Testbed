@@ -37,6 +37,13 @@ as the caller's intent doesn't depend on the exact list.
 Entries are soft-deleted: deletedAt is set and the entry leaves its section's
 order, while both rows are kept. Every write to an entry requires it not to
 be deleted, so a stale request can neither edit nor bring one back.
+
+Images in a document reference the device's gallery images by artifactId. A
+save that adds a reference (one the stored document doesn't have) is refused
+unless the image is a ready image of this device, in its scope, that the
+caller may read: the rule for the device's profile picture. References that
+were already stored are kept as they are, so an entry whose image later
+leaves the gallery can still be edited (the image shows as unavailable).
 """
 import json
 import os
@@ -47,6 +54,7 @@ import uuid
 from datetime import datetime, timezone
 
 import boto3
+import image_fields
 import re_notebook_doc
 import testbed_authz
 from boto3.dynamodb.conditions import Key
@@ -83,6 +91,9 @@ R_ENTRY_CONTENT = BASE + "/entries/{entryId}/content"
 R_ENTRY_MOVE = BASE + "/entries/{entryId}/move"
 
 NOTEBOOK_BUSY = "The notebook is being changed by someone else at the same time; try again"
+# The same answer whatever the reason (missing, another device's, not ready,
+# not an image), so ids can't be probed.
+INVALID_IMAGE = "content contains an image that isn't a ready image of this device"
 
 
 class RequestError(Exception):
@@ -325,6 +336,7 @@ def _save_content(ctx, ids, body, query):
     except re_notebook_doc.DocumentError as e:
         raise RequestError(400, str(e), {"code": "invalid_document"})
     entry_id = ids["entryId"]
+    _check_added_images(ctx, entry_id, body["doc"], expected)
     now = _now()
     new_version = expected + 1
 
@@ -351,6 +363,45 @@ def _save_content(ctx, ids, body, query):
                            {"code": "conflict", "entry": _entry_view(entry),
                             "doc": json.loads(content["doc"]) if content else None})
     return _resp(200, {"entry": _entry_view(_get(ctx, f"ENTRY#{entry_id}"))})
+
+
+def _check_added_images(ctx, entry_id, doc, expected):
+    """Refuses the save (400, invalid_document) if it adds a reference to an
+    image that isn't usable here (see the module docstring). Compared with
+    the stored document at the version the save names: if that isn't the
+    stored version, the save's transaction is refused as a conflict anyway."""
+    referenced = re_notebook_doc.image_ids(doc)
+    if not referenced:
+        return
+    content = _get(ctx, f"CONTENT#{entry_id}")
+    if content is None or int(content.get("contentVersion", 0)) != expected:
+        return
+    stored = set(re_notebook_doc.image_ids(json.loads(content["doc"])))
+    refused = [artifact_id for artifact_id in referenced
+               if artifact_id not in stored and not _usable_image(ctx, artifact_id)]
+    if refused:
+        raise RequestError(400, INVALID_IMAGE, {"code": "invalid_document", "artifactIds": refused})
+
+
+def _usable_image(ctx, artifact_id):
+    """Whether the artifact is one of this device's ready gallery images: an
+    image the caller may read (the rule of GET /artifacts/{id}), in the
+    device's scope (both personal, or both in the same workspace), linked to
+    the device (its deviceIds and its gallery row), with a supported format."""
+    try:
+        image = testbed_authz.require_resource(ctx.table, ctx.user_id, "ARTIFACT", artifact_id,
+                                               legacy_roles=testbed_authz.ANY_ROLE)
+    except testbed_authz.AuthorizationError:
+        return False
+    return (
+        image.get("type") == image_fields.IMAGE_TYPE
+        and image.get("status") == "ready"
+        and image.get("mimeType") in image_fields.IMAGE_MIME_TYPES
+        and image.get("workspaceId") == ctx.workspace_id
+        and ctx.device_id in (image.get("deviceIds") or ())
+        and ctx.table.get_item(Key={"pk": f"DEVICE#{ctx.device_id}",
+                                    "sk": f"ARTIFACT#{image_fields.IMAGE_TYPE}#{artifact_id}"}).get("Item") is not None
+    )
 
 
 def _move_entry(ctx, ids, body, query):
