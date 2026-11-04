@@ -1,8 +1,27 @@
+# Files local development leaves beside the source (bytecode from test runs,
+# test and type-checker caches, virtual environments). They are git-ignored,
+# so a clean checkout (CI) never has them; packaging them from a local
+# checkout would change the hash and redeploy functions whose code did not
+# change. Patterns are relative to source_dir.
+locals {
+  package_excludes = [
+    "**/__pycache__/**",
+    "**/*.pyc",
+    "**/*.pyo",
+    "**/.pytest_cache/**",
+    "**/.mypy_cache/**",
+    "**/.coverage",
+    "**/.venv/**",
+    "**/venv/**",
+  ]
+}
+
 data "archive_file" "this" {
   count       = var.package_type == "Zip" ? 1 : 0
   type        = "zip"
   source_dir  = var.source_dir
   output_path = "/tmp/lambda-${var.function_name}.zip"
+  excludes    = local.package_excludes
 }
 
 resource "aws_iam_role" "this" {
