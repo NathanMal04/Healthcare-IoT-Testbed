@@ -1,0 +1,237 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "TerraformState",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${state_bucket}",
+        "arn:aws:s3:::${state_bucket}/*"
+      ]
+    },
+    {
+      "Sid": "S3AppBuckets",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:DeleteBucket",
+        "s3:Get*",
+        "s3:Put*",
+        "s3:List*",
+        "s3:DeleteObject",
+        "s3:DeleteBucketPolicy"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${name}-web",
+        "arn:aws:s3:::${name}-web/*",
+        "arn:aws:s3:::${name}-data-lake",
+        "arn:aws:s3:::${name}-data-lake/*"
+      ]
+    },
+    {
+      "Sid": "ACMCloudFrontCert",
+      "Effect": "Allow",
+      "Action": [
+        "acm:RequestCertificate",
+        "acm:DescribeCertificate",
+        "acm:ListCertificates",
+        "acm:ListTagsForCertificate",
+        "acm:AddTagsToCertificate",
+        "acm:RemoveTagsFromCertificate",
+        "acm:DeleteCertificate"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "us-east-1"
+        }
+      }
+    },
+    {
+      "Sid": "CloudFront",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateFunction",
+        "cloudfront:UpdateFunction",
+        "cloudfront:DeleteFunction",
+        "cloudfront:GetFunction",
+        "cloudfront:DescribeFunction",
+        "cloudfront:PublishFunction",
+        "cloudfront:ListFunctions",
+        "cloudfront:CreateDistribution",
+        "cloudfront:GetDistribution",
+        "cloudfront:UpdateDistribution",
+        "cloudfront:DeleteDistribution",
+        "cloudfront:CreateInvalidation",
+        "cloudfront:CreateOriginAccessControl",
+        "cloudfront:GetOriginAccessControl",
+        "cloudfront:UpdateOriginAccessControl",
+        "cloudfront:DeleteOriginAccessControl",
+        "cloudfront:TagResource",
+        "cloudfront:UntagResource",
+        "cloudfront:ListTagsForResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Cognito",
+      "Effect": "Allow",
+      "Action": [
+        "cognito-idp:CreateUserPool",
+        "cognito-idp:DescribeUserPool",
+        "cognito-idp:UpdateUserPool",
+        "cognito-idp:DeleteUserPool",
+        "cognito-idp:CreateUserPoolClient",
+        "cognito-idp:DescribeUserPoolClient",
+        "cognito-idp:UpdateUserPoolClient",
+        "cognito-idp:DeleteUserPoolClient",
+        "cognito-idp:TagResource",
+        "cognito-idp:UntagResource",
+        "cognito-idp:ListTagsForResource",
+        "cognito-idp:GetUserPoolMfaConfig",
+        "cognito-idp:SetUserPoolMfaConfig"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DynamoDB",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:CreateTable",
+        "dynamodb:DescribeTable",
+        "dynamodb:DescribeContinuousBackups",
+        "dynamodb:DescribeTimeToLive",
+        "dynamodb:UpdateTable",
+        "dynamodb:UpdateTimeToLive",
+        "dynamodb:DeleteTable",
+        "dynamodb:TagResource",
+        "dynamodb:UntagResource",
+        "dynamodb:ListTagsOfResource"
+      ],
+      "Resource": "arn:aws:dynamodb:${region}:*:table/${name}-*"
+    },
+    {
+      "Sid": "Lambda",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:CreateFunction",
+        "lambda:GetFunction",
+        "lambda:GetFunctionConfiguration",
+        "lambda:GetFunctionCodeSigningConfig",
+        "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration",
+        "lambda:DeleteFunction",
+        "lambda:PublishVersion",
+        "lambda:CreateAlias",
+        "lambda:GetAlias",
+        "lambda:UpdateAlias",
+        "lambda:DeleteAlias",
+        "lambda:AddPermission",
+        "lambda:RemovePermission",
+        "lambda:GetPolicy",
+        "lambda:TagResource",
+        "lambda:UntagResource",
+        "lambda:ListTags",
+        "lambda:ListVersionsByFunction"
+      ],
+      "Resource": "arn:aws:lambda:${region}:*:function:${name}-*"
+    },
+    {
+      "Sid": "APIGateway",
+      "Effect": "Allow",
+      "Action": [
+        "apigateway:GET",
+        "apigateway:POST",
+        "apigateway:PUT",
+        "apigateway:PATCH",
+        "apigateway:DELETE"
+      ],
+      "Resource": "arn:aws:apigateway:${region}::/*"
+    },
+    {
+      "Sid": "IAMRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:GetRole",
+        "iam:UpdateRole",
+        "iam:DeleteRole",
+        "iam:PassRole",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies",
+        "iam:ListInstanceProfilesForRole",
+        "iam:PutRolePolicy",
+        "iam:GetRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:CreatePolicy",
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion",
+        "iam:CreatePolicyVersion",
+        "iam:DeletePolicyVersion",
+        "iam:DeletePolicy",
+        "iam:ListPolicyVersions",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:TagPolicy",
+        "iam:UntagPolicy",
+        "iam:CreateInstanceProfile",
+        "iam:DeleteInstanceProfile",
+        "iam:GetInstanceProfile",
+        "iam:AddRoleToInstanceProfile",
+        "iam:RemoveRoleFromInstanceProfile",
+        "iam:TagInstanceProfile"
+      ],
+      "Resource": [
+        "arn:aws:iam::*:role/${name}-*",
+        "arn:aws:iam::*:policy/${name}-*",
+        "arn:aws:iam::*:instance-profile/${name}-*"
+      ]
+    },
+    {
+      "Sid": "CloudWatchLogsList",
+      "Effect": "Allow",
+      "Action": "logs:DescribeLogGroups",
+      "Resource": "*"
+    },
+    {
+      "Sid": "CloudWatchLogsManage",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:DeleteLogGroup",
+        "logs:PutRetentionPolicy",
+        "logs:TagResource",
+        "logs:UntagResource",
+        "logs:ListTagsForResource"
+      ],
+      "Resource": [
+        "arn:aws:logs:${region}:*:log-group:/aws/lambda/${name}-*",
+        "arn:aws:logs:${region}:*:log-group:/aws/batch/${name}-*",
+        "arn:aws:logs:${region}:*:log-group:/aws/codebuild/${name}-*"
+      ]
+    },
+    {
+      "Sid": "LambdaSharedLayer",
+      "Effect": "Allow",
+      "Action": "lambda:PublishLayerVersion",
+      "Resource": "arn:aws:lambda:${region}:*:layer:${name}-shared"
+    },
+    {
+      "Sid": "LambdaSharedLayerVersions",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:GetLayerVersion",
+        "lambda:DeleteLayerVersion"
+      ],
+      "Resource": "arn:aws:lambda:${region}:*:layer:${name}-shared:*"
+    }
+  ]
+}

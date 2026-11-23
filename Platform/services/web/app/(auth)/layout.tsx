@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Cpu, Microchip, ShieldAlert, Users } from "lucide-react";
 import { BrandMark } from "@/app/components/shell/BrandMark";
+import { BRAND_NAME } from "@/lib/brand";
 
 // What the platform does today; nothing here promises unbuilt features.
 const CAPABILITIES = [
@@ -14,13 +15,13 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
   return (
     <div className="min-h-screen grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] bg-white">
       <div className="flex flex-col px-6 sm:px-10 py-8">
-        <Link href="/" className="self-start rounded-lg" aria-label="Vzoniq home">
+        <Link href="/" className="self-start rounded-lg" aria-label={`${BRAND_NAME} home`}>
           <BrandMark tone="light" />
         </Link>
         <div className="flex-1 flex items-center justify-center py-10">
           <div className="w-full max-w-sm">{children}</div>
         </div>
-        <p className="text-xs text-slate-400">Vzoniq · Healthcare IoT Vulnerability Testbed</p>
+        <p className="text-xs text-slate-400">{BRAND_NAME} · Healthcare IoT Vulnerability Testbed</p>
       </div>
 
       <aside className="hidden lg:flex relative overflow-hidden bg-navy-900 text-white">

@@ -1,9 +1,10 @@
 "use client";
 
 import { useId } from "react";
+import { BRAND_NAME } from "@/lib/brand";
 
 /**
- * The Vzoniq mark: a shield with a signal trace, drawn inline so no asset is
+ * The product mark (BRAND_NAME, lib/brand.ts): a shield with a signal trace, drawn inline so no asset is
  * needed. Each instance has its own gradient id: with a shared id, a logo
  * would paint with the gradient of another one, and draw nothing when that
  * one is hidden (the desktop sidebar's, below large screens).
@@ -38,7 +39,7 @@ export function BrandMark({ tone = "dark", compact = false }: { tone?: "dark" | 
       <BrandLogo className="h-8 w-8 shrink-0" />
       <div className="min-w-0 leading-tight">
         <p className={`text-[15px] font-semibold tracking-tight ${tone === "dark" ? "text-white" : "text-slate-900"}`}>
-          Vzoniq
+          {BRAND_NAME}
         </p>
         {!compact && (
           <p className={`text-2xs truncate ${tone === "dark" ? "text-navy-300" : "text-slate-500"}`}>

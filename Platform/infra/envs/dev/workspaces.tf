@@ -19,6 +19,7 @@ module "workspaces_api_fn" {
   layers        = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
+    ALLOWED_ORIGIN      = local.site_origin
     METADATA_TABLE_NAME = module.metadata_table.table_name
   }
 
@@ -176,6 +177,7 @@ module "workspaces_preflight" {
   for_each = local.workspaces_preflights
 
   rest_api_id     = module.api.rest_api_id
+  allowed_origin  = local.site_origin
   resource_id     = each.value.resource_id
   allowed_methods = each.value.methods
 }

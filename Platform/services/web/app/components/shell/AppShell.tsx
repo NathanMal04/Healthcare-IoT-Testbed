@@ -7,6 +7,7 @@ import { useWorkspace } from "@/context/WorkspaceContext";
 import { readShellPreferences, writeShellPreferences } from "@/lib/shellPreferences";
 import WorkspaceDialogs, { WorkspaceNotice } from "@/app/components/WorkspaceDialogs";
 import { LoadingState, PageContainer, useRequireUser } from "@/app/components/ui";
+import { BRAND_NAME } from "@/lib/brand";
 import { contentWidth, routeCrumbs } from "./navigation";
 import { ShellProvider, useShell } from "./ShellContext";
 import Sidebar, { DRAWER_ID } from "./Sidebar";
@@ -65,7 +66,7 @@ function Frame({ children }: { children: React.ReactNode }) {
   if (!ready) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <LoadingState label="Loading Vzoniq…" />
+        <LoadingState label={`Loading ${BRAND_NAME}…`} />
       </div>
     );
   }

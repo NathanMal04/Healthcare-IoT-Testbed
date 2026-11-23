@@ -8,6 +8,7 @@ import "@/lib/amplify";
 import { useAuth } from "@/context/AuthContext";
 import { Alert, Button, LoadingState, inputClass, labelClass } from "@/app/components/ui";
 import { AuthHeading } from "@/app/components/AuthForm";
+import { BRAND_NAME } from "@/lib/brand";
 import { VERIFIED_EMAIL_KEY, routeForSignInStep, savePendingVerification } from "@/lib/verification";
 
 function LoginForm() {
@@ -59,7 +60,7 @@ function LoginForm() {
 
   return (
     <>
-      <AuthHeading title="Welcome back" description="Sign in to your Vzoniq account to continue." />
+      <AuthHeading title="Welcome back" description={`Sign in to your ${BRAND_NAME} account to continue.`} />
 
       {justVerified && (
         <Alert tone="success" className="mb-4">

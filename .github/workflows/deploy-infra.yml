@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - "Platform/infra/**"
+      - "Platform/scripts/tf_init.sh"
       - ".github/workflows/deploy-infra.yml"
 
 permissions:
@@ -16,8 +17,17 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # The deployment's settings: secrets AWS_ROLE_ARN and AWS_REGION, and the
+    # repository variables below (SELF_HOSTING.md, "GitHub Actions").
     env:
       TF_VAR_aws_profile: ""
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_USE_LOCKFILE: ${{ vars.TF_USE_LOCKFILE }}
+      TF_VAR_aws_region: ${{ secrets.AWS_REGION }}
+      TF_VAR_name: ${{ vars.TF_NAME }}
+      TF_VAR_domain_name: ${{ vars.DOMAIN_NAME }}
+      TF_VAR_route53_zone_id: ${{ vars.ROUTE53_ZONE_ID }}
+      TF_VAR_brand_name: ${{ vars.BRAND_NAME }}
     defaults:
       run:
         working-directory: Platform/infra/envs/dev
@@ -25,6 +35,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Check repository variables
+        run: |
+          missing=""
+          [ -n "$TF_STATE_BUCKET" ] || missing="$missing TF_STATE_BUCKET"
+          [ -n "$TF_VAR_name" ] || missing="$missing TF_NAME"
+          [ -n "$TF_VAR_domain_name" ] || missing="$missing DOMAIN_NAME"
+          if [ -n "$missing" ]; then
+            echo "::error::Set these repository variables (Settings > Secrets and variables > Actions > Variables):$missing"
+            exit 1
+          fi
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -37,7 +58,7 @@ jobs:
         uses: hashicorp/setup-terraform@v3
 
       - name: Terraform Init
-        run: terraform init -input=false -upgrade
+        run: "$GITHUB_WORKSPACE/Platform/scripts/tf_init.sh -upgrade"
 
       - name: Terraform Plan
         run: terraform plan -var 'aws_profile=' -input=false -out=tfplan

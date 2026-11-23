@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { useFocusTrap } from "@/app/components/ui/useFocusTrap";
 import { BrandLogo, BrandMark } from "./BrandMark";
+import { BRAND_NAME } from "@/lib/brand";
 import { NAV_SECTIONS, SYSTEM_ITEMS, isActive, type NavItem } from "./navigation";
 import WorkspaceSelector from "./WorkspaceSelector";
 
@@ -113,7 +114,7 @@ function SidebarContent({
         <Link
           href="/dashboard"
           onClick={onNavigate}
-          aria-label="Vzoniq dashboard"
+          aria-label={`${BRAND_NAME} dashboard`}
           className="min-w-0 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
         >
           {rail ? <BrandLogo className="h-8 w-8" /> : <BrandMark tone="light" />}

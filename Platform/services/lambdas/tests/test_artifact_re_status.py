@@ -21,6 +21,7 @@ from boto3.dynamodb.types import TypeDeserializer
 from botocore.exceptions import ClientError
 
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-2")
+os.environ.setdefault("ALLOWED_ORIGIN", "https://vzoniq.com")
 os.environ.setdefault("METADATA_TABLE_NAME", "metadata")
 os.environ.setdefault("DATA_LAKE_BUCKET", "data-lake")
 

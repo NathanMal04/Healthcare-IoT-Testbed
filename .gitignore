@@ -11,6 +11,9 @@
 **/override.tf
 **/override.tf.json
 **/*.auto.tfvars
+# Per-deployment values (committed as *.example)
+**/terraform.tfvars
+**/backend.hcl
 # Keep provider lock file
 !.terraform.lock.hcl
 

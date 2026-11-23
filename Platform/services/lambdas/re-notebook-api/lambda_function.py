@@ -773,6 +773,6 @@ def _now():
 def _resp(status, body):
     return {
         "statusCode": status,
-        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "https://vzoniq.com"},
+        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": os.environ.get("ALLOWED_ORIGIN", "")},
         "body": json.dumps(body),
     }

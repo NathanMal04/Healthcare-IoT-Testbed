@@ -51,6 +51,7 @@ module "usage_api_fn" {
   runtime       = "python3.12"
 
   environment_variables = {
+    ALLOWED_ORIGIN        = local.site_origin
     METADATA_TABLE_NAME   = module.metadata_table.table_name
     DEFAULT_MONTHLY_LIMIT = var.default_monthly_limit
   }
@@ -205,6 +206,7 @@ module "usage_preflight" {
   source = "../../modules/api_cors_preflight"
 
   rest_api_id     = module.api.rest_api_id
+  allowed_origin  = local.site_origin
   resource_id     = aws_api_gateway_resource.usage.id
   allowed_methods = ["GET"]
 }

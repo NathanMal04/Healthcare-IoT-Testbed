@@ -25,6 +25,7 @@ import test_cves_api as cves_fakes
 import test_workspace_artifacts as artifact_world
 
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-2")
+os.environ.setdefault("ALLOWED_ORIGIN", "https://vzoniq.com")
 os.environ.setdefault("METADATA_TABLE_NAME", "metadata")
 os.environ.setdefault("DATA_LAKE_BUCKET", "data-lake")
 
@@ -408,6 +409,12 @@ class UpdateDeviceTests(unittest.TestCase):
     def test_cors_header(self):
         resp = self.patch({"reverseEngineeringStatus": "complete"})
         self.assertEqual(resp["headers"]["Access-Control-Allow-Origin"], "https://vzoniq.com")
+
+    def test_cors_header_follows_allowed_origin(self):
+        # Another deployment's domain (Terraform passes https://<domain_name>).
+        with mock.patch.dict(os.environ, {"ALLOWED_ORIGIN": "https://testbed.example.org"}):
+            resp = self.patch({"reverseEngineeringStatus": "complete"})
+        self.assertEqual(resp["headers"]["Access-Control-Allow-Origin"], "https://testbed.example.org")
 
 
 # --- Workspace devices (Stage 3A.3) --------------------------------------------------

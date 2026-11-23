@@ -1,5 +1,14 @@
 # Main infrastructure definitions
 
+locals {
+  # The one origin the browser app is served from (CloudFront 301s every other
+  # hostname to it). The S3 CORS rule, API Gateway responses and each API
+  # Lambda's Access-Control-Allow-Origin all use it; see README "Canonical Host".
+  site_origin = "https://${var.domain_name}"
+  site_hosts  = concat([var.domain_name], var.include_www ? ["www.${var.domain_name}"] : [])
+  brand_name  = coalesce(trimspace(var.brand_name), "Vzoniq")
+}
+
 # S3 bucket for hosting static web assets
 module "web_bucket" {
   source = "../../modules/s3_bucket"
@@ -19,8 +28,8 @@ module "cdn" {
   project                        = var.name
   environment                    = "dev"
 
-  aliases             = [var.domain_name, "www.${var.domain_name}"]
-  acm_certificate_arn = aws_acm_certificate.frontend.arn
+  aliases             = local.site_hosts
+  acm_certificate_arn = local.frontend_certificate_arn
   canonical_host      = var.domain_name
 
   # /s/* goes to notebook sessions (sessions.tf).
@@ -56,7 +65,7 @@ module "data_lake_bucket" {
   cors_rules = [{
     allowed_headers = ["*"]
     allowed_methods = ["PUT", "POST"]
-    allowed_origins = ["https://vzoniq.com", "http://localhost:3000"]
+    allowed_origins = concat([local.site_origin], var.extra_allowed_origins)
     expose_headers  = ["ETag"]
     max_age_seconds = 3000
   }]
@@ -138,7 +147,7 @@ resource "aws_lambda_permission" "allow_cognito_post_confirmation" {
   source_arn    = module.auth.user_pool_arn
 }
 
-# Cognito CustomMessage trigger: the branded "Verify your Vzoniq account"
+# Cognito CustomMessage trigger: the branded "Verify your <brand_name> account"
 # email for sign-up and resent codes. Other messages keep Cognito's defaults.
 # Cognito waits at most 5 s for a trigger; it needs no AWS permissions.
 module "cognito_custom_message_fn" {
@@ -148,6 +157,10 @@ module "cognito_custom_message_fn" {
   handler       = "lambda_function.handler"
   runtime       = "python3.12"
   timeout       = 5
+
+  environment_variables = {
+    BRAND_NAME = local.brand_name
+  }
 
   project     = var.name
   environment = "dev"
@@ -350,6 +363,7 @@ module "create_device_fn" {
   layers        = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
+    ALLOWED_ORIGIN      = local.site_origin
     METADATA_TABLE_NAME = module.metadata_table.table_name
     DATA_LAKE_BUCKET    = module.data_lake_bucket.bucket_name
   }
@@ -372,6 +386,7 @@ module "list_devices_fn" {
   layers        = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
+    ALLOWED_ORIGIN      = local.site_origin
     METADATA_TABLE_NAME = module.metadata_table.table_name
   }
 
@@ -393,6 +408,7 @@ module "update_device_fn" {
   layers        = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
+    ALLOWED_ORIGIN      = local.site_origin
     METADATA_TABLE_NAME = module.metadata_table.table_name
   }
 
@@ -414,6 +430,7 @@ module "presign_firmware_fn" {
   layers        = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
+    ALLOWED_ORIGIN          = local.site_origin
     METADATA_TABLE_NAME     = module.metadata_table.table_name
     DATA_LAKE_BUCKET        = module.data_lake_bucket.bucket_name
     PRESIGN_EXPIRES_SEC     = "300"
@@ -443,6 +460,7 @@ module "complete_firmware_fn" {
   layers        = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
+    ALLOWED_ORIGIN      = local.site_origin
     METADATA_TABLE_NAME = module.metadata_table.table_name
   }
 
@@ -469,6 +487,7 @@ module "list_firmware_fn" {
   layers        = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
+    ALLOWED_ORIGIN      = local.site_origin
     METADATA_TABLE_NAME = module.metadata_table.table_name
   }
 
@@ -643,7 +662,7 @@ resource "aws_api_gateway_integration_response" "devices_options_200" {
   status_code = aws_api_gateway_method_response.devices_options_200.status_code
 
   response_parameters = {
-    "method.response.header.Access-Control-Allow-Origin"  = "'https://vzoniq.com'"
+    "method.response.header.Access-Control-Allow-Origin"  = "'${local.site_origin}'"
     "method.response.header.Access-Control-Allow-Methods" = "'GET,POST,OPTIONS'"
     "method.response.header.Access-Control-Allow-Headers" = "'Authorization,Content-Type'"
   }
@@ -657,7 +676,7 @@ resource "aws_api_gateway_gateway_response" "default_4xx" {
   response_type = "DEFAULT_4XX"
 
   response_parameters = {
-    "gatewayresponse.header.Access-Control-Allow-Origin" = "'https://vzoniq.com'"
+    "gatewayresponse.header.Access-Control-Allow-Origin" = "'${local.site_origin}'"
   }
 
   response_templates = {
@@ -670,7 +689,7 @@ resource "aws_api_gateway_gateway_response" "default_5xx" {
   response_type = "DEFAULT_5XX"
 
   response_parameters = {
-    "gatewayresponse.header.Access-Control-Allow-Origin" = "'https://vzoniq.com'"
+    "gatewayresponse.header.Access-Control-Allow-Origin" = "'${local.site_origin}'"
   }
 
   response_templates = {
@@ -732,6 +751,7 @@ module "devices_device_id_preflight" {
   source = "../../modules/api_cors_preflight"
 
   rest_api_id     = module.api.rest_api_id
+  allowed_origin  = local.site_origin
   resource_id     = aws_api_gateway_resource.devices_device_id.id
   allowed_methods = ["GET", "PATCH"]
 }
@@ -807,7 +827,7 @@ resource "aws_api_gateway_integration_response" "firmware_options_200" {
   status_code = aws_api_gateway_method_response.firmware_options_200.status_code
 
   response_parameters = {
-    "method.response.header.Access-Control-Allow-Origin"  = "'https://vzoniq.com'"
+    "method.response.header.Access-Control-Allow-Origin"  = "'${local.site_origin}'"
     "method.response.header.Access-Control-Allow-Methods" = "'GET,OPTIONS'"
     "method.response.header.Access-Control-Allow-Headers" = "'Authorization,Content-Type'"
   }
@@ -884,7 +904,7 @@ resource "aws_api_gateway_integration_response" "firmware_presign_options_200" {
   status_code = aws_api_gateway_method_response.firmware_presign_options_200.status_code
 
   response_parameters = {
-    "method.response.header.Access-Control-Allow-Origin"  = "'https://vzoniq.com'"
+    "method.response.header.Access-Control-Allow-Origin"  = "'${local.site_origin}'"
     "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS'"
     "method.response.header.Access-Control-Allow-Headers" = "'Authorization,Content-Type'"
   }
@@ -967,7 +987,7 @@ resource "aws_api_gateway_integration_response" "firmware_complete_options_200" 
   status_code = aws_api_gateway_method_response.firmware_complete_options_200.status_code
 
   response_parameters = {
-    "method.response.header.Access-Control-Allow-Origin"  = "'https://vzoniq.com'"
+    "method.response.header.Access-Control-Allow-Origin"  = "'${local.site_origin}'"
     "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS'"
     "method.response.header.Access-Control-Allow-Headers" = "'Authorization,Content-Type'"
   }

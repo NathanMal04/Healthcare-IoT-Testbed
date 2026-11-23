@@ -227,6 +227,7 @@ module "builds_api_fn" {
   memory_size   = 512
 
   environment_variables = {
+    ALLOWED_ORIGIN      = local.site_origin
     METADATA_TABLE_NAME = module.metadata_table.table_name
     DATA_LAKE_BUCKET    = module.data_lake_bucket.bucket_name
     CODEBUILD_PROJECT   = aws_codebuild_project.images.name
@@ -486,6 +487,7 @@ module "builds_preflight" {
   for_each = local.builds_preflights
 
   rest_api_id     = module.api.rest_api_id
+  allowed_origin  = local.site_origin
   resource_id     = each.value.resource_id
   allowed_methods = each.value.methods
 }

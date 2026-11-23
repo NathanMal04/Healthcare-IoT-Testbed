@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "Platform/infra/**"
+      - "Platform/scripts/tf_init.sh"
       - ".github/workflows/terraform-pr-check.yml"
 
 permissions:
@@ -15,8 +16,16 @@ permissions:
 jobs:
   plan:
     runs-on: ubuntu-latest
+    # The same settings as deploy-infra.yml.
     env:
       TF_VAR_aws_profile: ""
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_USE_LOCKFILE: ${{ vars.TF_USE_LOCKFILE }}
+      TF_VAR_aws_region: ${{ secrets.AWS_REGION }}
+      TF_VAR_name: ${{ vars.TF_NAME }}
+      TF_VAR_domain_name: ${{ vars.DOMAIN_NAME }}
+      TF_VAR_route53_zone_id: ${{ vars.ROUTE53_ZONE_ID }}
+      TF_VAR_brand_name: ${{ vars.BRAND_NAME }}
     defaults:
       run:
         working-directory: Platform/infra/envs/dev
@@ -24,6 +33,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Check repository variables
+        run: |
+          missing=""
+          [ -n "$TF_STATE_BUCKET" ] || missing="$missing TF_STATE_BUCKET"
+          [ -n "$TF_VAR_name" ] || missing="$missing TF_NAME"
+          [ -n "$TF_VAR_domain_name" ] || missing="$missing DOMAIN_NAME"
+          if [ -n "$missing" ]; then
+            echo "::error::Set these repository variables (Settings > Secrets and variables > Actions > Variables):$missing"
+            exit 1
+          fi
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -39,8 +59,14 @@ jobs:
         working-directory: Platform/infra
         run: terraform fmt -check -diff envs/dev/main.tf
 
+      - name: Validate bootstrap
+        working-directory: Platform/infra/bootstrap
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
       - name: Terraform Init
-        run: terraform init -input=false
+        run: "$GITHUB_WORKSPACE/Platform/scripts/tf_init.sh"
 
       - name: Terraform Validate
         run: terraform validate

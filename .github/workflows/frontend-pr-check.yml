@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "Platform/services/web/**"
+      - "Platform/scripts/deploy_web.sh"
       - ".github/workflows/frontend-pr-check.yml"
 
 permissions:
@@ -15,6 +16,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_USE_LOCKFILE: ${{ vars.TF_USE_LOCKFILE }}
 
     steps:
       - name: Checkout
@@ -32,15 +36,6 @@ jobs:
         with:
           terraform_wrapper: false
 
-      - name: Read Terraform outputs
-        id: tf
-        working-directory: Platform/infra/envs/dev
-        run: |
-          terraform init -input=false
-          echo "cognito_user_pool_id=$(terraform output -raw cognito_user_pool_id)" >> "$GITHUB_OUTPUT"
-          echo "cognito_client_id=$(terraform output -raw cognito_user_pool_client_id)" >> "$GITHUB_OUTPUT"
-          echo "api_invoke_url=$(terraform output -raw api_invoke_url)" >> "$GITHUB_OUTPUT"
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -48,14 +43,8 @@ jobs:
           cache: 'npm'
           cache-dependency-path: Platform/services/web/package-lock.json
 
-      - name: Install dependencies
-        working-directory: Platform/services/web
-        run: npm ci
+      - name: Terraform Init
+        run: Platform/scripts/tf_init.sh
 
       - name: Build
-        working-directory: Platform/services/web
-        env:
-          NEXT_PUBLIC_COGNITO_USER_POOL_ID: ${{ steps.tf.outputs.cognito_user_pool_id }}
-          NEXT_PUBLIC_COGNITO_CLIENT_ID: ${{ steps.tf.outputs.cognito_client_id }}
-          NEXT_PUBLIC_API_URL: ${{ steps.tf.outputs.api_invoke_url }}
-        run: npm run build
+        run: Platform/scripts/deploy_web.sh --build-only

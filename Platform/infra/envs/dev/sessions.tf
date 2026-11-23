@@ -7,7 +7,7 @@
 #
 # A session is an ECS task on Fargate in the runs' private subnet (no
 # internet, no IAM role; files through the manifest API). The browser reaches
-# it at vzoniq.com/s/{sessionId}/: CloudFront sends /s/* through a VPC origin
+# it at <domain_name>/s/{sessionId}/: CloudFront sends /s/* through a VPC origin
 # to the internal load balancer below, where sessions-api adds a target group
 # and listener rule per session. The load balancer is the only always-on
 # cost here (about $17/month); tasks are billed per second while open.
@@ -161,6 +161,7 @@ module "sessions_api_fn" {
   layers        = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
+    ALLOWED_ORIGIN              = local.site_origin
     METADATA_TABLE_NAME         = module.metadata_table.table_name
     CLUSTER_ARN                 = aws_ecs_cluster.sessions.arn
     LISTENER_ARN                = aws_lb_listener.sessions.arn
@@ -418,6 +419,7 @@ module "sessions_preflight" {
   for_each = local.sessions_preflights
 
   rest_api_id     = module.api.rest_api_id
+  allowed_origin  = local.site_origin
   resource_id     = each.value.resource_id
   allowed_methods = each.value.methods
 }

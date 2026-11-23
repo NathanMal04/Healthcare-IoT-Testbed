@@ -11,7 +11,7 @@ no internet and no AWS credentials, files only through the manifest service
 with a per-session token. The task runs the environment's image with the
 notebook layer (containers/notebook) copied in by an init container.
 
-The browser reaches it as vzoniq.com/s/{sessionId}/: CloudFront sends /s/* to
+The browser reaches it as <site domain>/s/{sessionId}/: CloudFront sends /s/* to
 an internal load balancer, where each session has its own target group and
 listener rule. JupyterLab requires the session's own token, which only the
 owner gets from GET /sessions/{sessionId}. Sessions are always personal:
@@ -693,6 +693,6 @@ def _now():
 def _resp(status, body):
     return {
         "statusCode": status,
-        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "https://vzoniq.com"},
+        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": os.environ.get("ALLOWED_ORIGIN", "")},
         "body": json.dumps(body, default=_plain),
     }

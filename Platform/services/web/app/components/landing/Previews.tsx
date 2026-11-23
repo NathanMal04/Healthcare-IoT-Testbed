@@ -1,6 +1,7 @@
 import { Cpu, FolderArchive, Microchip, ShieldAlert, type LucideIcon } from "lucide-react";
 import { Badge, ReStatusBadge, SeverityBadge, StatusBadge } from "@/app/components/ui/Badge";
 import { BrandLogo } from "@/app/components/shell/BrandMark";
+import { BRAND_NAME, SITE_HOST } from "@/lib/brand";
 import { NAV_SECTIONS, SYSTEM_ITEMS } from "@/app/components/shell/navigation";
 import { REVERSE_ENGINEERING_STATUS_LABELS, type ReverseEngineeringStatus } from "@/lib/reverseEngineering";
 import { SAMPLE_CVES, SAMPLE_DEVICES, SAMPLE_RE_COUNTS, SAMPLE_RUNS } from "./sampleData";
@@ -19,14 +20,14 @@ export function AppFrame({ path, active, children }: { path: string; active: str
           <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
         </span>
         <span className="flex-1 max-w-xs mx-auto h-5 rounded-md bg-white text-2xs text-slate-500 flex items-center justify-center truncate">
-          vzoniq.com{path}
+          {SITE_HOST}{path}
         </span>
       </div>
       <div className="flex">
         <div className="hidden md:flex w-44 shrink-0 flex-col bg-navy-900 text-white py-3 px-2" aria-hidden="true">
           <div className="flex items-center gap-2 px-2 pb-3 mb-2 border-b border-white/5">
             <BrandLogo className="h-6 w-6" />
-            <span className="text-[13px] font-semibold">Vzoniq</span>
+            <span className="text-[13px] font-semibold">{BRAND_NAME}</span>
           </div>
           {NAV_SECTIONS.map((section) => (
             <div key={section.label} className="mb-3">

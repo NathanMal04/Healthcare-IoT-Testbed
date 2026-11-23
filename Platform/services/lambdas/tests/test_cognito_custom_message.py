@@ -6,8 +6,10 @@ verification email). No AWS access needed:
 import copy
 import html.parser
 import importlib.util
+import os
 import unittest
 from pathlib import Path
+from unittest import mock
 
 LAMBDAS = Path(__file__).resolve().parent.parent
 _spec = importlib.util.spec_from_file_location(
@@ -91,6 +93,28 @@ class SignUpEmailTests(unittest.TestCase):
         stripped = body.replace("{####}", "")
         self.assertNotIn("{", stripped)
         self.assertNotIn("}", stripped)
+
+
+class BrandNameTests(unittest.TestCase):
+    def test_brand_name_comes_from_the_environment(self):
+        with mock.patch.dict(os.environ, {"BRAND_NAME": "Acme Testbed"}):
+            out = fn.handler(cognito_event(), None)
+        self.assertEqual(out["response"]["emailSubject"], "Verify your Acme Testbed account")
+        text = visible_text(out["response"]["emailMessage"])
+        self.assertIn("Thanks for creating a Acme Testbed account.", text)
+        self.assertNotIn("Vzoniq", out["response"]["emailMessage"])
+
+    def test_brand_name_is_html_escaped(self):
+        with mock.patch.dict(os.environ, {"BRAND_NAME": "R&D <Lab>"}):
+            out = fn.handler(cognito_event(), None)
+        self.assertEqual(out["response"]["emailSubject"], "Verify your R&D <Lab> account")
+        self.assertIn("R&amp;D &lt;Lab&gt;", out["response"]["emailMessage"])
+        self.assertNotIn("<Lab>", out["response"]["emailMessage"])
+
+    def test_blank_brand_name_uses_the_default(self):
+        with mock.patch.dict(os.environ, {"BRAND_NAME": "  "}):
+            out = fn.handler(cognito_event(), None)
+        self.assertEqual(out["response"]["emailSubject"], "Verify your Vzoniq account")
 
 
 class UntouchedTriggerTests(unittest.TestCase):

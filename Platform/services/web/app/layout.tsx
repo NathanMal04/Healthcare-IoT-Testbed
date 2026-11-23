@@ -3,11 +3,12 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
+import { BRAND_NAME } from "@/lib/brand";
 
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Vzoniq · Healthcare IoT Vulnerability Testbed",
+  title: `${BRAND_NAME} · Healthcare IoT Vulnerability Testbed`,
   description: "Healthcare IoT vulnerability research: devices, firmware, artifacts and CVEs.",
 };
 

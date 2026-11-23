@@ -1,0 +1,19 @@
+# Copy to terraform.tfvars (git-ignored) and fill in.
+
+aws_region = "us-east-2"
+
+# The same value as `name` in envs/dev/terraform.tfvars.
+name = "my-testbed-dev"
+
+# Globally unique S3 bucket name.
+state_bucket_name = "my-testbed-tf-state"
+
+# owner/repo of your GitHub fork. Leave unset to skip the GitHub deploy role.
+github_repo = "your-github-user/Healthcare-IoT-Testbed"
+
+# Set false if this account already has the token.actions.githubusercontent.com
+# identity provider (IAM > Identity providers).
+# create_oidc_provider = false
+
+# The hosted zone ID, if envs/dev manages DNS in Route 53.
+# route53_zone_id = "Z0123456789ABCDEFGHIJ"

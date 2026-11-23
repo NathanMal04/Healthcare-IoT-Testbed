@@ -14,7 +14,6 @@ variable "allowed_methods" {
 }
 
 variable "allowed_origin" {
-  description = "Value for Access-Control-Allow-Origin."
+  description = "Value for Access-Control-Allow-Origin (the site's origin, e.g. https://example.com)."
   type        = string
-  default     = "https://vzoniq.com"
 }

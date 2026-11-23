@@ -67,3 +67,36 @@ output "image_build_project" {
 output "run_manifest_url" {
   value = local.manifest_url
 }
+
+# The site's origin, hostname and brand, for the web build (deploy-web.yml).
+output "site_origin" {
+  value = local.site_origin
+}
+
+output "site_host" {
+  value = var.domain_name
+}
+
+output "brand_name" {
+  value = local.brand_name
+}
+
+output "aws_region" {
+  value = var.aws_region
+}
+
+# DNS records that validate the CloudFront certificate. With route53_zone_id
+# set they are created automatically; otherwise add them at your DNS provider.
+output "acm_validation_records" {
+  value = [
+    for option in aws_acm_certificate.frontend.domain_validation_options : {
+      name  = option.resource_record_name
+      type  = option.resource_record_type
+      value = option.resource_record_value
+    }
+  ]
+}
+
+output "acm_certificate_arn" {
+  value = aws_acm_certificate.frontend.arn
+}

@@ -40,6 +40,7 @@ module "artifacts_presign_fn" {
   memory_size   = 512
 
   environment_variables = {
+    ALLOWED_ORIGIN          = local.site_origin
     METADATA_TABLE_NAME     = module.metadata_table.table_name
     DATA_LAKE_BUCKET        = module.data_lake_bucket.bucket_name
     PRESIGN_EXPIRES_SEC     = "3600"
@@ -63,6 +64,7 @@ module "artifacts_complete_fn" {
   memory_size   = 512
 
   environment_variables = {
+    ALLOWED_ORIGIN       = local.site_origin
     METADATA_TABLE_NAME  = module.metadata_table.table_name
     VERIFY_FUNCTION_NAME = module.artifacts_verify_fn.function_name
     VERIFY_STALE_SEC     = "1200"
@@ -100,6 +102,7 @@ module "artifacts_list_fn" {
   memory_size   = 256
 
   environment_variables = {
+    ALLOWED_ORIGIN      = local.site_origin
     METADATA_TABLE_NAME = module.metadata_table.table_name
   }
 
@@ -116,6 +119,7 @@ module "artifacts_get_fn" {
   layers        = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
+    ALLOWED_ORIGIN       = local.site_origin
     METADATA_TABLE_NAME  = module.metadata_table.table_name
     DOWNLOAD_EXPIRES_SEC = "300"
     VIEW_URL_EXPIRES_SEC = "300"
@@ -134,6 +138,7 @@ module "artifacts_update_fn" {
   layers        = [aws_lambda_layer_version.shared.arn]
 
   environment_variables = {
+    ALLOWED_ORIGIN      = local.site_origin
     METADATA_TABLE_NAME = module.metadata_table.table_name
   }
 
@@ -513,6 +518,7 @@ module "artifact_preflight" {
   for_each = local.artifact_preflights
 
   rest_api_id     = module.api.rest_api_id
+  allowed_origin  = local.site_origin
   resource_id     = each.value.resource_id
   allowed_methods = each.value.methods
 }

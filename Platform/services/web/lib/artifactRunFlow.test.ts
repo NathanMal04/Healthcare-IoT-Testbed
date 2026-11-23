@@ -100,9 +100,10 @@ describe("deploy cache headers", () => {
   // Client-side navigation (router.push from Artifacts to /runs) fetches
   // /runs.txt?_rsc=<hash of router state>. That URL is the same across
   // builds, so if it is cached as immutable the browser keeps rendering the
-  // old page after a deploy.
-  const workflow = readFileSync(fileURLToPath(new URL("../../../../.github/workflows/deploy-web.yml", import.meta.url)), "utf8");
-  const syncs = workflow.split("aws s3 sync").slice(1);
+  // old page after a deploy. The syncs are in the deploy script that
+  // deploy-web.yml (and deploy.sh web) runs.
+  const script = readFileSync(fileURLToPath(new URL("../../../scripts/deploy_web.sh", import.meta.url)), "utf8");
+  const syncs = script.split("aws s3 sync").slice(1);
 
   it("never marks pages or their RSC payloads immutable", () => {
     const immutable = syncs.filter((s) => s.includes("immutable"));

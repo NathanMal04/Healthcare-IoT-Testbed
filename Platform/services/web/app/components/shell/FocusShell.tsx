@@ -2,6 +2,7 @@
 
 import WorkspaceDialogs, { WorkspaceNotice } from "@/app/components/WorkspaceDialogs";
 import { LoadingState, useRequireUser } from "@/app/components/ui";
+import { BRAND_NAME } from "@/lib/brand";
 
 /**
  * The signed-in frame for full-screen workspaces (the RE Notebook): the same
@@ -15,7 +16,7 @@ export default function FocusShell({ children }: { children: React.ReactNode }) 
   if (!ready) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <LoadingState label="Loading Vzoniq…" />
+        <LoadingState label={`Loading ${BRAND_NAME}…`} />
       </div>
     );
   }

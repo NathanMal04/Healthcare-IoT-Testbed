@@ -9,6 +9,7 @@ options are left as they are; a user with no budget yet gets the defaults
 first ($25, Heavy off).
 """
 import argparse
+import os
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -21,7 +22,7 @@ def main():
     parser.add_argument("--user-id", required=True)
     parser.add_argument("--monthly-limit", type=Decimal)
     parser.add_argument("--heavy", choices=["on", "off"])
-    parser.add_argument("--region", default="us-east-2")
+    parser.add_argument("--region", default=os.environ.get("AWS_REGION", "us-east-2"))
     parser.add_argument("--profile")
     args = parser.parse_args()
     if args.monthly_limit is None and args.heavy is None:

@@ -35,28 +35,33 @@ docs/               # Project documentation (architecture, diagrams, presentatio
 - **AWS Batch** (Fargate, optionally EC2) runs scripts in bulk over artifacts, in a private network with no internet
   and no AWS credentials; jobs reach their files only through a private manifest API
 - **EventBridge** feeds build and job state changes to Lambdas that track status, meter usage and enforce budgets
-- Infrastructure is managed entirely via **Terraform** — no manual console changes
+- Infrastructure is managed entirely via **Terraform** — no manual console changes. The one-time account setup
+  (state bucket, GitHub deploy role) is in `Platform/infra/bootstrap/`
+
+To run your own copy in your own AWS account and on your own domain, see **[SELF_HOSTING.md](SELF_HOSTING.md)**.
 
 ### Canonical Host
 
-The site is served at **https://vzoniq.com**. The CloudFront distribution also answers on `www.vzoniq.com`
+The site is served at **https://<domain_name>** (the Terraform variable; **https://vzoniq.com** for the original
+deployment). The CloudFront distribution also answers on `www.<domain_name>` (unless `include_www = false`)
 and its default `*.cloudfront.net` domain, but a viewer-request function **301-redirects both to the apex**,
 preserving path and query string.
 
 This is deliberate. The API Gateway responses, Lambda responses, and the data lake bucket's CORS rule each
-pin a single allowed origin (`https://vzoniq.com`). An app served on a second hostname would load fine but
-have every API call and file upload blocked by the browser's CORS check. Collapsing to one canonical
-origin keeps that invariant in one place instead of maintaining an origin allowlist across three layers.
+pin a single allowed origin. An app served on a second hostname would load fine but have every API call and
+file upload blocked by the browser's CORS check. Collapsing to one canonical origin keeps that invariant in
+one place instead of maintaining an origin allowlist across three layers.
 
-If a new hostname is ever needed, it must be added to **all** of:
-- `canonical_host` / the redirect logic in `Platform/infra/modules/cloudfront/`
-- `allowed_origins` on the data lake bucket CORS rule
-- the `Access-Control-Allow-Origin` values in the API Gateway OPTIONS integrations and gateway responses
-- the `Access-Control-Allow-Origin` header in each Lambda's response helper
+That one place is `local.site_origin` (`https://${var.domain_name}`) in `Platform/infra/envs/dev/main.tf`. It feeds
+the CloudFront redirect (`canonical_host`), the data lake CORS rule (plus `extra_allowed_origins`, by default
+`http://localhost:3000`), the API Gateway OPTIONS integrations and gateway responses (`api_cors_preflight`'s
+`allowed_origin`), and each API Lambda's `ALLOWED_ORIGIN` environment variable, which its response helper
+returns as `Access-Control-Allow-Origin`. A Lambda that serves the browser must list
+`ALLOWED_ORIGIN = local.site_origin` in its `environment_variables`.
 
 ## Development Environment
 
-This project uses **VS Code Dev Containers** to standardize tooling. The container ships the AWS CLI, Terraform, Python and Node, and points `AWS_CONFIG_FILE` at the profile checked in at `.devcontainer/aws/config`.
+This project uses **VS Code Dev Containers** to standardize tooling. The container ships the AWS CLI, Terraform, Python and Node, and points `AWS_CONFIG_FILE` at the profile checked in at `.devcontainer/aws/config` (the original deployment's; a self-hosted copy replaces it, see `config.example`). `AWS_PROFILE` defaults to `Healthcare-IoT-Dev` and can be overridden by setting it on the host.
 
 There is no local AWS emulation — development runs against the real `dev` environment in AWS.
 
@@ -87,16 +92,23 @@ There is no local AWS emulation — development runs against the real `dev` envi
    The `Healthcare-IoT-Dev` profile is preselected via `AWS_PROFILE`, so no `--profile` flag is needed.
 
 4. **Read the deployed infrastructure values**
+
+   The deployment's settings are local, git-ignored files: copy `terraform.tfvars.example` and
+   `backend.hcl.example` in `Platform/infra/envs/dev/` (without `.example`) and fill in the deployment's values
+   (for the original deployment: `name = "healthcare-iot-testbed-dev"`, `domain_name = "vzoniq.com"`, and the
+   `healthcare-iot-testbed-tf-state` bucket in `us-east-2`; CI has the same values as repository variables).
    ```bash
+   Platform/scripts/tf_init.sh        # terraform init with backend.hcl; state lives in S3, so this needs an active SSO session
    cd Platform/infra/envs/dev
-   terraform init      # state lives in S3, so this needs an active SSO session
    terraform output
    ```
 
 ## Web Frontend
 
 The frontend is a **Next.js 14** app (App Router) configured for static export (`output: 'export'`),
-served via S3 + CloudFront at **vzoniq.com**. Styling is Tailwind CSS.
+served via S3 + CloudFront at the deployment's domain. Styling is Tailwind CSS. The product name
+("Vzoniq" by default) comes from `NEXT_PUBLIC_BRAND_NAME` (`lib/brand.ts`), set at build time from the
+`brand_name` Terraform variable.
 
 ### Local Development
 ```bash
@@ -152,7 +164,7 @@ Authentication is handled by **AWS Cognito** using the Amplify v6 library.
     `TooManyRequestsException`) are the server-side guard and are shown as a wait message
   - Sign-up codes are valid for 24 hours (fixed by Cognito); a new code replaces the old one
 - A **CustomMessage** Lambda (`cognito-custom-message`) brands the sign-up and resend emails
-  ("Verify your Vzoniq account"). Every other message, including password reset (1-hour codes),
+  ("Verify your Vzoniq account", with the `brand_name` Terraform variable as the name). Every other message, including password reset (1-hour codes),
   keeps Cognito's default. Mail is sent with Cognito's default sender (`COGNITO_DEFAULT`,
   `no-reply@verificationemail.com`, about 50 emails/day)
 - Session state managed via `AuthContext` — unauthenticated users are redirected to `/login`
@@ -264,8 +276,8 @@ Firmware uploaded before artifacts existed is stored as `DEVICE#/FIRMWARE#` rows
 once, after the artifact routes are deployed (it only appears in the new firmware list after this):
 
 ```bash
-python3 Platform/scripts/migrate_firmware_to_artifacts.py --table healthcare-iot-testbed-dev-metadata          # dry run
-python3 Platform/scripts/migrate_firmware_to_artifacts.py --table healthcare-iot-testbed-dev-metadata --apply
+python3 Platform/scripts/migrate_firmware_to_artifacts.py --table "$(terraform -chdir=Platform/infra/envs/dev output -raw metadata_table_name)"          # dry run
+python3 Platform/scripts/migrate_firmware_to_artifacts.py --table "$(terraform -chdir=Platform/infra/envs/dev output -raw metadata_table_name)" --apply
 ```
 
 S3 objects stay where they are and the old rows are left in place. The script is safe to run again: versions
@@ -368,7 +380,7 @@ Defaults: a $25 monthly budget per user (`default_monthly_limit`), and the Heavy
 user's budget, or turns on Heavy for them, with:
 
 ```bash
-python3 Platform/scripts/set_budget.py --table healthcare-iot-testbed-dev-metadata --user-id <cognito sub> --monthly-limit 100 --heavy on
+python3 Platform/scripts/set_budget.py --table "$(terraform -chdir=Platform/infra/envs/dev output -raw metadata_table_name)" --user-id <cognito sub> --monthly-limit 100 --heavy on
 ```
 
 The Heavy class itself is created by setting the Terraform variable `enable_heavy_class = true`. It adds EC2
@@ -403,12 +415,16 @@ Terraform is split into reusable **modules** and per-environment **configs**:
 
 ```
 Platform/infra/
+  bootstrap/        # One-time account setup (local state): state bucket, GitHub OIDC deploy role
+    policies/       # The deploy role's policies, as templates
   modules/          # api_gateway, api_gateway_route, api_lambda_method,
                     # api_cors_preflight, cloudfront, cognito, dynamodb,
                     # lambda, network, s3_bucket
   envs/
     dev/            # Deployed to real AWS (S3 remote state)
+      terraform.tfvars, backend.hcl   # per-deployment values, git-ignored (*.example committed)
       main.tf       # buckets, tables, Cognito, CloudFront, API, devices, firmware
+      acm.tf, dns.tf  # the CloudFront certificate; Route 53 records when route53_zone_id is set
       artifacts.tf  # artifact Lambdas, IAM and routes
       builds.tf     # ECR, CodeBuild, scripts and environments
       runs.tf       # run network, AWS Batch, private manifest API, runs
@@ -416,7 +432,8 @@ Platform/infra/
 ```
 
 `dev` is currently the only environment. State is stored in S3, so any Terraform command requires an
-active SSO session.
+active SSO session. Initialise with `Platform/scripts/tf_init.sh`, which reads `envs/dev/backend.hcl` locally
+and the `TF_STATE_BUCKET` repository variable in CI.
 
 ### Notes
 - DynamoDB tables are created with `deletion_protection_enabled = true` hardcoded in the module.
@@ -437,13 +454,40 @@ GitHub Actions authenticates to AWS via **OIDC** (no long-lived credentials). Re
 | `AWS_ROLE_ARN` | IAM role ARN with deployment permissions |
 | `AWS_REGION` | AWS region (e.g. `us-east-2`) |
 
-The deploy role's policy is managed in the AWS console, not in this repo. Besides creating resources, it needs
+And repository variables (Settings → Secrets and variables → Actions → Variables), the CI equivalent of
+`terraform.tfvars` and `backend.hcl`:
+
+| Variable | Required | Original deployment | Description |
+|---|---|---|---|
+| `TF_STATE_BUCKET` | yes | `healthcare-iot-testbed-tf-state` | Terraform state bucket |
+| `TF_NAME` | yes | `healthcare-iot-testbed-dev` | `name` |
+| `DOMAIN_NAME` | yes | `vzoniq.com` | `domain_name` |
+| `ROUTE53_ZONE_ID` | no | (unset) | `route53_zone_id` |
+| `BRAND_NAME` | no | (unset: Vzoniq) | `brand_name` |
+| `TF_USE_LOCKFILE` | no | (unset: no locking) | `true` for S3-native state locking |
+
+The infrastructure workflows stop before `terraform init` if a required variable is missing, and the
+Terraform variables reject an empty `name` or `domain_name`.
+
+The deploy role is created by `Platform/infra/bootstrap/` for new deployments. On the original deployment it
+(`github-actions-deploy`, with the policies `github-actions-deploy-policy`, `deploy-runs` and
+`healthcare-iot-testbed-deploy-sessions`) is managed in the AWS console, and
+`Platform/infra/bootstrap/policies/*.json.tftpl` are copies of those policies. After changing a deploy policy
+in the console, copy the change into its template and check that they match:
+
+```bash
+python3 Platform/scripts/check_deploy_policy_drift.py --name healthcare-iot-testbed-dev \
+    --state-bucket healthcare-iot-testbed-tf-state --policy core=github-actions-deploy-policy \
+    --policy runs=deploy-runs --policy sessions=healthcare-iot-testbed-deploy-sessions
+```
+
+Besides creating resources, the role needs
 the actions Terraform uses to **change and remove** them. For the project's IAM roles and policies that
 includes `iam:ListInstanceProfilesForRole` (checked before any role is deleted), `iam:CreatePolicyVersion`
 (to edit a policy) and `iam:DeletePolicyVersion` (to delete an edited policy). Without them, a deploy that
 removes a Lambda or changes its permissions fails with a 403.
 
-For step 2 (scripts and runs) the deploy role also needs, scoped to `healthcare-iot-testbed-dev-*` names where
+For step 2 (scripts and runs) the deploy role also needs, scoped to `<name>-*` names where
 the service allows it:
 - **EC2/VPC:** VPC, subnets, route tables, security groups and their rules, VPC endpoints and endpoint policies; launch templates if Heavy is enabled
 - **ECR:** repositories and lifecycle policies
@@ -451,13 +495,13 @@ the service allows it:
 - **AWS Batch:** compute environments and job queues
 - **EventBridge:** rules and targets
 - **IAM:** instance profiles (Heavy only), and `iam:CreateServiceLinkedRole` for Batch, ECS and Spot
-- **CloudWatch Logs:** `logs:*` on `/aws/batch/healthcare-iot-testbed-dev-*` and `/aws/codebuild/healthcare-iot-testbed-dev-*`, alongside the existing `/aws/lambda/…` groups
+- **CloudWatch Logs:** `logs:*` on `/aws/batch/<name>-*` and `/aws/codebuild/<name>-*`, alongside the existing `/aws/lambda/…` groups
 
 New accounts start with low Fargate and Spot vCPU quotas; request increases before running large jobs.
 
 ### Deploying the Platform Images (CI/CD)
-`deploy-images.yml` runs on pushes to `main` that change `Platform/services/containers/{base,ghidra,launcher,sdk}`
-(or by hand). It:
+`deploy-images.yml` runs on pushes to `main` that change `Platform/services/containers/{base,ghidra,launcher,sdk,notebook}`
+(or by hand). Its steps are `Platform/scripts/build_images.sh`, which `deploy.sh images` also runs. It:
 1. builds the analysis-base and platform-ghidra images and pushes them to ECR;
 2. records them as new versions of the `platform-base` and `platform-ghidra` environments with
    `Platform/scripts/seed_platform_envs.py`.
@@ -469,7 +513,8 @@ DynamoDB and S3 writes to the metadata table and `builds/*`.
 ### Deploying the Web Frontend (CI/CD)
 Frontend is deployed automatically on every push to `main` that changes files under `Platform/services/web/`.
 
-The workflow reads the S3 bucket name, CloudFront distribution ID, Cognito IDs, and API URL directly from
+The workflow (`Platform/scripts/deploy_web.sh`, which `deploy.sh web` also runs) reads the S3 bucket name,
+CloudFront distribution ID, Cognito IDs, API URL, brand name and site host directly from
 `terraform output` — no need to store them as secrets. It builds the static export, syncs to S3 (long cache
 for assets, `no-cache` for HTML), and invalidates the CloudFront distribution. Only AWS access requires secrets:
 
@@ -481,7 +526,7 @@ for assets, `no-cache` for HTML), and invalidates the CloudFront distribution. O
 ### Pull Request Checks
 | Workflow | Trigger | Action |
 |---|---|---|
-| `terraform-pr-check.yml` | PRs touching `Platform/infra/**` | `terraform plan` against `dev` |
+| `terraform-pr-check.yml` | PRs touching `Platform/infra/**` | Validate `bootstrap`; `terraform plan` against `dev` |
 | `frontend-pr-check.yml` | PRs touching `Platform/services/web/**` | Build the frontend |
 
 All five workflows authenticate via the same OIDC role.

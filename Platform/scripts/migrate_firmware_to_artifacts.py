@@ -17,6 +17,7 @@ Usage:
   python3 migrate_firmware_to_artifacts.py --table healthcare-iot-testbed-dev-metadata --apply
 """
 import argparse
+import os
 import secrets
 import sys
 import uuid
@@ -33,7 +34,7 @@ serializer = TypeSerializer()
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--table", required=True, help="Metadata table name")
-    parser.add_argument("--region", default="us-east-2")
+    parser.add_argument("--region", default=os.environ.get("AWS_REGION", "us-east-2"))
     parser.add_argument("--profile", default=None, help="AWS CLI profile")
     parser.add_argument("--apply", action="store_true", help="Write the records (default is a dry run)")
     args = parser.parse_args()

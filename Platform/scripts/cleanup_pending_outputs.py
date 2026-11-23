@@ -16,6 +16,7 @@ left alone. Uploaded files (origin = upload) are never touched.
   python3 cleanup_pending_outputs.py --table ... --run-id <runId> --apply                    # one run only
 """
 import argparse
+import os
 from datetime import datetime, timedelta, timezone
 
 import boto3
@@ -31,7 +32,7 @@ def main():
     parser.add_argument("--min-age-minutes", type=int, default=60,
                         help="Skip outputs registered more recently than this (default 60)")
     parser.add_argument("--apply", action="store_true", help="Delete (default is a dry run)")
-    parser.add_argument("--region", default="us-east-2")
+    parser.add_argument("--region", default=os.environ.get("AWS_REGION", "us-east-2"))
     parser.add_argument("--profile")
     args = parser.parse_args()
 

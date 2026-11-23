@@ -923,6 +923,6 @@ def _condition_check(pk, sk, condition, names=None, values=None):
 def _resp(status, body):
     return {
         "statusCode": status,
-        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "https://vzoniq.com"},
+        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": os.environ.get("ALLOWED_ORIGIN", "")},
         "body": json.dumps(body, default=_plain),
     }

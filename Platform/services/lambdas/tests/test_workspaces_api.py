@@ -17,6 +17,7 @@ from boto3.dynamodb.types import TypeDeserializer
 from botocore.exceptions import ClientError
 
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-2")
+os.environ.setdefault("ALLOWED_ORIGIN", "https://vzoniq.com")
 os.environ.setdefault("METADATA_TABLE_NAME", "metadata")
 
 LAMBDAS = Path(__file__).resolve().parent.parent

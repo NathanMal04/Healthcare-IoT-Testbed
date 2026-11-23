@@ -1,0 +1,20 @@
+# AWS CLI profile for your own deployment. Replace .devcontainer/aws/config
+# with this file's contents (filled in), and either name the profile
+# Healthcare-IoT-Dev or set AWS_PROFILE on the host to its name before opening
+# the devcontainer. SELF_HOSTING.md has the details.
+
+# IAM Identity Center (SSO): `aws sso login` in the container.
+[profile Healthcare-IoT-Dev]
+sso_session = my-testbed
+sso_account_id = 123456789012
+sso_role_name = AdministratorAccess
+region = us-east-2
+
+[sso-session my-testbed]
+sso_start_url = https://d-xxxxxxxxxx.awsapps.com/start
+sso_region = us-east-2
+sso_registration_scopes = sso:account:access
+
+# Or access keys instead of SSO: keep only `[profile Healthcare-IoT-Dev]` with
+# `region = us-east-2`, then run `aws configure --profile Healthcare-IoT-Dev` in
+# the container (the keys go to ~/.aws/credentials, outside the repository).

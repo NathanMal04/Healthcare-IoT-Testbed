@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - 'Platform/services/web/**'
+      - 'Platform/scripts/deploy_web.sh'
       - '.github/workflows/deploy-web.yml'
 
 permissions:
@@ -16,6 +17,9 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_USE_LOCKFILE: ${{ vars.TF_USE_LOCKFILE }}
 
     steps:
       - name: Checkout
@@ -32,17 +36,6 @@ jobs:
         with:
           terraform_wrapper: false
 
-      - name: Read Terraform outputs
-        id: tf
-        working-directory: Platform/infra/envs/dev
-        run: |
-          terraform init -input=false
-          echo "bucket_name=$(terraform output -raw web_bucket_name)" >> "$GITHUB_OUTPUT"
-          echo "distribution_id=$(terraform output -raw cloudfront_distribution_id)" >> "$GITHUB_OUTPUT"
-          echo "cognito_user_pool_id=$(terraform output -raw cognito_user_pool_id)" >> "$GITHUB_OUTPUT"
-          echo "cognito_client_id=$(terraform output -raw cognito_user_pool_client_id)" >> "$GITHUB_OUTPUT"
-          echo "api_invoke_url=$(terraform output -raw api_invoke_url)" >> "$GITHUB_OUTPUT"
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -50,36 +43,10 @@ jobs:
           cache: 'npm'
           cache-dependency-path: Platform/services/web/package-lock.json
 
-      - name: Install dependencies
-        working-directory: Platform/services/web
-        run: npm ci
+      - name: Terraform Init
+        run: Platform/scripts/tf_init.sh
 
-      - name: Build
-        working-directory: Platform/services/web
-        env:
-          NEXT_PUBLIC_COGNITO_USER_POOL_ID: ${{ steps.tf.outputs.cognito_user_pool_id }}
-          NEXT_PUBLIC_COGNITO_CLIENT_ID: ${{ steps.tf.outputs.cognito_client_id }}
-          NEXT_PUBLIC_API_URL: ${{ steps.tf.outputs.api_invoke_url }}
-        run: npm run build
-
-      - name: Sync to S3
-        run: |
-          aws s3 sync Platform/services/web/out/ s3://${{ steps.tf.outputs.bucket_name }} \
-            --delete \
-            --cache-control "public, max-age=31536000, immutable" \
-            --exclude "*.html" \
-            --exclude "*.txt"
-          # Pages and their *.txt RSC payloads (fetched on client-side
-          # navigation) keep the same names across builds, so they must
-          # never be cached as immutable.
-          aws s3 sync Platform/services/web/out/ s3://${{ steps.tf.outputs.bucket_name }} \
-            --delete \
-            --cache-control "no-cache" \
-            --include "*.html" \
-            --include "*.txt"
-
-      - name: Invalidate CloudFront cache
-        run: |
-          aws cloudfront create-invalidation \
-            --distribution-id ${{ steps.tf.outputs.distribution_id }} \
-            --invalidation-batch '{"Paths":{"Quantity":1,"Items":["/*"]},"CallerReference":"deploy-'"$(date +%s)"'"}'
+      # Builds with the Terraform outputs (Cognito, API URL, brand), syncs to
+      # S3 (long cache for assets, no-cache for HTML) and invalidates CloudFront.
+      - name: Build and publish
+        run: Platform/scripts/deploy_web.sh

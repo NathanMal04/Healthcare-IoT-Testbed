@@ -14,6 +14,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { BrandMark } from "@/app/components/shell/BrandMark";
+import { BRAND_NAME } from "@/lib/brand";
 import { GetStartedLink, SignInLink } from "@/app/components/landing/AuthCta";
 import LandingHeader from "@/app/components/landing/LandingHeader";
 import { LANDING_SECTIONS } from "@/app/components/landing/sections";
@@ -21,7 +22,7 @@ import PlatformPreview from "@/app/components/landing/PlatformPreview";
 import { AppFrame, DashboardPreview } from "@/app/components/landing/Previews";
 
 export const metadata: Metadata = {
-  title: "Vzoniq · Healthcare IoT Security Testbed",
+  title: `${BRAND_NAME} · Healthcare IoT Security Testbed`,
   description:
     "A collaborative security testbed for analyzing medical IoT devices, firmware, vulnerabilities, and reverse-engineering workflows.",
 };
@@ -195,7 +196,7 @@ export default function LandingPage() {
                 </AppFrame>
               </div>
               <figcaption className="sr-only">
-                Preview of the Vzoniq dashboard: device, vulnerability, firmware and artifact counts, reverse-engineering
+                Preview of the {BRAND_NAME} dashboard: device, vulnerability, firmware and artifact counts, reverse-engineering
                 progress and recently updated CVEs, shown with sample data.
               </figcaption>
             </figure>
@@ -298,7 +299,7 @@ export default function LandingPage() {
                 A research testbed for connected medical devices
               </h2>
               <p className="mt-4 text-slate-600">
-                Vzoniq is a healthcare IoT vulnerability testbed. It brings device inventory, firmware and artifact
+                {BRAND_NAME} is a healthcare IoT vulnerability testbed. It brings device inventory, firmware and artifact
                 storage, scripted analysis and CVE tracking together, so a research team can follow a device from first
                 teardown to known vulnerabilities.
               </p>
@@ -329,7 +330,7 @@ export default function LandingPage() {
               <NavyBackdrop />
               <div className="relative">
                 <h2 id="cta-title" className="text-2xl sm:text-4xl font-semibold tracking-tight">
-                  Start Analyzing with Vzoniq
+                  Start Analyzing with {BRAND_NAME}
                 </h2>
                 <p className="mt-4 max-w-xl mx-auto text-navy-200">
                   Create an account, register your first device and upload its firmware.
@@ -346,7 +347,7 @@ export default function LandingPage() {
 
       <footer className="bg-navy-950 text-navy-200">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 flex flex-col md:flex-row gap-8 md:items-center md:justify-between">
-          <Link href="/" className="self-start rounded-lg" aria-label="Vzoniq home">
+          <Link href="/" className="self-start rounded-lg" aria-label={`${BRAND_NAME} home`}>
             <BrandMark tone="dark" />
           </Link>
           <nav aria-label="Footer" className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
@@ -365,7 +366,7 @@ export default function LandingPage() {
         </div>
         <div className="border-t border-white/5">
           <p className="max-w-6xl mx-auto px-4 sm:px-6 py-5 text-xs text-navy-300">
-            Vzoniq · Healthcare IoT Vulnerability Testbed
+            {BRAND_NAME} · Healthcare IoT Vulnerability Testbed
           </p>
         </div>
       </footer>

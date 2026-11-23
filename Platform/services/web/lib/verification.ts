@@ -5,6 +5,8 @@
 // Only the email address and the time the last code was sent are stored —
 // never a password or a verification code.
 
+import { BRAND_NAME } from "@/lib/brand";
+
 /** Minimum time between "Resend code" requests, enforced in the UI. */
 export const RESEND_COOLDOWN_MS = 60_000;
 
@@ -18,7 +20,7 @@ export const SIGNUP_CODE_VALIDITY_HOURS = 24;
 /**
  * Sender shown in the "can't find the email?" hint. The user pool currently
  * sends through Cognito's default email (COGNITO_DEFAULT). Change this if the
- * pool is switched to SES with no-reply@vzoniq.com.
+ * pool is switched to SES (with a sender on your own domain).
  */
 export const VERIFICATION_EMAIL_SENDER = "no-reply@verificationemail.com";
 
@@ -173,7 +175,7 @@ export function describeVerificationError(err: unknown, action: "confirm" | "res
 
   switch (name) {
     case "CodeMismatchException":
-      return { message: "That code isn't correct. Check the most recent email from Vzoniq and try again." };
+      return { message: `That code isn't correct. Check the most recent email from ${BRAND_NAME} and try again.` };
     case "ExpiredCodeException":
       return {
         message: "This code has expired or was replaced by a newer one. Request a new code below.",
@@ -237,7 +239,7 @@ export function routeForSignInStep(step: string, email: string): SignInRoute {
     default:
       return {
         kind: "error",
-        message: "This account needs an extra sign-in step that Vzoniq doesn't support yet. Contact an administrator.",
+        message: `This account needs an extra sign-in step that ${BRAND_NAME} doesn't support yet. Contact an administrator.`,
       };
   }
 }

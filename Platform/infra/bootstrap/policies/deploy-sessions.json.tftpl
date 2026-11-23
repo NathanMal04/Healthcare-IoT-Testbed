@@ -1,0 +1,85 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "SessionsLoadBalancer",
+      "Effect": "Allow",
+      "Action": "elasticloadbalancing:*",
+      "Resource": [
+        "arn:aws:elasticloadbalancing:${region}:*:loadbalancer/app/${name}-nb/*",
+        "arn:aws:elasticloadbalancing:${region}:*:listener/app/${name}-nb/*",
+        "arn:aws:elasticloadbalancing:${region}:*:listener-rule/app/${name}-nb/*"
+      ]
+    },
+    {
+      "Sid": "LoadBalancerReads",
+      "Effect": "Allow",
+      "Action": "elasticloadbalancing:Describe*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "SessionsCluster",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:CreateCluster",
+        "ecs:DeleteCluster",
+        "ecs:DescribeClusters",
+        "ecs:UpdateCluster",
+        "ecs:UpdateClusterSettings",
+        "ecs:TagResource",
+        "ecs:UntagResource",
+        "ecs:ListTagsForResource"
+      ],
+      "Resource": "arn:aws:ecs:${region}:*:cluster/${name}-sessions"
+    },
+    {
+      "Sid": "VpcOrigin",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateVpcOrigin",
+        "cloudfront:GetVpcOrigin",
+        "cloudfront:UpdateVpcOrigin",
+        "cloudfront:DeleteVpcOrigin",
+        "cloudfront:ListVpcOrigins",
+        "cloudfront:TagResource",
+        "cloudfront:UntagResource",
+        "cloudfront:ListTagsForResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "InternetGatewayAndEc2Reads",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateInternetGateway",
+        "ec2:AttachInternetGateway",
+        "ec2:DetachInternetGateway",
+        "ec2:DeleteInternetGateway",
+        "ec2:Describe*",
+        "ec2:Get*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "SessionsLogs",
+      "Effect": "Allow",
+      "Action": "logs:*",
+      "Resource": "arn:aws:logs:${region}:*:log-group:/aws/ecs/${name}-sessions*"
+    },
+    {
+      "Sid": "ServiceLinkedRoles",
+      "Effect": "Allow",
+      "Action": "iam:CreateServiceLinkedRole",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "iam:AWSServiceName": [
+            "elasticloadbalancing.amazonaws.com",
+            "vpcorigin.cloudfront.amazonaws.com",
+            "ecs.amazonaws.com"
+          ]
+        }
+      }
+    }
+  ]
+}

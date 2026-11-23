@@ -19,6 +19,7 @@ notebook sessions copy JupyterLab from:
   python3 seed_platform_envs.py --table ... --notebook-image-uri <repo>@sha256:...
 """
 import argparse
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,7 +42,7 @@ def main():
     parser.add_argument("--notebook-image-uri", help="repository@sha256:digest of the notebook layer image")
     parser.add_argument("--packages-dir", type=Path, help="folder with pip-freeze.txt and dpkg.txt")
     parser.add_argument("--bucket", help="data lake bucket, for the package lists")
-    parser.add_argument("--region", default="us-east-2")
+    parser.add_argument("--region", default=os.environ.get("AWS_REGION", "us-east-2"))
     parser.add_argument("--profile")
     args = parser.parse_args()
     if bool(args.notebook_image_uri) == bool(args.env_id or args.image_uri):

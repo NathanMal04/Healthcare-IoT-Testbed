@@ -151,7 +151,7 @@ How it's put together:
   `--system-site-packages`. A session task's first container copies it into a shared volume, mounted read-only
   into the environment's container, which runs `session.py`. So every environment version opens without a rebuild.
   This relies on environments being `python:3.12-slim-bookworm` based, which all platform-derived ones are.
-- **Reaching it:** CloudFront sends `vzoniq.com/s/*` through a VPC origin to an internal load balancer. Each session
+- **Reaching it:** CloudFront sends `<site domain>/s/*` through a VPC origin to an internal load balancer. Each session
   has a target group and a `/s/{sessionId}/*` rule, and JupyterLab requires the session's token, which only its
   owner gets.
 

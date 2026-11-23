@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Menu, X } from "lucide-react";
 import { BrandMark } from "@/app/components/shell/BrandMark";
+import { BRAND_NAME } from "@/lib/brand";
 import { GetStartedLink, SignInLink } from "./AuthCta";
 import { LANDING_SECTIONS } from "./sections";
 
@@ -23,7 +24,7 @@ export default function LandingHeader() {
   return (
     <header className="sticky top-0 z-40 bg-navy-900/95 backdrop-blur border-b border-white/5 text-white">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center gap-6">
-        <Link href="/" className="rounded-lg" aria-label="Vzoniq home">
+        <Link href="/" className="rounded-lg" aria-label={`${BRAND_NAME} home`}>
           <BrandMark tone="dark" compact />
         </Link>
 

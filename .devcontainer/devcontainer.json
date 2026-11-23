@@ -37,8 +37,11 @@
   },
 
   "containerEnv": {
+    // Your own AWS setup: replace .devcontainer/aws/config (see config.example
+    // and SELF_HOSTING.md), or set AWS_PROFILE on the host before opening the
+    // container.
     "AWS_CONFIG_FILE": "${containerWorkspaceFolder}/.devcontainer/aws/config",
-    "AWS_PROFILE": "Healthcare-IoT-Dev",
+    "AWS_PROFILE": "${localEnv:AWS_PROFILE:Healthcare-IoT-Dev}",
     "DISPLAY": "${localEnv:DISPLAY}",
     "WAYLAND_DISPLAY": "${localEnv:WAYLAND_DISPLAY}",
     "XDG_RUNTIME_DIR": "/tmp"
