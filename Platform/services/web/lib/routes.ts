@@ -43,3 +43,16 @@ export function cveHref(cveRecordId: string, tab?: string, options: { edit?: boo
   if (options.edit) params.set("edit", "1");
   return `/vulnerabilities/view?${params.toString()}`;
 }
+
+/**
+ * The device list of the current scope. `deleted` names a device that was
+ * just deleted, which the list confirms; `cleanupPending` adds that some of
+ * its files are still being removed in the background.
+ */
+export function devicesHref(options: { deleted?: string; cleanupPending?: boolean } = {}): string {
+  const params = new URLSearchParams();
+  if (options.deleted) params.set("deleted", options.deleted);
+  if (options.deleted && options.cleanupPending) params.set("cleanup", "pending");
+  const query = params.toString();
+  return query ? `/devices?${query}` : "/devices";
+}

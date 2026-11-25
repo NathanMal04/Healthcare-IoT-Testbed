@@ -509,7 +509,8 @@ module "api" {
 
 # Integrations defined with the api_lambda_method / api_cors_preflight
 # modules: GET and PATCH /devices/{deviceId} below, plus artifacts.tf, builds.tf,
-# runs.tf, usage.tf, workspaces.tf, cves.tf, sessions.tf and re_notebook.tf.
+# runs.tf, usage.tf, workspaces.tf, cves.tf, sessions.tf, re_notebook.tf and
+# device_deletion.tf (DELETE /devices/{deviceId}).
 locals {
   module_route_integration_ids = concat(
     [
@@ -525,6 +526,7 @@ locals {
     local.cves_integration_ids,
     local.sessions_integration_ids,
     local.re_notebook_integration_ids,
+    local.device_deletion_integration_ids,
   )
 }
 
@@ -697,6 +699,7 @@ resource "aws_api_gateway_resource" "devices_device_id" {
 # GET /devices/{deviceId} -> list-devices (one device with all its details)
 # PATCH /devices/{deviceId} -> update-device (name, type, details,
 # reverseEngineeringStatus).
+# DELETE /devices/{deviceId} -> delete-device (device_deletion.tf).
 # Uses the api_lambda_method / api_cors_preflight modules (see artifacts.tf),
 # which take the full route path for the invoke permission, so they work on
 # this path-parameter resource.
@@ -733,7 +736,7 @@ module "devices_device_id_preflight" {
 
   rest_api_id     = module.api.rest_api_id
   resource_id     = aws_api_gateway_resource.devices_device_id.id
-  allowed_methods = ["GET", "PATCH"]
+  allowed_methods = ["GET", "PATCH", "DELETE"]
 }
 
 resource "aws_api_gateway_resource" "devices_device_id_firmware" {

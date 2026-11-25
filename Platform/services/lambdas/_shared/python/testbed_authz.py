@@ -101,6 +101,22 @@ def require_resource(table, user_id, kind, resource_id, *, legacy_roles=("owner"
     return item
 
 
+def may_delete_device(role, device, user_id):
+    """Whether a caller with `role` may delete `device` (its METADATA item).
+
+    Deleting a device removes files and research other people added, so it
+    is narrower than editing (the rule of cancelling a workspace run): the
+    owner of a personal device (`role` is their USER#/DEVICE# link role); for
+    a workspace device (`role` is the caller's workspace role), an `owner` of
+    the workspace, or the `member` who created the device. Viewers never.
+    """
+    if "workspaceId" in device:
+        if role == "owner":
+            return True
+        return role == "member" and _is_id(user_id) and device.get("createdBy") == user_id
+    return role == "owner"
+
+
 def _is_id(value):
     # Ids become key components, so an empty value or a "#" could address a
     # different row than intended.

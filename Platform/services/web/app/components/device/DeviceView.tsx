@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { canEditDevice } from "@/lib/devices";
+import { useRouter, useSearchParams } from "next/navigation";
+import { canDeleteDevice, canEditDevice } from "@/lib/devices";
+import { devicesHref } from "@/lib/routes";
 import {
   DEVICE_PAGE_SECTIONS,
   DEVICE_SECTION_LABELS,
@@ -18,6 +19,7 @@ import {
 import { scopeWorkspaceId } from "@/lib/workspaces";
 import { ScopeLockReporter, useWorkspace } from "@/context/WorkspaceContext";
 import EditDeviceDialog from "@/app/components/EditDeviceDialog";
+import DeleteDeviceDialog from "./DeleteDeviceDialog";
 import { usePageCrumbs } from "@/app/components/shell/ShellContext";
 import { Alert, LoadingState, NavigationGuard } from "@/app/components/ui";
 import DeviceHeader from "./DeviceHeader";
@@ -50,6 +52,7 @@ import OverviewSection from "./sections/OverviewSection";
  */
 export default function DeviceView({ deviceId }: { deviceId: string }) {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const section = deviceSectionFromParams(searchParams);
   // A linked CVE opened from Vulnerabilities; in the URL so Back returns to the list.
   const openCveId = searchParams.get("cve");
@@ -63,6 +66,7 @@ export default function DeviceView({ deviceId }: { deviceId: string }) {
   // The Overview's own data loads only while it's open (and once the device is known).
   const overview = useOverviewData(deviceId, section === "overview" && device !== null);
   const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   // The open linked CVE's ID, for the breadcrumb, once its details have loaded.
   const [cveLabel, setCveLabel] = useState<{ cveRecordId: string; label?: string } | null>(null);
   const onCveLabel = useCallback((cveRecordId: string, label: string | undefined) => {
@@ -102,12 +106,23 @@ export default function DeviceView({ deviceId }: { deviceId: string }) {
       : null
   );
 
+  // Stable, so the dialog's preview load doesn't rerun on every render.
+  const deviceName = device?.name;
+  const onDeviceDeleted = useCallback(
+    ({ cleanupPending }: { cleanupPending: boolean }) => {
+      setDeleting(false);
+      router.replace(devicesHref({ deleted: deviceName ?? "The device", cleanupPending }));
+    },
+    [router, deviceName]
+  );
+
   if (loadError) return <DeviceLoadError message={loadError} />;
   if (notFound) return <DeviceNotFound scopeName={scopeName} />;
   if (!device) return <LoadingState label="Loading device…" />;
 
   const loaded = device;
   const canEdit = canEditDevice(loaded);
+  const canDelete = canDeleteDevice(loaded);
   const cveCount = cves.cves ? cves.deviceCves.length : null;
 
   function renderSection(s: DevicePageSection): React.ReactNode {
@@ -169,7 +184,15 @@ export default function DeviceView({ deviceId }: { deviceId: string }) {
 
   return (
     <div>
-      <DeviceHeader device={loaded} scope={scope} canEdit={canEdit} picture={picture} onEdit={() => setEditing(true)} />
+      <DeviceHeader
+        device={loaded}
+        scope={scope}
+        canEdit={canEdit}
+        canDelete={canDelete}
+        picture={picture}
+        onEdit={() => setEditing(true)}
+        onDelete={() => setDeleting(true)}
+      />
 
       <div className="xl:flex xl:items-start xl:gap-6">
         <DeviceSectionNav
@@ -199,6 +222,9 @@ export default function DeviceView({ deviceId }: { deviceId: string }) {
       </div>
 
       {editing && canEdit && <EditDeviceDialog device={loaded} onClose={() => setEditing(false)} onSaved={setDevice} />}
+      {deleting && canDelete && (
+        <DeleteDeviceDialog device={loaded} scope={scope} onCancel={() => setDeleting(false)} onDeleted={onDeviceDeleted} />
+      )}
 
       {/*
         Uploads and saves on this page hold the workspace (the scope lock).

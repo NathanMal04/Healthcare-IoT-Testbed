@@ -1,11 +1,11 @@
 "use client";
 
-import { NotebookPen, Pencil } from "lucide-react";
+import { NotebookPen, Pencil, Trash2 } from "lucide-react";
 import type { Device } from "@/lib/devices";
 import { notebookHref } from "@/lib/routes";
 import type { Scope } from "@/lib/workspaces";
 import DeviceProfilePicture from "@/app/components/images/DeviceProfilePicture";
-import { Alert, Button, ButtonLink, ReStatusBadge, ScopeLabel } from "@/app/components/ui";
+import { Alert, Button, ButtonLink, ReStatusBadge, RowActionsMenu, ScopeLabel } from "@/app/components/ui";
 import type { DeviceProfilePictureState } from "./useDeviceProfilePicture";
 
 /** "Philips · MX800 · Infusion pump": whichever of the three the device has. */
@@ -16,20 +16,26 @@ export function deviceIdentityLine(device: Pick<Device, "manufacturer" | "modelN
 /**
  * The device's identity: profile picture, name, manufacturer, model and
  * type, its reverse-engineering status, scope and the user's access, with
- * the RE Notebook (the main research destination) and Edit.
+ * the RE Notebook (the main research destination), Edit and, for those who
+ * may delete the device, Delete in the More actions menu.
  */
 export default function DeviceHeader({
   device,
   scope,
   canEdit,
+  canDelete = false,
   picture,
   onEdit,
+  onDelete,
 }: {
   device: Device;
   scope: Scope;
   canEdit: boolean;
+  /** Shows Delete Device; the backend enforces the same rule. */
+  canDelete?: boolean;
   picture: DeviceProfilePictureState;
   onEdit: () => void;
+  onDelete?: () => void;
 }) {
   const { profile } = picture;
   const identity = deviceIdentityLine(device);
@@ -74,6 +80,13 @@ export default function DeviceHeader({
             <Button variant="secondary" size="sm" icon={Pencil} onClick={onEdit}>
               Edit Device
             </Button>
+          )}
+          {canDelete && onDelete && (
+            <RowActionsMenu
+              trigger="button"
+              label={`More actions for ${device.name}`}
+              actions={[{ label: "Delete Device", icon: Trash2, danger: true, onSelect: onDelete }]}
+            />
           )}
         </div>
       </header>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cveHref, deviceHref, legacyNotebookHref, notebookHref } from "./routes";
+import { cveHref, deviceHref, devicesHref, legacyNotebookHref, notebookHref } from "./routes";
 
 describe("deviceHref", () => {
   it("links to the device, optionally on a tab", () => {
@@ -46,5 +46,14 @@ describe("cveHref", () => {
   it("still links to the Vulnerabilities CVE page", () => {
     expect(cveHref("c1")).toBe("/vulnerabilities/view?id=c1");
     expect(cveHref("c1", "devices", { edit: true })).toBe("/vulnerabilities/view?id=c1&tab=devices&edit=1");
+  });
+});
+
+describe("devicesHref", () => {
+  it("links the list, optionally confirming a deletion", () => {
+    expect(devicesHref()).toBe("/devices");
+    expect(devicesHref({ deleted: "Pump & Co" })).toBe("/devices?deleted=Pump+%26+Co");
+    expect(devicesHref({ deleted: "Pump", cleanupPending: true })).toBe("/devices?deleted=Pump&cleanup=pending");
+    expect(devicesHref({ cleanupPending: true })).toBe("/devices");
   });
 });

@@ -223,6 +223,10 @@ vi.mock(
   recordingStub("EditDeviceDialog", () => <div role="dialog" aria-label="Edit device dialog" />)
 );
 vi.mock(
+  "@/app/components/device/DeleteDeviceDialog",
+  recordingStub("DeleteDeviceDialog", () => <div role="dialog" aria-label="Delete device dialog" />)
+);
+vi.mock(
   "@/app/components/ArtifactUploader",
   recordingStub("ArtifactUploader", (p) => (
     <div data-testid="artifact-uploader">
@@ -745,6 +749,38 @@ describe("Device editing and profile picture", () => {
     await renderPage();
     expect(screen.queryByRole("button", { name: "Edit Device" })).toBeNull();
     expect(stubs.props.DeviceProfilePicture.canEdit).toBe(false);
+  });
+
+  it("offers Delete Device in More actions when the API allows it", async () => {
+    api.getDevice.mockResolvedValue(device({ canDelete: true }));
+    await renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Infusion Pump X" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete Device" }));
+    expect(screen.getByRole("dialog", { name: "Delete device dialog" })).toBeTruthy();
+    expect((stubs.props.DeleteDeviceDialog.device as Device).deviceId).toBe(DEVICE_ID);
+    act(() => (stubs.props.DeleteDeviceDialog.onCancel as () => void)());
+    expect(screen.queryByRole("dialog", { name: "Delete device dialog" })).toBeNull();
+  });
+
+  it("goes to the device list after a deletion", async () => {
+    api.getDevice.mockResolvedValue(device({ canDelete: true }));
+    await renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Infusion Pump X" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete Device" }));
+    act(() => (stubs.props.DeleteDeviceDialog.onDeleted as (r: { cleanupPending: boolean }) => void)({ cleanupPending: false }));
+    expect(nav.replace).toHaveBeenCalledWith("/devices?deleted=Infusion+Pump+X");
+  });
+
+  it.each([
+    ["a viewer", { role: "viewer", canDelete: true }],
+    ["a member who may not delete it", { role: "member", workspaceId: "ws-1", canDelete: false }],
+    ["an older response without canDelete", { role: "owner" }],
+  ] as const)("hides Delete Device from %s", async (_label, patch) => {
+    if ("workspaceId" in patch) setScope(WS);
+    api.getDevice.mockResolvedValue(device(patch as Partial<Device>));
+    await renderPage();
+    expect(screen.queryByRole("button", { name: "More actions for Infusion Pump X" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Delete Device" })).toBeNull();
   });
 
   it("refreshes the header and the gallery when the profile picture's file is replaced", async () => {

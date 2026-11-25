@@ -56,6 +56,8 @@ A physical device under test.
 - `POST /devices` `{name, type, workspaceId?, ...optional fields}`. Only `name` and `type` are required; other keys are ignored.
 - `GET /devices[?workspaceId=]` returns `deviceId`, `name`, `type`, `role`, `reverseEngineeringStatus`, `workspaceId` (workspace lists), `profileImageArtifactId` (when set) and whichever optional fields each device has, all read from `METADATA`.
 - `GET /devices/{did}` (`list-devices`) returns one device with the same fields plus `status`, `createdAt`, `updatedAt` and, on workspace devices, `createdBy`. Read rule: any `USER#/DEVICE#` link of a personal device, or membership of a workspace device's workspace; `404` if there is no `METADATA`, `403` otherwise.
+- `GET /devices/{did}` also returns `canDelete`: whether the caller may delete the device (`testbed_authz.may_delete_device`, below). Clients only use it to show the action.
+- `DELETE /devices/{did}` `{confirmName}` and `GET /devices/{did}/deletion` (`delete-device`): see [Deleting a device](#deleting-a-device).
 - `PATCH /devices/{did}` (`update-device`) is a partial update of any of `name`, `type`, the optional fields, `reverseEngineeringStatus` and `profileImageArtifactId`; at least one is required. An optional field sent as `null` or `""` is removed; `name` and `type` can't be removed. `pk`, `sk`, `entity`, `deviceId`, `workspaceId`, `createdBy`, `createdAt`, `updatedAt`, `status`, `dataPath`, `role` and `pendingNameSync` are refused (`400`), as is any unknown key. Who may: the owner of a personal device, or any member of a workspace device's workspace.
 
 A device is either **personal** or belongs to exactly one **workspace**, decided only by whether its `METADATA` has a `workspaceId`:
@@ -66,6 +68,7 @@ A device is either **personal** or belongs to exactly one **workspace**, decided
 | Links | `USER#{uid} / DEVICE#{did}` (`user-device`, `role = owner`, `name`) and `DEVICE#{did} / USER#{uid}` (`device-user`) | `WORKSPACE#{wid} / DEVICE#{did}` (`workspace-device`: `name`, `createdBy`, `createdAt`) and `DEVICE#{did} / WORKSPACE#{wid}` (`device-workspace`: `createdAt`). **No** ownership links. |
 | Listed by | `GET /devices` | `GET /devices?workspaceId={wid}` (members only) |
 | Who may use it | The owner, through the `USER#/DEVICE#` link (unchanged) | Contributors (`owner` or `member`) may change it; viewers may only read it; nobody else |
+| Who may delete it | The owner | A workspace `owner`, or the `member` who created it (`createdBy`); never a viewer |
 
 - **`workspaceId` on `METADATA` is the authority.** The shared layer (`testbed_authz.require_resource`) reads `METADATA` first: with a `workspaceId` it checks only the caller's `USER#{uid} / WORKSPACE#{wid}` membership. It never falls back to `USER#/DEVICE#` links, so a leftover owner link grants nothing.
 - **The workspace/device rows are for listing only.** `GET /devices?workspaceId=` queries `WORKSPACE#{wid}`, then lists a device only if its `METADATA` has that `workspaceId`; a link row alone never makes a device part of a workspace. `GET /devices` (personal) leaves out any device whose `METADATA` has a `workspaceId`.
@@ -74,6 +77,32 @@ A device is either **personal** or belongs to exactly one **workspace**, decided
 - <a id="device-profile-pictures"></a>**Device profile pictures.** `PATCH /devices/{did}` with `profileImageArtifactId` (an artifact id) chooses the picture; `null` or `""` removes it. Same rule as every device edit: the owner of a personal device, or any member of a workspace device's workspace (`403` otherwise). The image must be an `image` artifact the caller may read, in the device's scope (both personal, or both in the same workspace), in the device's gallery (`deviceIds` contains the device and `DEVICE#{did} / ARTIFACT#image#{aid}` exists), `ready` and of an allowed `mimeType`; anything else, including an id that doesn't exist, gets the same `400` (`profileImageArtifactId must be a ready image of this device`), so ids can't be probed. The write is one transaction: the `METADATA` update plus `ConditionCheck`s that the link row still exists and the image is still a ready image, so a reference to an image that changed after it was checked is never stored. Only the named attributes are written, so other edits of the device are never overwritten. Choosing another picture or removing it never changes or deletes an image. `GET /devices`, `GET /devices/{did}` and the `PATCH` response return `profileImageArtifactId` when it is set. Clients show it through `POST /artifacts/view-urls`, which checks the caller's access per image and answers `404` for an image that is no longer viewable, so a stale reference shows the default icon (and can be removed or changed). Replacing the image's file keeps its artifact id, so the device shows the new file without being changed.
 - <a id="device-names"></a>**Device names.** A device's name is copied onto `USER#{uid} / DEVICE#{did}` (`name`), `WORKSPACE#{wid} / DEVICE#{did}` (`name`), `ARTIFACT#{aid} / DEVICE#{did}` (`name`) and `CVE#{rid} / DEVICE#{did}` (`deviceName`). A rename (`PATCH` with `name`) sets `name` and `pendingNameSync` on `METADATA`, finds every copy from the `DEVICE#{did}` partition (strongly consistent `Query` on `USER#`, `WORKSPACE#`, `ARTIFACT#` and `CVE#`), rewrites them in transactions of up to 99 `Update`s plus a `ConditionCheck` that `METADATA` still has that name, then removes `pendingNameSync`. A sync superseded by a later rename stops (the later one writes the copies). If a sync is cut short, `pendingNameSync` stays and the next `PATCH` of the device finishes it. The endpoints that copy an existing device's name into a new row (`artifacts-presign`, `cves-api` link) check in their own transaction that `METADATA` still has the name they copied, so a row written during a rename is either found by the rename or refused (`409`, try again). The lists and `GET /devices/{did}` read the name from `METADATA`, never from a copy.
 - **Artifacts and firmware** follow the device's scope: see [Artifact scope](#artifact-scope). The old `/devices/{id}/firmware` routes still refuse workspace devices; a workspace device is a run input only for a run of its workspace (see [Run scope](#run-scope)).
+
+### Deleting a device
+
+<a id="deleting-a-device"></a>`delete-device` (`device_deletion.tf`) permanently deletes a device and everything only it owns. There is no restore, and the data lake bucket is unversioned, so deleted files are gone.
+
+**Who:** `testbed_authz.may_delete_device`: the owner of a personal device; for a workspace device, a workspace `owner` or the `member` who created it (`createdBy`). Viewers never, and a leftover `USER#/DEVICE#` row grants nothing on a workspace device. Narrower than editing because it removes other people's files and research; it follows the rule for cancelling a workspace run. Device endpoints answer `403` to a caller who may not delete and `404` when there is no device.
+
+**API:**
+- `GET /devices/{did}/deletion` returns `{deviceId, name, workspaceId?, resources}`, where `resources` counts what a deletion would do: `firmware`, `images` and `otherArtifacts` deleted, `sharedArtifacts` only unlinked, `cves` and `runs` links removed, and `notebookSections` and live `notebookEntries` deleted. Same permission as deleting.
+- `DELETE /devices/{did}` with `{"confirmName": "<the device's current name>"}`. The name is compared after trimming, and is case-sensitive. A missing name gets `400` `confirmation_required`, and a wrong one gets `400` `confirmation_mismatch`, after authorization so the check reveals nothing. Answers `200 {deviceId, deleted: true, cleanupPending: false, resources}`, or `202` with `cleanupPending: true` when the device is gone but some cleanup continues in the background. A device renamed or changed during the request gets `409`. Repeating the request while cleanup is pending resumes it, for anyone allowed to delete the device. After it has finished, a repeat gets `404` and changes nothing.
+
+**Begin** (one `TransactWriteItems`): `Delete` `DEVICE#{did} / METADATA`, conditional on `attribute_exists`, the name that was confirmed, the scope that was authorized and, for a member, `createdBy`. `Delete` both rows of every listing link: `USER#/DEVICE#` and `WORKSPACE#/DEVICE#`, with their mirrors. For a personal device the caller's own link is deleted on condition that `role = owner`; for a workspace device a `ConditionCheck` re-checks the caller's role. `Put` the **tombstone** `ACTIVE#DEVICE_DELETIONS / DEVICE#{did}` (`device-deletion`): `deviceId`, `name`, a copy of the device record (`device`), `ownerIds` (personal), `workspaceId`, `requestedBy`, `requestedAt`, `summary`, `attempts`, the lease (`leaseId`, `leaseUntil`) and, later, `protectedS3Keys`, `lastError` and `lastAttemptAt`. After this the device is gone for every endpoint. Every endpoint that attaches something to a device (artifact uploads, CVE links, notebook writes, renames) checks `DEVICE#{did} / METADATA` inside its own transaction, so nothing new can be attached while the rest is removed.
+
+**Cleanup** runs from the tombstone in steps that are each idempotent:
+1. **Artifacts** linked to the device (`DEVICE#{did} / ARTIFACT#…`): the artifact's partition is read. If another device or a run (`RUN#` rows, as input or output) also uses it, it is **kept**. The keys of its S3 objects are first added to the tombstone's `protectedS3Keys`, then both device link rows are deleted and the id is removed from `deviceIds` (`REMOVE` when it was the last one, never an empty set). Otherwise it is **deleted**: first its S3 objects (`s3Key`, a pending replacement, `orphanS3Keys` and everything under `artifacts/{aid}/`, never a protected key), then all of its rows and their mirrors in one transaction: `METADATA`, ownership or workspace rows, device links and the `BATCH#/ARTIFACT#` row with the batch's `fileCount` and `totalBytes` reduced. The record holds the keys, so deleting the files first means a failure leaves everything to retry.
+2. **CVE links**: as above; the CVE records stay.
+3. **Every other row** of `DEVICE#{did}`, with the mirrors other partitions keep (`RUN#{rid} / DEVICE#{did}`): run links, `FWVER#` guards, old `FIRMWARE#` rows. Runs keep their own records and results.
+4. The **`RENOTEBOOK#{did}`** partition.
+5. Steps 1–4 repeat (up to 3 passes) until both partitions are empty. Then every object under the device's prefix `devices/{did}/` is deleted (old firmware uploads), except protected keys: migrated firmware artifacts point there, and one kept for a run keeps its file. This step runs on every attempt, because those objects have no rows that would lead a retry back to them.
+6. The tombstone is deleted, conditional on the caller's `leaseId`.
+
+**Failures and retries.** A request stops after about 20 s (API Gateway's limit is 29 s). If a step fails or time runs out, the tombstone keeps `lastError`, its lease is released, and the request answers `202`. The sweep, the same function on an EventBridge schedule every 10 minutes, claims each tombstone whose lease is free or has lapsed (lease 6 minutes, longer than the function's 5-minute timeout) and carries on. Every write is conditional or repeatable, so a step cut short is simply redone.
+
+**Audit:** the platform has no audit table. Each deletion is logged as structured events in the function's CloudWatch logs: `device_deletion_started` (who, role, scope, counts), `device_deleted`, `device_deletion_pending` and `device_deletion_incomplete` (with the error).
+
+**Not covered:** a session that already staged a deleted file keeps its copy. Files are found only through the device's own rows, since the table has no index on `s3Key`.
 
 ### Artifact: `ARTIFACT#{id}` / `METADATA`
 
@@ -449,7 +478,7 @@ A CVE is linked to any number (up to 40) of devices **of its own scope**, and a 
 - The claim, **only if it names this `cveRecordId`**, and conditional on that inside the transaction, so another record's claim is never deleted. A missing claim doesn't block the delete.
 - At 40 devices that is at most 5 + 2 × 40 = 85 of DynamoDB's 100 items per transaction. A CVE with more than 40 links (only possible through corruption) is refused rather than deleted in part.
 
-**Devices are never deleted yet.** A future device delete must remove its `DEVICE#{did} / CVE#{rid}` rows, the mirrors and the id from each CVE's `deviceIds` (one transaction per CVE, as a device can be linked to many).
+**Deleting a device** removes its `DEVICE#{did} / CVE#{rid}` rows, the mirrors and the id from each CVE's `deviceIds` (bumping `version`, one transaction per CVE, exactly like an unlink). The CVE records, their claims and their other links are never deleted. See [Deleting a device](#deleting-a-device).
 
 ### RE Notebook: `RENOTEBOOK#{deviceId}`
 
@@ -475,7 +504,7 @@ The notebook is one partition, keyed by the device id:
 - **Moving** an entry to another section is one transaction: the entry's `sectionId` (conditional on its `version` and current section) and both sections' `entryIds`.
 - **Limits:** 50 sections, 200 entries per section, titles of 1-200 characters without control characters.
 - **Later phases** (images from the device gallery, artifact and CVE references, revision history, PDF export) add document node types that reference records by id (`artifactId`, `cveRecordId`), never copies; revision rows can be keyed by `contentVersion` (`REVISION#{eid}#{contentVersion}`).
-- **Devices are never deleted yet.** A future device delete must remove the `RENOTEBOOK#{deviceId}` partition too.
+- **Deleting a device** removes the whole `RENOTEBOOK#{deviceId}` partition: sections, entries (including soft-deleted ones), documents, and any row kind added later, such as revisions. See [Deleting a device](#deleting-a-device).
 
 ### Budget: `USER#{uid}` / `BUDGET`
 
@@ -596,6 +625,8 @@ erDiagram
 | Everything to delete with a CVE | `Query pk = CVE#{rid}` (consistent read), plus the claim |
 | A device's RE Notebook (structure) | `GetItem RENOTEBOOK#{did} / METADATA`, `Query pk = RENOTEBOOK#{did}, sk begins_with SECTION#` and `… ENTRY#` (consistent reads; documents aren't read) |
 | One notebook entry's document | `GetItem RENOTEBOOK#{did} / CONTENT#{eid}` |
+| Everything to delete with a device | `Query pk = DEVICE#{did}` and `pk = RENOTEBOOK#{did}` (consistent), then `Query pk = ARTIFACT#{aid}` for each linked artifact |
+| Device deletions still being cleaned up (sweep) | `Query pk = ACTIVE#DEVICE_DELETIONS` |
 
 ## Status tracking
 

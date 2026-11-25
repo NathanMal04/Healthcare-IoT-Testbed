@@ -977,6 +977,7 @@ class GetDeviceTests(unittest.TestCase):
             "deviceId": DEVICE_A, "name": "Pump", "type": "pump", "role": "owner", "status": "active",
             "reverseEngineeringStatus": "in_progress",
             "createdAt": "2026-10-01T00:00:00+00:00", "updatedAt": "2026-10-02T00:00:00+00:00",
+            "canDelete": True,
             **DETAILS,
         })
 

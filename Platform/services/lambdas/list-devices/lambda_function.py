@@ -144,6 +144,9 @@ def _get_device(table, user_id, raw_id):
         "status": item.get("status"),
         "createdAt": item.get("createdAt"),
         "updatedAt": item.get("updatedAt"),
+        # Whether the caller may DELETE the device (delete-device enforces
+        # the same shared rule); clients only use it to show the action.
+        "canDelete": testbed_authz.may_delete_device(role, item, user_id),
     }
     for field in ("workspaceId", "createdBy"):
         if field in item:

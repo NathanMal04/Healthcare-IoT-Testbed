@@ -114,6 +114,22 @@ function DevicesView() {
     void loadDevices();
   }, [loadDevices]);
 
+  // Arriving from a device that was just deleted (?deleted=<name>): confirm
+  // it once, then drop the parameter so a reload doesn't repeat it. Read from
+  // the location, as useSearchParams would need a Suspense boundary here.
+  const [deletedNotice, setDeletedNotice] = useState<string | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const deleted = params.get("deleted");
+    if (!deleted) return;
+    setDeletedNotice(
+      params.get("cleanup") === "pending"
+        ? `${deleted} was deleted. Some of its files are still being removed in the background.`
+        : `${deleted} was deleted, with its files and RE Notebook.`
+    );
+    router.replace("/devices");
+  }, [router]);
+
   const deviceIds = useMemo(() => (devices ? devices.map((d) => d.deviceId) : null), [devices]);
   // Keyed on the ids, so a status change or edit (same devices) fetches nothing.
   const artifactCounts = useDeviceArtifactCounts(deviceIds, loadCount);
@@ -293,6 +309,12 @@ function DevicesView() {
         activeStatus={filters.status}
         onSelectStatus={(status) => setFilters((current) => ({ ...current, status }))}
       />
+
+      {deletedNotice && (
+        <Alert tone="success" className="mb-4" onDismiss={() => setDeletedNotice(null)}>
+          {deletedNotice}
+        </Alert>
+      )}
 
       <Card as="section" className="overflow-hidden">
         {/* Names the region, and gives the cards' and states' h3 titles their parent heading. */}

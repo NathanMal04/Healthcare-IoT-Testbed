@@ -7,8 +7,13 @@ import { apiRequest } from "@/lib/api";
 import {
   DEVICE_DETAIL_FIELDS,
   applyDeviceUpdate,
+  canDeleteDevice,
   canEditDevice,
   createDevice,
+  deleteDevice,
+  deletionConfirmed,
+  deletionSummary,
+  getDeviceDeletionPreview,
   deviceFormError,
   deviceToForm,
   deviceUpdateBody,
@@ -204,5 +209,53 @@ describe("device profile pictures", () => {
     expect(canEditDevice({ role: "member", workspaceId: "ws" })).toBe(true);
     expect(canEditDevice({ role: "owner", workspaceId: "ws" })).toBe(true);
     expect(canEditDevice({ role: "viewer", workspaceId: "ws" })).toBe(false);
+  });
+});
+
+describe("deleting a device", () => {
+  const NONE = {
+    firmware: 0, images: 0, otherArtifacts: 0, sharedArtifacts: 0, cves: 0, runs: 0, notebookSections: 0, notebookEntries: 0,
+  };
+
+  it("previews and deletes with the typed name", async () => {
+    request.mockResolvedValueOnce({ deviceId: DEVICE_ID, name: "Pump", resources: NONE });
+    await getDeviceDeletionPreview(DEVICE_ID);
+    expect(request).toHaveBeenLastCalledWith("GET", `/devices/${DEVICE_ID}/deletion`);
+    request.mockResolvedValueOnce({ deviceId: DEVICE_ID, deleted: true, cleanupPending: false });
+    await expect(deleteDevice(DEVICE_ID, "Pump")).resolves.toEqual({ deviceId: DEVICE_ID, deleted: true, cleanupPending: false });
+    expect(request).toHaveBeenLastCalledWith("DELETE", `/devices/${DEVICE_ID}`, { body: { confirmName: "Pump" } });
+  });
+
+  it("confirms only the exact name", () => {
+    expect(deletionConfirmed("ALFA AWUS036ACH", "ALFA AWUS036ACH")).toBe(true);
+    expect(deletionConfirmed("  ALFA AWUS036ACH ", "ALFA AWUS036ACH")).toBe(true);
+    expect(deletionConfirmed("alfa awus036ach", "ALFA AWUS036ACH")).toBe(false);
+    expect(deletionConfirmed("ALFA", "ALFA AWUS036ACH")).toBe(false);
+    expect(deletionConfirmed("", "")).toBe(false);
+    expect(deletionConfirmed("   ", "ALFA")).toBe(false);
+  });
+
+  it("offers delete only when the API allows it, never to a viewer", () => {
+    expect(canDeleteDevice({ role: "owner", canDelete: true })).toBe(true);
+    expect(canDeleteDevice({ role: "member", canDelete: true })).toBe(true);
+    expect(canDeleteDevice({ role: "member", canDelete: false })).toBe(false);
+    expect(canDeleteDevice({ role: "owner" })).toBe(false);
+    expect(canDeleteDevice({ role: "viewer", canDelete: true })).toBe(false);
+  });
+
+  it("summarizes what is deleted and what is kept", () => {
+    expect(deletionSummary(NONE)).toEqual({ deleted: [], kept: [] });
+    expect(
+      deletionSummary({
+        firmware: 2, images: 1, otherArtifacts: 3, sharedArtifacts: 1, cves: 4, runs: 1, notebookSections: 2, notebookEntries: 1,
+      })
+    ).toEqual({
+      deleted: ["2 firmware files", "1 image", "3 other files", "The RE Notebook: 2 sections, 1 entry"],
+      kept: [
+        "4 CVE links (the CVE records stay)",
+        "1 file also used by other devices or runs (unlinked, not deleted)",
+        "1 run link (the runs and their results stay)",
+      ],
+    });
   });
 });

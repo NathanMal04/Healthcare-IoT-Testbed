@@ -47,6 +47,13 @@ export interface Device extends DeviceDetails {
    * which reports an image that is no longer viewable as unavailable.
    */
   profileImageArtifactId?: string;
+  /**
+   * From GET /devices/{deviceId} only: whether the user may delete the
+   * device (the owner of a personal device; a workspace owner, or the member
+   * who created a workspace device; never a viewer). Only hides the action;
+   * the backend enforces the same rule.
+   */
+  canDelete?: boolean;
 }
 
 /** Personal devices, or the devices of a workspace when workspaceId is given. */
@@ -138,6 +145,14 @@ export function canEditDevice(device: Pick<Device, "role" | "workspaceId">): boo
   return device.workspaceId ? device.role === "owner" || device.role === "member" : device.role === "owner";
 }
 
+/**
+ * Whether to offer Delete Device: what GET /devices/{id} says (canDelete),
+ * and never to a viewer. Only hides the action; the backend enforces it.
+ */
+export function canDeleteDevice(device: Pick<Device, "role" | "canDelete">): boolean {
+  return device.canDelete === true && device.role !== "viewer";
+}
+
 // --- The add/edit form ---------------------------------------------------------
 
 /** Every field as the form edits it: untrimmed text, "" when empty. */
@@ -214,4 +229,85 @@ export function applyDeviceUpdate(device: Device, updated: UpdatedDevice): Devic
   if (updated.profileImageArtifactId) next.profileImageArtifactId = updated.profileImageArtifactId;
   else delete next.profileImageArtifactId;
   return next;
+}
+
+// --- Deleting a device ----------------------------------------------------------
+
+/** What deleting a device removes (and keeps), from GET /devices/{id}/deletion. */
+export interface DeviceDeletionResources {
+  /** Firmware only this device uses (deleted with its files). */
+  firmware: number;
+  /** Gallery images only this device uses. */
+  images: number;
+  /** Other files only this device uses. */
+  otherArtifacts: number;
+  /** Files another device or a run also uses: unlinked from this device and kept. */
+  sharedArtifacts: number;
+  /** Links to CVE records; the records themselves are kept. */
+  cves: number;
+  /** Links to runs; the runs and their results are kept. */
+  runs: number;
+  notebookSections: number;
+  notebookEntries: number;
+}
+
+export interface DeviceDeletionPreview {
+  deviceId: string;
+  name: string;
+  workspaceId?: string;
+  resources: DeviceDeletionResources;
+}
+
+export async function getDeviceDeletionPreview(deviceId: string): Promise<DeviceDeletionPreview> {
+  return apiRequest<DeviceDeletionPreview>("GET", `/devices/${encodeURIComponent(deviceId)}/deletion`);
+}
+
+export interface DeviceDeletionResult {
+  deviceId: string;
+  deleted: true;
+  /**
+   * The device is gone, but removing some of its files or records is still
+   * finishing in the background (the server retries it automatically).
+   */
+  cleanupPending: boolean;
+}
+
+/**
+ * Permanently deletes the device. `confirmName` must be the device's name
+ * (the server checks it too). Repeating it after a failure resumes the same
+ * deletion.
+ */
+export async function deleteDevice(deviceId: string, confirmName: string): Promise<DeviceDeletionResult> {
+  return apiRequest<DeviceDeletionResult>("DELETE", `/devices/${encodeURIComponent(deviceId)}`, {
+    body: { confirmName },
+  });
+}
+
+/** Whether the typed confirmation matches the device's name (surrounding spaces ignored, case kept). */
+export function deletionConfirmed(typed: string, name: string): boolean {
+  return typed.trim() !== "" && typed.trim() === name.trim();
+}
+
+function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/** The lines the confirmation lists: what is deleted, and what is only unlinked. */
+export function deletionSummary(resources: DeviceDeletionResources): { deleted: string[]; kept: string[] } {
+  const deleted: string[] = [];
+  const kept: string[] = [];
+  if (resources.firmware) deleted.push(plural(resources.firmware, "firmware file"));
+  if (resources.images) deleted.push(plural(resources.images, "image"));
+  if (resources.otherArtifacts) deleted.push(plural(resources.otherArtifacts, "other file"));
+  if (resources.notebookSections || resources.notebookEntries) {
+    deleted.push(
+      `The RE Notebook: ${plural(resources.notebookSections, "section")}, ${plural(resources.notebookEntries, "entry", "entries")}`
+    );
+  }
+  if (resources.cves) kept.push(`${plural(resources.cves, "CVE link")} (the CVE records stay)`);
+  if (resources.sharedArtifacts) {
+    kept.push(`${plural(resources.sharedArtifacts, "file")} also used by other devices or runs (unlinked, not deleted)`);
+  }
+  if (resources.runs) kept.push(`${plural(resources.runs, "run link")} (the runs and their results stay)`);
+  return { deleted, kept };
 }
